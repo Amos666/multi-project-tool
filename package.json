@@ -1,0 +1,121 @@
+{
+  "name": "multi-project-tool",
+  "displayName": "Multi-Project Tool",
+  "description": "A VSCode extension for managing multiple projects with unified Git operations and configuration management",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "prepublish": "npm run compile",
+    "clean": "rimraf out"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.125.0",
+    "@vscode/test-electron": "^2.3.8",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.9.3"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "multi-project-tool.openJsonTab",
+        "title": "Multi-Project Tool: Open JSON Tab",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.openGitTab",
+        "title": "Multi-Project Tool: Open Git Tab",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.refreshProjects",
+        "title": "Multi-Project Tool: Refresh Projects",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.gitPull",
+        "title": "Multi-Project Tool: Git Pull",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.gitSwitchBranch",
+        "title": "Multi-Project Tool: Git Switch Branch",
+        "category": "Multi-Project Tool"
+      }
+    ],
+    "views": {
+      "multi-project-tool": [
+        {
+          "id": "multi-project-tool.json-tab",
+          "name": "JSON Settings",
+          "when": "config.multi-project-tool.showJsonTab"
+        },
+        {
+          "id": "multi-project-tool.git-tab",
+          "name": "Git Projects",
+          "when": "config.multi-project-tool.showGitTab"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "multi-project-tool.openJsonTab",
+          "when": "false"
+        },
+        {
+          "command": "multi-project-tool.openGitTab",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "multi-project-tool.refreshProjects",
+          "when": "view == multi-project-tool.git-tab",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Multi-Project Tool",
+      "properties": {
+        "multi-project-tool.showJsonTab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show JSON Tab in the sidebar"
+        },
+        "multi-project-tool.showGitTab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Git Tab in the sidebar"
+        },
+        "multi-project-tool.gitDefaultBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Default Git branch name"
+        },
+        "multi-project-tool.projectScanDepth": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum depth to scan for Git projects"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@vscode/webview-ui-toolkit": "^1.4.0"
+  }
+}
