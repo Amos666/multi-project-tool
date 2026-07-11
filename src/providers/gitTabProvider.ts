@@ -94,7 +94,8 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
                 vscode.Uri.parse(`${this.context.extensionUri}/webviews/gitTab`),
                 this.context.extensionUri,
                 this.projects,
-                Array.from(this.selectedProjects)
+                Array.from(this.selectedProjects),
+                () => this.refresh()
             );
         }
         this.webview.show();
@@ -115,16 +116,16 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
     }
 
     private setupCommands(): void {
-        const disposable = vscode.commands.registerCommand('multi-project-tool.selectProject', (projectItem: ProjectItem) => {
+        const disposable = vscode.commands.registerCommand('multi-project-tool.toggleProjectSelection', (projectItem: ProjectItem) => {
             this.toggleProjectSelection(projectItem);
         });
 
-        const disposable2 = vscode.commands.registerCommand('multi-project-tool.gitPull', (projectItem: ProjectItem) => {
-            this.handleGitPull([projectItem]);
+        const disposable2 = vscode.commands.registerCommand('multi-project-tool.selectAllProjects', () => {
+            this.selectAllProjects();
         });
 
-        const disposable3 = vscode.commands.registerCommand('multi-project-tool.gitSwitchBranch', (projectItem: ProjectItem) => {
-            this.handleGitSwitchBranch([projectItem]);
+        const disposable3 = vscode.commands.registerCommand('multi-project-tool.deselectAllProjects', () => {
+            this.deselectAllProjects();
         });
 
         const disposable4 = vscode.commands.registerCommand('multi-project-tool.gitStatus', (projectItem: ProjectItem) => {
@@ -214,8 +215,8 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
         return this.projects.filter(p => this.selectedProjects.has(p.id));
     }
 
-    public async gitPull(selectedProjects: Project[]): Promise<void> {
-        const projects = selectedProjects.length > 0 ? selectedProjects : this.getSelectedProjects();
+    public async gitPull(selectedProjects: any[]): Promise<void> {
+        const projects = this.resolveProjects(selectedProjects);
         if (projects.length === 0) {
             vscode.window.showInformationMessage('No projects selected');
             return;
@@ -233,8 +234,8 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
         }
     }
 
-    public async gitSwitchBranch(selectedProjects: Project[]): Promise<void> {
-        const projects = selectedProjects.length > 0 ? selectedProjects : this.getSelectedProjects();
+    public async gitSwitchBranch(selectedProjects: any[]): Promise<void> {
+        const projects = this.resolveProjects(selectedProjects);
         if (projects.length === 0) {
             vscode.window.showInformationMessage('No projects selected');
             return;
@@ -250,6 +251,56 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
             this.showGitOperationResults(results);
             this.refresh();
         }
+    }
+
+    public async gitCustomCommand(selectedProjects: any[]): Promise<void> {
+        const projects = this.resolveProjects(selectedProjects);
+        if (projects.length === 0) {
+            vscode.window.showInformationMessage('No projects selected');
+            return;
+        }
+
+        const customCommand = await vscode.window.showInputBox({
+            prompt: 'Enter custom git command (e.g., fetch, push, log --oneline):',
+            placeHolder: 'fetch'
+        });
+
+        if (customCommand) {
+            const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, customCommand);
+            this.showGitOperationResults(results);
+            this.refresh();
+        }
+    }
+
+    public selectAllProjects(): void {
+        this.projects.forEach(project => {
+            if (project.isGitRepo) {
+                this.selectedProjects.add(project.id);
+            }
+        });
+        this.refresh();
+    }
+
+    public deselectAllProjects(): void {
+        this.selectedProjects.clear();
+        this.refresh();
+    }
+
+    private resolveProjects(items: any[]): Project[] {
+        if (!items || items.length === 0) {
+            return this.getSelectedProjects();
+        }
+
+        const projects: Project[] = [];
+        for (const item of items) {
+            if (item && item.id) {
+                const project = this.projects.find(p => p.id === item.id);
+                if (project) {
+                    projects.push(project);
+                }
+            }
+        }
+        return projects.length > 0 ? projects : this.getSelectedProjects();
     }
 }
 

@@ -4,7 +4,7 @@ import { MultiProjectToolSettings, DEFAULT_SETTINGS } from '../models/settings';
 
 export class JsonTabProvider implements vscode.TreeDataProvider<JsonTabItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<JsonTabItem | undefined | null | void> = new vscode.EventEmitter<JsonTabItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<JsonTabItem | undefined | null> = this._onDidChangeTreeData.event;
+    readonly onDidChangeTreeData: vscode.Event<JsonTabItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private webview: JsonTabWebview | undefined;
     private settings: MultiProjectToolSettings;

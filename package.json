@@ -14,8 +14,8 @@
   ],
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "compile": "node ./node_modules/typescript/bin/tsc -p ./",
+    "watch": "node ./node_modules/typescript/bin/tsc -watch -p ./",
     "prepublish": "npm run compile",
     "clean": "rimraf out"
   },
@@ -27,6 +27,15 @@
     "typescript": "^5.9.3"
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "multi-project-tool",
+          "title": "Multi-Project Tool",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "multi-project-tool.openJsonTab",
@@ -40,17 +49,47 @@
       },
       {
         "command": "multi-project-tool.refreshProjects",
-        "title": "Multi-Project Tool: Refresh Projects",
+        "title": "Refresh Projects",
         "category": "Multi-Project Tool"
       },
       {
         "command": "multi-project-tool.gitPull",
-        "title": "Multi-Project Tool: Git Pull",
+        "title": "Git Pull",
         "category": "Multi-Project Tool"
       },
       {
         "command": "multi-project-tool.gitSwitchBranch",
-        "title": "Multi-Project Tool: Git Switch Branch",
+        "title": "Switch Branch",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.gitCustomCommand",
+        "title": "Custom Command",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.selectAllProjects",
+        "title": "Select All",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.deselectAllProjects",
+        "title": "Deselect All",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.toggleProjectSelection",
+        "title": "Toggle Selection",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.showLog",
+        "title": "Show Log",
+        "category": "Multi-Project Tool"
+      },
+      {
+        "command": "multi-project-tool.clearLog",
+        "title": "Clear Log",
         "category": "Multi-Project Tool"
       }
     ],
@@ -84,6 +123,38 @@
           "command": "multi-project-tool.refreshProjects",
           "when": "view == multi-project-tool.git-tab",
           "group": "navigation"
+        },
+        {
+          "command": "multi-project-tool.selectAllProjects",
+          "when": "view == multi-project-tool.git-tab",
+          "group": "navigation"
+        },
+        {
+          "command": "multi-project-tool.deselectAllProjects",
+          "when": "view == multi-project-tool.git-tab",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "multi-project-tool.toggleProjectSelection",
+          "when": "view == multi-project-tool.git-tab && viewItem =~ /project$/",
+          "group": "inline"
+        },
+        {
+          "command": "multi-project-tool.gitPull",
+          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
+          "group": "git@1"
+        },
+        {
+          "command": "multi-project-tool.gitSwitchBranch",
+          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
+          "group": "git@2"
+        },
+        {
+          "command": "multi-project-tool.gitCustomCommand",
+          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
+          "group": "git@3"
         }
       ]
     },

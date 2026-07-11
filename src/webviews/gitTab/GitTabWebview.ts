@@ -7,13 +7,16 @@ export class GitTabWebview {
     private _panel: vscode.WebviewPanel | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _view: GitTabView | undefined;
+    private _refreshCallback?: () => void;
 
     constructor(
         private readonly _uri: vscode.Uri,
         private readonly _extensionUri: vscode.Uri,
         private _projects: Project[],
-        private _selectedProjectIds: string[]
+        private _selectedProjectIds: string[],
+        refreshCallback?: () => void
     ) {
+        this._refreshCallback = refreshCallback;
         this.createWebviewPanel();
     }
 
@@ -445,15 +448,17 @@ export class GitTabWebview {
             type: 'info'
         });
 
-        // 这里应该调用provider的refresh方法
-        // 暂时发送模拟数据
-        setTimeout(() => {
-            this._panel?.webview.postMessage({
-                command: 'updateProjects',
-                projects: this._projects,
-                selectedProjectIds: this._selectedProjectIds
-            });
-        }, 1000);
+        if (this._refreshCallback) {
+            this._refreshCallback();
+        } else {
+            setTimeout(() => {
+                this._panel?.webview.postMessage({
+                    command: 'updateProjects',
+                    projects: this._projects,
+                    selectedProjectIds: this._selectedProjectIds
+                });
+            }, 500);
+        }
     }
 
     private handleToggleProjectSelection(projectId: string, selected: boolean): void {
@@ -480,15 +485,9 @@ export class GitTabWebview {
             type: 'info'
         });
 
-        // 这里应该调用实际的Git操作
-        // 暂时模拟
-        setTimeout(() => {
-            this._panel?.webview.postMessage({
-                command: 'showStatus',
-                message: 'Git Pull completed successfully!',
-                type: 'success'
-            });
-        }, 2000);
+        const projects = this.getProjectsFromIds(projectIds);
+        const results = await GitUtils.executeGitOperations(projects, 'pull');
+        this.showGitOperationResults(results);
     }
 
     private async handleGitSwitchBranch(projectIds: string[], branch: string): Promise<void> {
@@ -498,15 +497,9 @@ export class GitTabWebview {
             type: 'info'
         });
 
-        // 这里应该调用实际的Git操作
-        // 暂时模拟
-        setTimeout(() => {
-            this._panel?.webview.postMessage({
-                command: 'showStatus',
-                message: `Successfully switched to branch ${branch}!`,
-                type: 'success'
-            });
-        }, 2000);
+        const projects = this.getProjectsFromIds(projectIds);
+        const results = await GitUtils.executeGitOperations(projects, 'switch-branch', branch);
+        this.showGitOperationResults(results);
     }
 
     private async handleGitStatus(projectIds: string[]): Promise<void> {
@@ -516,15 +509,9 @@ export class GitTabWebview {
             type: 'info'
         });
 
-        // 这里应该调用实际的Git操作
-        // 暂时模拟
-        setTimeout(() => {
-            this._panel?.webview.postMessage({
-                command: 'showStatus',
-                message: 'Git status check completed!',
-                type: 'success'
-            });
-        }, 2000);
+        const projects = this.getProjectsFromIds(projectIds);
+        const results = await GitUtils.executeGitOperations(projects, 'status');
+        this.showGitOperationResults(results);
     }
 
     private async handleGitCommit(projectIds: string[], commitMessage: string): Promise<void> {
@@ -534,15 +521,37 @@ export class GitTabWebview {
             type: 'info'
         });
 
-        // 这里应该调用实际的Git操作
-        // 暂时模拟
-        setTimeout(() => {
+        const projects = this.getProjectsFromIds(projectIds);
+        const results = await GitUtils.executeGitOperations(projects, 'commit', undefined, commitMessage);
+        this.showGitOperationResults(results);
+    }
+
+    private getProjectsFromIds(projectIds: string[]): Project[] {
+        return projectIds
+            .map(id => this._projects.find(p => p.id === id))
+            .filter(project => project !== undefined) as Project[];
+    }
+
+    private showGitOperationResults(results: GitOperationResult[]): void {
+        const successful = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success);
+
+        if (successful.length > 0) {
             this._panel?.webview.postMessage({
                 command: 'showStatus',
-                message: 'Commit completed successfully!',
+                message: `Successfully completed operations on ${successful.length} project(s).`,
                 type: 'success'
             });
-        }, 2000);
+        }
+
+        if (failed.length > 0) {
+            const errorMessages = failed.map(r => `${r.project?.name}: ${r.error || r.message}`).join('\n');
+            this._panel?.webview.postMessage({
+                command: 'showStatus',
+                message: `Failed operations on ${failed.length} project(s):\n${errorMessages}`,
+                type: 'error'
+            });
+        }
     }
 
     public updateProjects(projects: Project[], selectedProjectIds: string[]): void {

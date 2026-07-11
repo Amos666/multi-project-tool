@@ -53,13 +53,19 @@ export class ProjectScanner {
         }
 
         const projects: Project[] = [];
-        const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+        let entries: fs.Dirent[] = [];
+
+        try {
+            entries = fs.readdirSync(folderPath, { withFileTypes: true });
+        } catch (error) {
+            console.warn(`Cannot read directory ${folderPath}:`, error);
+            return [];
+        }
 
         for (const entry of entries) {
             const fullPath = path.join(folderPath, entry.name);
 
             if (entry.isDirectory()) {
-                // 检查是否是Git仓库
                 const gitPath = path.join(fullPath, '.git');
                 if (fs.existsSync(gitPath)) {
                     const project: Project = {
@@ -72,7 +78,6 @@ export class ProjectScanner {
                     };
                     projects.push(project);
                 } else {
-                    // 递归扫描子目录
                     const subProjects = await this.scanFolder(fullPath, maxDepth, currentDepth + 1);
                     projects.push(...subProjects);
                 }
