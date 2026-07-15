@@ -123,8 +123,9 @@ export class GitUtils {
             }
 
             // 提交
-            logManager.info(`Committing with message: "${message}" in ${project.name}`);
-            const commitResult = await this.executeGitCommand(project.path, `commit -m "${message}"`);
+            const commitMsg = message || 'Auto commit';
+            logManager.info(`Committing with message: "${commitMsg}" in ${project.name}`);
+            const commitResult = await this.executeGitCommand(project.path, `commit -m "${commitMsg}"`);
             if (commitResult.success) {
                 logManager.success(`Successfully committed changes in ${project.name}`, commitResult.output);
             } else {
@@ -150,7 +151,7 @@ export class GitUtils {
 
     private static async executeGitCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
         return new Promise((resolve) => {
-            cp.exec(`git ${command}`, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+            cp.exec(`git --no-pager ${command}`, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 10, timeout: 30000 }, (error, stdout, stderr) => {
                 if (error) {
                     resolve({ success: false, output: stdout.trim(), error: stderr.trim() || error.message });
                 } else {

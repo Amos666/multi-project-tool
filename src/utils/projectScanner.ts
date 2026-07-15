@@ -156,12 +156,16 @@ export class ProjectScanner {
 
     private async executeGitCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
         return new Promise((resolve) => {
-            cp.exec(`git ${command}`, { cwd, encoding: 'utf8' }, (error, stdout, stderr) => {
+            const timeout = 5000;
+            const proc = cp.exec(`git --no-pager ${command}`, { cwd, encoding: 'utf8', timeout }, (error, stdout, stderr) => {
                 if (error) {
                     resolve({ success: false, output: stdout.trim(), error: stderr.trim() || error.message });
                 } else {
                     resolve({ success: true, output: stdout.trim() });
                 }
+            });
+            proc.on('error', (err) => {
+                resolve({ success: false, output: '', error: err.message });
             });
         });
     }

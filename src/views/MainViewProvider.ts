@@ -4,6 +4,7 @@ import { MultiProjectToolSettings } from '../models/settings';
 import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore } from '../utils/configStore';
+import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
 
 interface CustomCommand {
     id: string;
@@ -48,18 +49,28 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _concurrency: number = 1;
     private _commandTimeout: number = 300;
     private _logContainerHeight: number = 60;
+    private _pythonTxtCommands: PythonTxtCommand[] = [];
     private _projectScanner: ProjectScanner;
 
     constructor(private readonly _extensionUri: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
+        // 不在构造函数中等待加载完成，让UI先显示
         this.loadData();
     }
 
     private async loadData(): Promise<void> {
-        await this.loadSettings();
-        await this.loadCommands();
-        await this.loadEnvVariables();
-        await this.loadProjects();
+        try {
+            await this.loadSettings();
+            await this.loadCommands();
+            await this.loadEnvVariables();
+            await this.loadPythonTxtCommands();
+            // 项目加载可能较慢，先显示其他数据
+            this.updateWebview();
+            await this.loadProjects();
+        } catch (error) {
+            console.error('Failed to load data:', error);
+        }
+        // 项目加载完成后再更新一次
         this.updateWebview();
     }
 
@@ -67,9 +78,18 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         try {
             const scanDepth = this._settings.projectScanDepth;
             this._projects = await this._projectScanner.scanWorkspace(scanDepth);
-            for (let i = 0; i < this._projects.length; i++) {
-                this._projects[i] = await this._projectScanner.getProjectInfo(this._projects[i]);
-            }
+            // 并行获取项目信息，但每个项目有独立超时
+            const infoPromises = this._projects.map(async (project) => {
+                try {
+                    return await Promise.race([
+                        this._projectScanner.getProjectInfo(project),
+                        new Promise<Project>((resolve) => setTimeout(() => resolve(project), 3000))
+                    ]);
+                } catch {
+                    return project;
+                }
+            });
+            this._projects = await Promise.all(infoPromises);
         } catch (error) {
             console.error('Failed to load projects:', error);
         }
@@ -102,6 +122,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this._envVariables = config.envVariables;
     }
 
+    private async loadPythonTxtCommands(): Promise<void> {
+        this._pythonTxtCommands = PythonTxtCmdStore.getInstance().load();
+    }
+
     public resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken): void {
         this._view = webviewView;
 
@@ -124,6 +148,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'gitCommit': await this.handleGitCommit(message.message); break;
                     case 'gitChange': await this.handleGitChange(); break;
                     case 'gitBranch': await this.handleGitBranch(message.branch); break;
+                    case 'getBranchList': await this.handleGetBranchList(message.projectId); break;
                     case 'gitPush': await this.handleGitPush(); break;
                     case 'refreshProjects': await this.handleRefreshProjects(); break;
                     case 'setShell': await this.handleSetShell(message.shell); break;
@@ -139,6 +164,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'clearLogs': this.handleClearLogs(); break;
                     case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
                     case 'logHeightChange': this.handleLogHeightChange(message.height); break;
+                    case 'savePythonTxtCommands': await this.handleSavePythonTxtCommands(message.commands); break;
+                    case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
                 }
             }
         );
@@ -297,6 +324,78 @@ body {
     border-radius: 8px;
     margin-left: 2px;
 }
+
+.git-branch-selector {
+    flex: 1;
+    min-width: 100px;
+    display: flex;
+    align-items: center;
+    position: relative;
+    background-color: var(--brand-surface-raised);
+    border-radius: var(--radius-sm);
+    border: none;
+}
+
+.branch-input {
+    flex: 1;
+    padding: 6px 8px;
+    border: none;
+    background: transparent;
+    color: var(--brand-text);
+    font-size: 10px;
+    outline: none;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.branch-input::placeholder { color: var(--brand-text-muted); }
+
+.branch-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: var(--brand-surface);
+    border: 1px solid var(--brand-border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    z-index: 100;
+    max-height: 150px;
+    overflow-y: auto;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.branch-dropdown.show { display: block; }
+
+.dropdown-loading {
+    padding: 8px;
+    font-size: 11px;
+    color: var(--brand-text-muted);
+    text-align: center;
+}
+
+.dropdown-content { display: flex; flex-direction: column; }
+
+.dropdown-content div {
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--brand-text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dropdown-content div:hover { background-color: var(--brand-surface-raised); }
+
+.dropdown-content div.current {
+    background-color: var(--brand-primary);
+    color: var(--brand-text-inverse);
+}
+
+.dropdown-content div.current::before { content: '✓ '; }
 
 .custom-command-header {
     display: flex;
@@ -758,7 +857,46 @@ body {
     display: none;
 }
 
-.selection-warning.show { display: block; }`;
+.selection-warning.show { display: block; }
+
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10000;
+}
+.modal-dialog {
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--brand-border);
+    border-radius: 8px;
+    min-width: 360px; max-width: 90%;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--brand-border);
+}
+.modal-title { font-size: 13px; font-weight: 600; color: var(--brand-text); }
+.modal-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--brand-text-muted); font-size: 18px; padding: 0 4px;
+}
+.modal-close:hover { color: var(--brand-text); }
+.modal-body { padding: 14px; }
+.modal-input {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid var(--brand-border); border-radius: 4px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    font-size: 12px; outline: none;
+}
+.modal-input:focus { border-color: var(--vscode-focusBorder); }
+.modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--brand-border);
+}`;
     }
 
     private getHtmlBody(): string {
@@ -773,6 +911,9 @@ body {
         <div class="tab" onclick="switchTab('settings')">
             <span>⚙️</span><span>Set</span>
         </div>
+        <div class="tab" onclick="switchTab('txtcmd')">
+            <span>🐍</span><span>Pyt</span>
+        </div>
     </div>
 
     <div class="tab-content">
@@ -781,7 +922,16 @@ body {
                 <button class="git-btn pull" onclick="executeGitAction('pull')"><span>📥</span><span>Pull</span></button>
                 <button class="git-btn commit" onclick="executeGitAction('commit')"><span>✓</span><span>Commit</span></button>
                 <button class="git-btn change" onclick="executeGitAction('change')"><span>📊</span><span>Change</span></button>
-                <button class="git-btn branch" onclick="executeGitAction('branch')"><span>🌿</span><span>Branch</span></button>
+                <div class="git-branch-selector">
+                    <button class="git-btn branch" onclick="executeGitAction('branch')"><span>🌿</span><span>Branch</span></button>
+                    <div style="position: relative; flex: 1;">
+                        <input type="text" id="branchInput" class="branch-input" placeholder="选择分支..." onclick="onBranchInputClick(event)" autocomplete="off" oninput="filterBranchList(this.value)">
+                        <div class="branch-dropdown" id="branchDropdown">
+                            <div class="dropdown-loading" id="branchLoading">加载中...</div>
+                            <div class="dropdown-content" id="branchList"></div>
+                        </div>
+                    </div>
+                </div>
                 <button class="git-btn push" onclick="executeGitAction('push')"><span>📤</span><span>Push</span><span class="badge" id="pushBadge">0</span></button>
             </div>
 
@@ -932,6 +1082,62 @@ body {
                 </div>
             </div>
         </div>
+
+        <div id="tab-txtcmd" class="tab-panel">
+            <div class="txtcmd-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div class="txtcmd-commands" style="flex: 1; overflow-y: auto; padding: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 12px;">Python 文本转换命令</span>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="addPythonTxtCmd()">+ 新建</button>
+                    </div>
+                    <div class="subtitle" style="margin-bottom: 8px; font-size: 11px;">使用编辑器当前选中的文本作为输入，执行 Python 命令，输出替换选中内容</div>
+                    <div id="pythonTxtCmdList" style="display: flex; flex-direction: column; gap: 6px;"></div>
+                </div>
+
+                <div id="pythonTxtCmdEditor" style="display: none; padding: 8px; border-bottom: 1px solid var(--brand-border); gap: 8px; flex-direction: column;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; font-size: 12px;" id="pythonTxtCmdEditorTitle">编辑命令</span>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px;" onclick="closePythonTxtCmdEditor()">× 关闭</button>
+                    </div>
+                    <input type="text" id="pythonTxtCmdAlias" placeholder="命令别名" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 12px;">
+                    <textarea id="pythonTxtCmdContent" placeholder="Python 代码，使用 sys.stdin.read() 读取输入，print 输出结果" rows="6" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-primary" style="font-size: 11px; padding: 4px 12px;" onclick="savePythonTxtCmd()">保存</button>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="runPythonTxtCmdFromEditor()">运行</button>
+                    </div>
+                </div>
+
+                <div class="log-container" id="txtCmdLogContainer">
+                    <div class="log-resizer" id="txtCmdLogResizer"></div>
+                    <div class="log-header" onclick="toggleTxtCmdLog()">
+                        <span class="log-title">📝 执行日志</span>
+                        <span class="log-toggle-icon" id="txtCmdLogToggle">▼</span>
+                    </div>
+                    <div class="log-content" id="txtCmdLogContent">
+                        <div class="log-entry info">
+                            <span class="message">选择文本后运行 Python 命令即可转换</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="commitModal" class="modal-overlay" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span class="modal-title">提交确认</span>
+                <button class="modal-close" onclick="closeCommitModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <label style="font-size: 12px; display: block; margin-bottom: 6px;">提交信息（留空则使用默认）：</label>
+                <input type="text" id="commitMessageInput" class="modal-input" placeholder="Auto commit" autocomplete="off">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCommitModal()">取消</button>
+                <button class="btn btn-primary" onclick="confirmCommit()">确认提交</button>
+            </div>
+        </div>
     </div>`;
     }
 
@@ -949,15 +1155,26 @@ let logExpanded = false;
 let savedLogHeight = 180;
 let logUserResized = false;
 let logInitHeight = '60px';
+let branchList = [];
+let currentBranch = '';
 
 window.addEventListener('load', () => { vscode.postMessage({ command: 'init' }); });
 
 function switchTab(tabId) {
     currentTab = tabId;
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(t => t.classList.remove('active'));
-    document.querySelector('.tab[onclick="switchTab(\\'' + tabId + '\\')"]').classList.add('active');
-    document.getElementById('tab-' + tabId).classList.add('active');
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.tab-panel');
+    const tabNames = ['git', 'custom', 'settings', 'txtcmd'];
+    tabs.forEach((t, i) => {
+        if (tabNames[i] === tabId) {
+            t.classList.add('active');
+        } else {
+            t.classList.remove('active');
+        }
+    });
+    panels.forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById('tab-' + tabId);
+    if (panel) panel.classList.add('active');
     vscode.postMessage({ command: 'switchTab', tabId: tabId });
 }
 
@@ -998,22 +1215,114 @@ function executeGitAction(action) {
     switch(action) {
         case 'pull': vscode.postMessage({ command: 'gitPull' }); break;
         case 'commit':
-            const message = prompt('Enter commit message:', 'Auto commit');
-            if (message) vscode.postMessage({ command: 'gitCommit', message: message });
-            else if (btn) btn.classList.remove('executing');
+            showCommitModal();
             break;
         case 'change': vscode.postMessage({ command: 'gitChange' }); break;
         case 'branch':
-            const branch = prompt('Enter branch name:', 'main');
-            if (branch) vscode.postMessage({ command: 'gitBranch', branch: branch });
-            else if (btn) btn.classList.remove('executing');
+            const branchInput = document.getElementById('branchInput');
+            const branchName = branchInput.value.trim();
+            if (branchName) {
+                vscode.postMessage({ command: 'gitBranch', branch: branchName });
+            } else {
+                alert('请选择或输入分支名称');
+                if (btn) btn.classList.remove('executing');
+            }
             break;
         case 'push': vscode.postMessage({ command: 'gitPush' }); break;
     }
 }
 
+function showCommitModal() {
+    const modal = document.getElementById('commitModal');
+    const input = document.getElementById('commitMessageInput');
+    if (modal && input) {
+        input.value = '';
+        modal.style.display = 'flex';
+        input.focus();
+    }
+}
+
+function closeCommitModal() {
+    const modal = document.getElementById('commitModal');
+    if (modal) modal.style.display = 'none';
+    const btn = document.querySelector('.git-btn.commit');
+    if (btn) btn.classList.remove('executing');
+}
+
+function confirmCommit() {
+    const input = document.getElementById('commitMessageInput');
+    const message = input ? input.value.trim() : '';
+    closeCommitModal();
+    vscode.postMessage({ command: 'gitCommit', message: message });
+}
+
 function refreshProjects() { vscode.postMessage({ command: 'refreshProjects' }); }
 function setShell(shell) { vscode.postMessage({ command: 'setShell', shell: shell }); }
+
+function onBranchInputClick(e) {
+    e.stopPropagation();
+    const selected = projects.find(p => selectedProjectIds.has(p.id));
+    if (!selected) {
+        return;
+    }
+    if (branchList.length === 0) {
+        document.getElementById('branchLoading').style.display = 'block';
+        document.getElementById('branchList').innerHTML = '';
+        document.getElementById('branchDropdown').classList.add('show');
+        vscode.postMessage({ command: 'getBranchList', projectId: selected.id });
+    } else {
+        document.getElementById('branchDropdown').classList.toggle('show');
+    }
+}
+
+function toggleBranchDropdown() {
+    const dropdown = document.getElementById('branchDropdown');
+    dropdown.classList.toggle('show');
+}
+
+function filterBranchList(filter) {
+    const list = document.getElementById('branchList');
+    const filtered = branchList.filter(b => b.includes(filter.toLowerCase()));
+    renderBranchList(filtered);
+}
+
+function selectBranch(branchName) {
+    document.getElementById('branchInput').value = branchName;
+    currentBranch = branchName;
+    document.getElementById('branchDropdown').classList.remove('show');
+}
+
+function renderBranchList(list) {
+    const container = document.getElementById('branchList');
+    container.innerHTML = '';
+    list.forEach(b => {
+        const isCurrent = b === currentBranch;
+        const div = document.createElement('div');
+        if (isCurrent) div.className = 'current';
+        div.textContent = b;
+        div.onclick = function() { selectBranch(b); };
+        container.appendChild(div);
+    });
+}
+
+function updateBranchList(branches, current) {
+    branchList = branches;
+    currentBranch = current;
+    document.getElementById('branchLoading').style.display = 'none';
+    renderBranchList(branches);
+    const branchInput = document.getElementById('branchInput');
+    if (branchInput && current && !branchInput.value) {
+        branchInput.value = current;
+    }
+}
+
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('branchDropdown');
+    const selector = document.querySelector('.git-branch-selector');
+    if (dropdown && dropdown.classList.contains('show') && !selector.contains(e.target)) {
+        dropdown.classList.remove('show');
+    }
+});
 
 function showCommandEditor(commandId) {
     editingCommandId = commandId;
@@ -1211,21 +1520,54 @@ function updateProjectList() {
         return;
     }
 
-    const html = projects.map(p => {
+    list1.innerHTML = '';
+    list2.innerHTML = '';
+
+    projects.forEach(p => {
         const isSelected = selectedProjectIds.has(p.id);
         const changeClass = (p.changeCount === 0) ? 'success' : (p.changeCount <= 2 ? 'warning' : 'error');
-        return '<div class="project-item ' + (isSelected ? 'selected' : '') + '" onclick="toggleProjectSelection(\\'' + p.id + '\\')">' +
-            '<input type="checkbox" class="project-checkbox" data-project-id="' + p.id + '" ' + (isSelected ? 'checked' : '') + ' onchange="toggleProjectSelection(\\'' + p.id + '\\')">' +
-            '<div class="project-info">' +
-            '<div class="project-name">' + p.name + '</div>' +
-            '<div class="project-branch"><span>🌿</span>' + (p.currentBranch || 'No branch') + '</div>' +
-            '</div>' +
-            '<span class="change-count ' + changeClass + '">' + (p.changeCount || 0) + '</span>' +
-            '</div>';
-    }).join('');
 
-    list1.innerHTML = html;
-    list2.innerHTML = html;
+        function createItem() {
+            const item = document.createElement('div');
+            item.className = 'project-item' + (isSelected ? ' selected' : '');
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'project-checkbox';
+            checkbox.dataset.projectId = p.id;
+            checkbox.checked = isSelected;
+            checkbox.onchange = function(e) { e.stopPropagation(); toggleProjectSelection(p.id); };
+            item.appendChild(checkbox);
+
+            const info = document.createElement('div');
+            info.className = 'project-info';
+
+            const name = document.createElement('div');
+            name.className = 'project-name';
+            name.textContent = p.name;
+            info.appendChild(name);
+
+            const branch = document.createElement('div');
+            branch.className = 'project-branch';
+            branch.innerHTML = '<span>🌿</span>' + (p.currentBranch || 'No branch');
+            info.appendChild(branch);
+
+            item.appendChild(info);
+
+            const count = document.createElement('span');
+            count.className = 'change-count ' + changeClass;
+            count.textContent = p.changeCount || 0;
+            item.appendChild(count);
+
+            item.onclick = function() { toggleProjectSelection(p.id); };
+
+            return item;
+        }
+
+        list1.appendChild(createItem());
+        list2.appendChild(createItem());
+    });
+
     document.getElementById('projectCount').textContent = projects.length;
     document.getElementById('customProjectCount').textContent = projects.length;
 }
@@ -1244,31 +1586,93 @@ function updateCommandList() {
         return;
     }
 
-    list.innerHTML = customCommands.map(cmd => {
+    list.innerHTML = '';
+    customCommands.forEach(cmd => {
         const preview = cmd.content.split('\\n')[0];
-        return '<div class="command-item">' +
-            '<div class="cmd-main" onclick="showCommandEditor(\\'' + cmd.id + '\\')">' +
-            '<span class="alias">' + cmd.alias + '</span>' +
-            '<span class="cmd-content-preview">' + preview + '</span>' +
-            '</div>' +
-            '<div class="actions">' +
-            '<button class="cmd-action-btn run" onclick="runCommand(\\'' + cmd.id + '\\')" title="运行">▶</button>' +
-            '<button class="cmd-action-btn edit" onclick="showCommandEditor(\\'' + cmd.id + '\\')" title="编辑">✎</button>' +
-            '<button class="cmd-action-btn delete" onclick="deleteCommand(\\'' + cmd.id + '\\')" title="删除">🗑</button>' +
-            '</div></div>';
-    }).join('');
+
+        const item = document.createElement('div');
+        item.className = 'command-item';
+
+        const main = document.createElement('div');
+        main.className = 'cmd-main';
+        main.onclick = function() { showCommandEditor(cmd.id); };
+
+        const alias = document.createElement('span');
+        alias.className = 'alias';
+        alias.textContent = cmd.alias;
+        main.appendChild(alias);
+
+        const previewSpan = document.createElement('span');
+        previewSpan.className = 'cmd-content-preview';
+        previewSpan.textContent = preview;
+        main.appendChild(previewSpan);
+
+        item.appendChild(main);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        const runBtn = document.createElement('button');
+        runBtn.className = 'cmd-action-btn run';
+        runBtn.title = '运行';
+        runBtn.textContent = '▶';
+        runBtn.onclick = function() { runCommand(cmd.id); };
+        actions.appendChild(runBtn);
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'cmd-action-btn edit';
+        editBtn.title = '编辑';
+        editBtn.textContent = '✎';
+        editBtn.onclick = function() { showCommandEditor(cmd.id); };
+        actions.appendChild(editBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'cmd-action-btn delete';
+        delBtn.title = '删除';
+        delBtn.textContent = '🗑';
+        delBtn.onclick = function() { deleteCommand(cmd.id); };
+        actions.appendChild(delBtn);
+
+        item.appendChild(actions);
+        list.appendChild(item);
+    });
 }
 
 function updateEnvVariables() {
     const list = document.getElementById('envVariableList');
-    list.innerHTML = envVariables.map((v, i) => {
-        return '<div class="env-variable-item">' +
-            '<input type="text" class="key" value="' + v.key + '" placeholder="Key" onchange="updateEnvVariable(' + i + ', this.value, \\'' + v.value + '\\')">' +
-            '<span class="separator">=</span>' +
-            '<input type="text" value="' + v.value + '" placeholder="Value" onchange="updateEnvVariable(' + i + ', \\'' + v.key + '\\', this.value)">' +
-            '<button class="delete-btn" onclick="deleteEnvVariable(' + i + ')">×</button>' +
-            '</div>';
-    }).join('');
+    list.innerHTML = '';
+    envVariables.forEach((v, i) => {
+        const item = document.createElement('div');
+        item.className = 'env-variable-item';
+
+        const keyInput = document.createElement('input');
+        keyInput.type = 'text';
+        keyInput.className = 'key';
+        keyInput.value = v.key;
+        keyInput.placeholder = 'Key';
+        keyInput.onchange = function() { updateEnvVariable(i, this.value, v.value); };
+        item.appendChild(keyInput);
+
+        const separator = document.createElement('span');
+        separator.className = 'separator';
+        separator.textContent = '=';
+        item.appendChild(separator);
+
+        const valInput = document.createElement('input');
+        valInput.type = 'text';
+        valInput.value = v.value;
+        valInput.placeholder = 'Value';
+        valInput.onchange = function() { updateEnvVariable(i, v.key, this.value); };
+        item.appendChild(valInput);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = '×';
+        delBtn.onclick = function() { deleteEnvVariable(i); };
+        item.appendChild(delBtn);
+
+        list.appendChild(item);
+    });
 }
 
 function addLogEntry(entry) {
@@ -1306,6 +1710,220 @@ function renderLogEntry(entry) {
     return html;
 }
 
+let pythonTxtCommands = [];
+let pythonTxtEditingId = null;
+let txtCmdLogExpanded = false;
+let txtCmdSavedLogHeight = 180;
+let txtCmdLogs = [];
+
+function addPythonTxtCmd() {
+    pythonTxtEditingId = null;
+    document.getElementById('pythonTxtCmdEditorTitle').textContent = '新建命令';
+    document.getElementById('pythonTxtCmdAlias').value = '';
+    document.getElementById('pythonTxtCmdContent').value = 'import sys\\n\\ntext = sys.stdin.read()\\nresult = text\\nprint(result)';
+    document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
+}
+
+function editPythonTxtCmd(id) {
+    const cmd = pythonTxtCommands.find(c => c.id === id);
+    if (!cmd) return;
+    pythonTxtEditingId = id;
+    document.getElementById('pythonTxtCmdEditorTitle').textContent = '编辑命令';
+    document.getElementById('pythonTxtCmdAlias').value = cmd.alias;
+    document.getElementById('pythonTxtCmdContent').value = cmd.content;
+    document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
+}
+
+function closePythonTxtCmdEditor() {
+    pythonTxtEditingId = null;
+    document.getElementById('pythonTxtCmdEditor').style.display = 'none';
+}
+
+function savePythonTxtCmd() {
+    const alias = document.getElementById('pythonTxtCmdAlias').value.trim();
+    const content = document.getElementById('pythonTxtCmdContent').value;
+    if (!alias) { alert('请输入命令别名'); return; }
+
+    if (pythonTxtEditingId) {
+        const idx = pythonTxtCommands.findIndex(c => c.id === pythonTxtEditingId);
+        if (idx >= 0) {
+            pythonTxtCommands[idx].alias = alias;
+            pythonTxtCommands[idx].content = content;
+        }
+    } else {
+        const newCmd = { id: 'cmd_' + Date.now(), alias, content };
+        pythonTxtCommands.push(newCmd);
+        pythonTxtEditingId = newCmd.id;
+    }
+    vscode.postMessage({ command: 'savePythonTxtCommands', commands: pythonTxtCommands });
+    renderPythonTxtCmdList();
+    closePythonTxtCmdEditor();
+}
+
+function deletePythonTxtCmd(id) {
+    if (!confirm('确定删除该命令？')) return;
+    pythonTxtCommands = pythonTxtCommands.filter(c => c.id !== id);
+    vscode.postMessage({ command: 'savePythonTxtCommands', commands: pythonTxtCommands });
+    if (pythonTxtEditingId === id) closePythonTxtCmdEditor();
+    renderPythonTxtCmdList();
+}
+
+function runPythonTxtCmd(id) {
+    const cmd = pythonTxtCommands.find(c => c.id === id);
+    if (!cmd) return;
+    vscode.postMessage({ command: 'runPythonTxtCmd', cmd: cmd });
+}
+
+function runPythonTxtCmdFromEditor() {
+    const alias = document.getElementById('pythonTxtCmdAlias').value.trim() || '临时命令';
+    const content = document.getElementById('pythonTxtCmdContent').value;
+    vscode.postMessage({ command: 'runPythonTxtCmd', cmd: { id: 'temp', alias, content } });
+}
+
+function renderPythonTxtCmdList() {
+    const list = document.getElementById('pythonTxtCmdList');
+    if (!list) return;
+    if (pythonTxtCommands.length === 0) {
+        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground); font-size: 11px; padding: 10px; text-align: center;">暂无命令，点击"新建"添加</div>';
+        return;
+    }
+    list.innerHTML = '';
+    pythonTxtCommands.forEach(cmd => {
+        const firstLine = cmd.content.split('\\n')[0].substring(0, 50);
+        const item = document.createElement('div');
+        item.className = 'cmd-item';
+        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: var(--brand-surface); border: 1px solid var(--brand-border); border-radius: 4px; cursor: pointer;';
+        item.onmouseover = function() { this.style.borderColor = 'var(--vscode-focusBorder)'; };
+        item.onmouseout = function() { this.style.borderColor = 'var(--brand-border)'; };
+
+        const infoDiv = document.createElement('div');
+        infoDiv.style.cssText = 'flex: 1; overflow: hidden;';
+        infoDiv.innerHTML = '<div style="font-weight: 600; font-size: 12px; color: var(--vscode-foreground);">' + cmd.alias + '</div>' +
+            '<div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + firstLine + '</div>';
+        item.appendChild(infoDiv);
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.style.cssText = 'display: flex; gap: 4px; margin-left: 8px;';
+
+        const runBtn = document.createElement('button');
+        runBtn.className = 'btn btn-secondary';
+        runBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
+        runBtn.textContent = '▶ 运行';
+        runBtn.title = '运行';
+        runBtn.onclick = function(e) { e.stopPropagation(); runPythonTxtCmd(cmd.id); };
+        actionsDiv.appendChild(runBtn);
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-secondary';
+        editBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
+        editBtn.textContent = '✎';
+        editBtn.title = '编辑';
+        editBtn.onclick = function(e) { e.stopPropagation(); editPythonTxtCmd(cmd.id); };
+        actionsDiv.appendChild(editBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-secondary';
+        deleteBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
+        deleteBtn.textContent = '🗑';
+        deleteBtn.title = '删除';
+        deleteBtn.onclick = function(e) { e.stopPropagation(); deletePythonTxtCmd(cmd.id); };
+        actionsDiv.appendChild(deleteBtn);
+
+        item.appendChild(actionsDiv);
+        list.appendChild(item);
+    });
+}
+
+function toggleTxtCmdLog() {
+    const container = document.getElementById('txtCmdLogContainer');
+    if (!container) return;
+    const currentHeight = container.getBoundingClientRect().height;
+    if (currentHeight <= 80) {
+        txtCmdLogExpanded = true;
+        container.style.height = txtCmdSavedLogHeight + 'px';
+    } else {
+        txtCmdLogExpanded = false;
+        container.style.height = '60px';
+    }
+    const icon = document.getElementById('txtCmdLogToggle');
+    if (icon) icon.textContent = txtCmdLogExpanded ? '▼' : '▶';
+}
+
+function addTxtCmdLogEntry(entry) {
+    txtCmdLogs.push(entry);
+    if (txtCmdLogs.length > 50) txtCmdLogs.shift();
+    renderTxtCmdLogs();
+}
+
+function renderTxtCmdLogs() {
+    const content = document.getElementById('txtCmdLogContent');
+    if (!content) return;
+    if (txtCmdLogs.length === 0) {
+        content.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">选择文本后运行 Python 命令即可转换</span></div>';
+        return;
+    }
+    content.innerHTML = txtCmdLogs.map(entry => {
+        const statusIcon = entry.type === 'success' ? '✓' : entry.type === 'error' ? '✗' : '▶';
+        let html = '<div class="log-entry ' + entry.type + '">';
+        html += '<span class="timestamp">[' + entry.timestamp + ']</span>';
+        html += '<span class="status-icon">' + statusIcon + '</span>';
+        if (entry.shellType) html += '<span class="shell-type">[' + entry.shellType + ']</span>';
+        html += '<span class="message">' + entry.message + '</span>';
+        if (entry.details) html += '<div class="tree-line">' + entry.details + '</div>';
+        html += '</div>';
+        return html;
+    }).join('');
+    content.scrollTop = content.scrollHeight;
+}
+
+(function initTxtCmdLogResizer() {
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    function onMouseDown(e) {
+        const resizer = e.target.closest('#txtCmdLogResizer');
+        if (!resizer) return;
+        e.preventDefault();
+        e.stopPropagation();
+        isResizing = true;
+        startY = e.clientY;
+        const container = document.getElementById('txtCmdLogContainer');
+        startHeight = container.getBoundingClientRect().height;
+        resizer.classList.add('active');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+        const headers = document.querySelectorAll('#txtCmdLogContainer .log-header');
+        headers.forEach(h => { h.dataset._oldPE = h.style.pointerEvents; h.style.pointerEvents = 'none'; });
+    }
+
+    function onMouseMove(e) {
+        if (!isResizing) return;
+        e.preventDefault();
+        const delta = startY - e.clientY;
+        const newHeight = Math.min(Math.max(startHeight + delta, 40), window.innerHeight * 0.8);
+        const container = document.getElementById('txtCmdLogContainer');
+        container.style.height = newHeight + 'px';
+        txtCmdLogExpanded = newHeight > 60;
+        if (newHeight > 80) txtCmdSavedLogHeight = newHeight;
+    }
+
+    function onMouseUp() {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const resizer = document.getElementById('txtCmdLogResizer');
+        if (resizer) resizer.classList.remove('active');
+        const headers = document.querySelectorAll('#txtCmdLogContainer .log-header');
+        headers.forEach(h => { h.style.pointerEvents = h.dataset._oldPE || ''; delete h.dataset._oldPE; });
+    }
+
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+})();
+
 window.addEventListener('message', event => {
     const message = event.data;
     switch (message.command) {
@@ -1314,6 +1932,7 @@ window.addEventListener('message', event => {
         case 'addLog': addLogEntry(message.entry); break;
         case 'updateCommands': customCommands = message.commands; updateCommandList(); break;
         case 'updateEnvVariables': envVariables = message.variables; updateEnvVariables(); break;
+        case 'updateBranchList': updateBranchList(message.branches, message.current); break;
         case 'updateSettings':
             document.getElementById('commonParams').value = JSON.stringify(message.settings.commonParameters, null, 2);
             document.getElementById('autoRefreshToggle').classList.toggle('active', message.settings.autoRefresh);
@@ -1345,6 +1964,13 @@ window.addEventListener('message', event => {
                 logUserResized = true;
             }
             break;
+        case 'updatePythonTxtCommands':
+            pythonTxtCommands = message.commands;
+            renderPythonTxtCmdList();
+            break;
+        case 'addTxtCmdLog':
+            addTxtCmdLogEntry(message.entry);
+            break;
     }
 });`;
     }
@@ -1364,6 +1990,96 @@ window.addEventListener('message', event => {
 
     private handleLogHeightChange(height: number): void {
         this._logContainerHeight = height;
+    }
+
+    private async handleSavePythonTxtCommands(commands: PythonTxtCommand[]): Promise<void> {
+        this._pythonTxtCommands = commands;
+        PythonTxtCmdStore.getInstance().save(commands);
+        this._view?.webview.postMessage({ command: 'updatePythonTxtCommands', commands: this._pythonTxtCommands });
+    }
+
+    private async handleRunPythonTxtCmd(cmd: PythonTxtCommand): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            this.addTxtCmdLog('没有活动的文本编辑器', 'error');
+            return;
+        }
+
+        const selection = editor.selection;
+        const selectedText = editor.document.getText(selection);
+
+        if (!selectedText || selectedText.trim().length === 0) {
+            this.addTxtCmdLog('请先在编辑器中选择要转换的文本', 'error');
+            return;
+        }
+
+        this.addTxtCmdLog(`执行命令: ${cmd.alias}`, 'info');
+
+        try {
+            const result = await this.executePythonTransform(selectedText, cmd.content);
+            if (result.success) {
+                await editor.edit(editBuilder => {
+                    editBuilder.replace(selection, result.output);
+                });
+                this.addTxtCmdLog(`转换成功，输出 ${result.output.length} 字符`, 'success');
+            } else {
+                this.addTxtCmdLog(`执行失败: ${result.error}`, 'error', result.error);
+            }
+        } catch (error: any) {
+            this.addTxtCmdLog(`执行出错: ${error.message}`, 'error');
+        }
+    }
+
+    private executePythonTransform(input: string, script: string): Promise<{ success: boolean; output: string; error?: string }> {
+        return new Promise((resolve) => {
+            const cp = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            const os = require('os');
+
+            const tmpDir = os.tmpdir();
+            const scriptPath = path.join(tmpDir, `mpt_py_${Date.now()}.py`);
+
+            try {
+                fs.writeFileSync(scriptPath, script, 'utf8');
+
+                const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+                const child = cp.exec(pythonCmd + ' "' + scriptPath + '"', {
+                    encoding: 'utf8',
+                    maxBuffer: 1024 * 1024 * 10,
+                    timeout: 30000,
+                    env: { ...process.env, ...this.getEnvVariables() }
+                }, (error: Error | null, stdout: string, stderr: string) => {
+                    try { fs.unlinkSync(scriptPath); } catch (e) { }
+                    if (error) {
+                        const errMsg = error.message;
+                        if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
+                            resolve({ success: false, output: '', error: 'Python 未找到，请确保已安装 Python 并加入系统 PATH' });
+                        } else {
+                            resolve({ success: false, output: stdout, error: stderr.trim() || errMsg });
+                        }
+                    } else {
+                        resolve({ success: true, output: stdout });
+                    }
+                });
+
+                if (child.stdin) {
+                    child.stdin.write(input);
+                    child.stdin.end();
+                }
+            } catch (error: any) {
+                resolve({ success: false, output: '', error: error.message });
+            }
+        });
+    }
+
+    private addTxtCmdLog(message: string, type: 'success' | 'error' | 'info' = 'info', details?: string): void {
+        const now = new Date();
+        const timestamp = now.toLocaleTimeString('zh-CN', { hour12: false });
+        this._view?.webview.postMessage({
+            command: 'addTxtCmdLog',
+            entry: { timestamp, type, message, details }
+        });
     }
 
     private handleSwitchTab(tabId: string): void {
@@ -1398,6 +2114,41 @@ window.addEventListener('message', event => {
     private async handleGitCommit(message: string): Promise<void> { await this.executeGitOperation('commit', undefined, message); }
     private async handleGitChange(): Promise<void> { await this.executeGitOperation('status'); }
     private async handleGitBranch(branch: string): Promise<void> { await this.executeGitOperation('switch-branch', branch); }
+
+    private async handleGetBranchList(projectId: string): Promise<void> {
+        const project = this._projects.find(p => p.id === projectId);
+        if (!project || !project.path) return;
+
+        try {
+            const result = await GitUtils.gitBranches(project);
+            if (result.success && result.output) {
+                const lines = result.output.split('\n').filter(line => line.trim().length > 0);
+                const branches: string[] = [];
+                let currentBranch = '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('* ')) {
+                        currentBranch = trimmed.substring(2).replace(/^remotes\/origin\//, '');
+                        branches.push(currentBranch);
+                    } else {
+                        const branchName = trimmed.replace(/^remotes\/origin\//, '');
+                        if (!branches.includes(branchName)) {
+                            branches.push(branchName);
+                        }
+                    }
+                }
+
+                this._view?.webview.postMessage({
+                    command: 'updateBranchList',
+                    branches: branches,
+                    current: currentBranch
+                });
+            }
+        } catch (error) {
+            console.error('Failed to get branch list:', error);
+        }
+    }
     private async handleGitPush(): Promise<void> { await this.executeGitOperation('custom', undefined, undefined, 'push'); }
 
     private async executeGitOperation(operation: string, branch?: string, commitMessage?: string, customCommand?: string): Promise<void> {
@@ -1675,6 +2426,7 @@ window.addEventListener('message', event => {
         this._view?.webview.postMessage({ command: 'updateLogs', logs: this._logs });
         this._view?.webview.postMessage({ command: 'updateCommands', commands: this._customCommands });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
+        this._view?.webview.postMessage({ command: 'updatePythonTxtCommands', commands: this._pythonTxtCommands });
         this._view?.webview.postMessage({
             command: 'updateSettings',
             settings: {
