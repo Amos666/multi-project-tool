@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { GitTabWebview } from '../webviews/gitTab/GitTabWebview';
 import { Project, GitOperationResult } from '../models/project';
 import { ProjectScanner } from '../utils/projectScanner';
 import { GitUtils } from '../utils/gitUtils';
@@ -8,7 +7,6 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<ProjectItem | undefined | null | void> = new vscode.EventEmitter<ProjectItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<ProjectItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    private webview: GitTabWebview | undefined;
     private projects: Project[] = [];
     private selectedProjects: Set<string> = new Set();
     private projectScanner: ProjectScanner;
@@ -21,9 +19,6 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
     refresh(): void {
         this.loadProjects();
         this._onDidChangeTreeData.fire();
-        if (this.webview) {
-            this.webview.updateProjects(this.projects, Array.from(this.selectedProjects));
-        }
     }
 
     getTreeItem(element: ProjectItem): vscode.TreeItem {
@@ -88,19 +83,6 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
         return items;
     }
 
-    openWebview(): void {
-        if (!this.webview) {
-            this.webview = new GitTabWebview(
-                vscode.Uri.parse(`${this.context.extensionUri}/webviews/gitTab`),
-                this.context.extensionUri,
-                this.projects,
-                Array.from(this.selectedProjects),
-                () => this.refresh()
-            );
-        }
-        this.webview.show();
-    }
-
     private async loadProjects(): Promise<void> {
         try {
             const scanDepth = vscode.workspace.getConfiguration('multi-project-tool').get('projectScanDepth', 3);
@@ -132,7 +114,27 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
             this.handleGitStatus([projectItem]);
         });
 
-        this.context.subscriptions.push(disposable, disposable2, disposable3, disposable4);
+        const disposable5 = vscode.commands.registerCommand('multi-project-tool.gitPull', (projectItem: ProjectItem) => {
+            this.handleGitPull([projectItem]);
+        });
+
+        const disposable6 = vscode.commands.registerCommand('multi-project-tool.gitSwitchBranch', (projectItem: ProjectItem) => {
+            this.handleGitSwitchBranch([projectItem]);
+        });
+
+        const disposable7 = vscode.commands.registerCommand('multi-project-tool.gitPush', (projectItem: ProjectItem) => {
+            this.handleGitPush([projectItem]);
+        });
+
+        const disposable8 = vscode.commands.registerCommand('multi-project-tool.gitFetch', (projectItem: ProjectItem) => {
+            this.handleGitFetch([projectItem]);
+        });
+
+        const disposable9 = vscode.commands.registerCommand('multi-project-tool.gitCustomCommand', (projectItem: ProjectItem) => {
+            this.handleGitCustomCommand([projectItem]);
+        });
+
+        this.context.subscriptions.push(disposable, disposable2, disposable3, disposable4, disposable5, disposable6, disposable7, disposable8, disposable9);
     }
 
     private toggleProjectSelection(projectItem: ProjectItem): void {
@@ -185,6 +187,97 @@ export class GitTabProvider implements vscode.TreeDataProvider<ProjectItem> {
 
         const results = await GitUtils.executeGitOperations(projects, 'status');
         this.showGitOperationResults(results);
+    }
+
+    private async handleGitCommit(projectItems: ProjectItem[]): Promise<void> {
+        const projects = this.getProjectsFromItems(projectItems);
+        if (projects.length === 0) return;
+
+        const commitMessage = await vscode.window.showInputBox({
+            prompt: 'Enter commit message:',
+            placeHolder: 'Commit message'
+        });
+
+        if (commitMessage) {
+            const results = await GitUtils.executeGitOperations(projects, 'commit', undefined, commitMessage);
+            this.showGitOperationResults(results);
+        }
+    }
+
+    private async handleGitPush(projectItems: ProjectItem[]): Promise<void> {
+        const projects = this.getProjectsFromItems(projectItems);
+        if (projects.length === 0) return;
+
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to push changes for ${projects.length} project(s)?`,
+            { modal: true },
+            'Yes', 'No'
+        );
+
+        if (confirm === 'Yes') {
+            const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, 'push');
+            this.showGitOperationResults(results);
+        }
+    }
+
+    private async handleGitFetch(projectItems: ProjectItem[]): Promise<void> {
+        const projects = this.getProjectsFromItems(projectItems);
+        if (projects.length === 0) return;
+
+        const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, 'fetch');
+        this.showGitOperationResults(results);
+    }
+
+    private async handleGitCustomCommand(projectItems: ProjectItem[]): Promise<void> {
+        const projects = this.getProjectsFromItems(projectItems);
+        if (projects.length === 0) return;
+
+        const customCommand = await vscode.window.showInputBox({
+            prompt: 'Enter custom git command (e.g., fetch, push, log --oneline):',
+            placeHolder: 'fetch'
+        });
+
+        if (customCommand) {
+            const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, customCommand);
+            this.showGitOperationResults(results);
+        }
+    }
+
+    private async handleLoadBranches(projectIds: string[]): Promise<void> {
+        const projects = projectIds
+            .map(id => this.projects.find(p => p.id === id))
+            .filter(project => project !== undefined) as Project[];
+        
+        if (projects.length === 0) return;
+
+        // 使用第一个项目获取分支列表
+        const firstProject = projects[0];
+        const result = await GitUtils.gitBranches(firstProject);
+        
+        if (result.success && result.output) {
+            // 解析分支输出
+            this.parseBranchOutput(result.output);
+        } else {
+            vscode.window.showErrorMessage(`Failed to load branches: ${result.error || 'Unknown error'}`);
+        }
+    }
+
+    private parseBranchOutput(output: string): string[] {
+        const lines = output.split('\n');
+        const branches = [];
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+                // 移除星号（当前分支）和空格
+                const branchName = trimmed.replace(/^\*\s*/, '').replace(/^\s+/, '');
+                if (branchName && !branchName.includes('->')) { // 排除跟踪分支的引用
+                    branches.push(branchName);
+                }
+            }
+        }
+        
+        return branches;
     }
 
     private getProjectsFromItems(projectItems: ProjectItem[]): Project[] {

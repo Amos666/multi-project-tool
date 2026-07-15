@@ -134,15 +134,19 @@ export class ProjectScanner {
         const gitInfo: Partial<Project> = {};
 
         try {
-            // 获取当前分支
             const branchResult = await this.executeGitCommand(repoPath, 'branch --show-current');
             if (branchResult.success) {
                 gitInfo.currentBranch = branchResult.output.trim();
             }
 
-            // 检查是否有远程
             const remoteResult = await this.executeGitCommand(repoPath, 'remote -v');
             gitInfo.hasRemote = remoteResult.success && remoteResult.output.trim().length > 0;
+
+            const statusResult = await this.executeGitCommand(repoPath, 'status --porcelain');
+            if (statusResult.success) {
+                const lines = statusResult.output.split('\n').filter(line => line.trim().length > 0);
+                gitInfo.changeCount = lines.length;
+            }
         } catch (error) {
             console.warn(`Failed to get Git info for ${repoPath}:`, error);
         }

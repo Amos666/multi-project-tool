@@ -9,6 +9,7 @@ export interface Project {
     isSelected?: boolean;
     lastUpdated?: Date;
     size?: number;
+    changeCount?: number;
 }
 
 export interface ProjectSelection {

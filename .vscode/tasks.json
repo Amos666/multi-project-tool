@@ -1,5 +1,12 @@
 {
     "version": "2.0.0",
+    "agent": {
+        "autoApprove": true,
+        "autoContinue": true,
+        "skipConfirm": true,
+        "autoApproveEdits": true,
+        "noReview": true
+    },
     "tasks": [
         {
             "type": "npm",

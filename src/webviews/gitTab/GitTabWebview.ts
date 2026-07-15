@@ -30,7 +30,6 @@ export class GitTabWebview {
 
         this._panel.webview.html = this.getWebviewContent();
 
-        // 监听webview消息
         this._panel.webview.onDidReceiveMessage(
             async (message) => {
                 switch (message.command) {
@@ -52,18 +51,34 @@ export class GitTabWebview {
                     case 'gitCommit':
                         this.handleGitCommit(message.projectIds, message.commitMessage);
                         break;
+                    case 'loadBranches':
+                        this.handleLoadBranches(message.projectIds);
+                        break;
+                    case 'gitPush':
+                        this.handleGitPush(message.projectIds);
+                        break;
+                    case 'gitFetch':
+                        this.handleGitFetch(message.projectIds);
+                        break;
+                    case 'gitCustomCommand':
+                        this.handleGitCustomCommand(message.projectIds, message.customCommand);
+                        break;
+                    case 'selectAllProjects':
+                        this.handleSelectAllProjects();
+                        break;
+                    case 'clearSelection':
+                        this.handleClearSelection();
+                        break;
                 }
             },
             undefined,
             this._disposables
         );
 
-        // 监听面板关闭事件
         this._panel.onDidDispose(() => {
             this.dispose();
         }, null, this._disposables);
 
-        // 创建视图
         this._view = new GitTabView(this._panel.webview, this._extensionUri);
     }
 
@@ -89,34 +104,122 @@ export class GitTabWebview {
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         margin: 0;
-                        padding: 20px;
+                        padding: 0;
                         background-color: var(--vscode-editor-background);
                         color: var(--vscode-editor-foreground);
-                    }
-                    .container {
-                        max-width: 1200px;
-                        margin: 0 auto;
-                    }
-                    .header {
+                        height: 100vh;
                         display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 20px;
+                        flex-direction: column;
+                    }
+                    .split-container {
+                        display: flex;
+                        flex-direction: column;
+                        height: 100%;
+                    }
+                    .top-pane {
+                        flex: 0 0 50%;
+                        display: flex;
+                        flex-direction: column;
+                        border-bottom: 1px solid var(--vscode-editor-lineHighlightBorder);
+                    }
+                    .bottom-pane {
+                        flex: 0 0 50%;
+                        display: flex;
+                        flex-direction: column;
+                        overflow: hidden;
+                    }
+                    .tab-container {
+                        display: flex;
+                        border-bottom: 1px solid var(--vscode-editor-lineHighlightBorder);
+                        background-color: var(--vscode-editorWidget-background);
+                    }
+                    .tab {
+                        padding: 10px 20px;
+                        cursor: pointer;
+                        background-color: transparent;
+                        border: none;
+                        border-bottom: 2px solid transparent;
+                        color: var(--vscode-descriptionForeground);
+                        font-size: 14px;
+                        transition: all 0.2s ease;
+                    }
+                    .tab.active {
+                        color: var(--vscode-textLink-foreground);
+                        border-bottom-color: var(--vscode-textLink-foreground);
+                        background-color: var(--vscode-editor-background);
+                    }
+                    .tab-content {
+                        flex: 1;
+                        padding: 15px;
+                        overflow-y: auto;
+                    }
+                    .git-commands-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                        gap: 12px;
+                    }
+                    .command-card {
                         padding: 15px;
                         background-color: var(--vscode-editorWidget-background);
-                        border-radius: 6px;
+                        border-radius: 8px;
+                        border: 1px solid var(--vscode-editor-lineHighlightBorder);
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        text-align: center;
+                    }
+                    .command-card:hover:not(.disabled) {
+                        background-color: var(--vscode-list-hoverBackground);
+                        transform: translateY(-2px);
+                    }
+                    .command-card.disabled {
+                        opacity: 0.5;
+                        cursor: not-allowed;
+                    }
+                    .command-icon {
+                        font-size: 28px;
+                        margin-bottom: 8px;
+                    }
+                    .command-name {
+                        font-size: 14px;
+                        font-weight: 500;
+                        margin-bottom: 4px;
+                    }
+                    .command-desc {
+                        font-size: 12px;
+                        color: var(--vscode-descriptionForeground);
+                    }
+                    .command-input-group {
+                        margin-top: 15px;
+                        padding: 15px;
+                        background-color: var(--vscode-editorWidget-background);
+                        border-radius: 8px;
                         border: 1px solid var(--vscode-editor-lineHighlightBorder);
                     }
-                    .header h1 {
-                        margin: 0;
-                        color: var(--vscode-textLink-foreground);
+                    .command-input-group label {
+                        display: block;
+                        font-size: 13px;
+                        margin-bottom: 8px;
+                        color: var(--vscode-descriptionForeground);
                     }
-                    .controls {
-                        display: flex;
-                        gap: 10px;
+                    .command-input-group input,
+                    .command-input-group select {
+                        width: 100%;
+                        padding: 8px 12px;
+                        border: 1px solid var(--vscode-input-border);
+                        border-radius: 4px;
+                        background-color: var(--vscode-input-background);
+                        color: var(--vscode-input-foreground);
+                        font-size: 14px;
+                        box-sizing: border-box;
                     }
-                    .controls button {
-                        padding: 8px 16px;
+                    .command-input-group input:focus,
+                    .command-input-group select:focus {
+                        outline: none;
+                        border-color: var(--vscode-focusBorder);
+                    }
+                    .command-input-group button {
+                        margin-top: 10px;
+                        padding: 8px 20px;
                         border: none;
                         border-radius: 4px;
                         background-color: var(--vscode-button-background);
@@ -124,26 +227,53 @@ export class GitTabWebview {
                         cursor: pointer;
                         font-size: 14px;
                     }
-                    .controls button:hover {
+                    .command-input-group button:hover {
                         background-color: var(--vscode-button-hoverBackground);
                     }
-                    .controls button:disabled {
-                        background-color: var(--vscode-button-secondaryBackground);
-                        color: var(--vscode-button-secondaryForeground);
-                        cursor: not-allowed;
+                    .bottom-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 12px 15px;
+                        background-color: var(--vscode-editorWidget-background);
+                        border-bottom: 1px solid var(--vscode-editor-lineHighlightBorder);
                     }
-                    .project-list {
-                        margin-bottom: 20px;
+                    .bottom-header h2 {
+                        margin: 0;
+                        font-size: 14px;
+                        color: var(--vscode-textLink-foreground);
+                    }
+                    .bottom-controls {
+                        display: flex;
+                        gap: 10px;
+                    }
+                    .bottom-controls button {
+                        padding: 6px 12px;
+                        border: none;
+                        border-radius: 4px;
+                        background-color: var(--vscode-button-background);
+                        color: var(--vscode-button-foreground);
+                        cursor: pointer;
+                        font-size: 13px;
+                    }
+                    .bottom-controls button:hover {
+                        background-color: var(--vscode-button-hoverBackground);
+                    }
+                    .project-list-container {
+                        flex: 1;
+                        overflow-y: auto;
+                        padding: 10px;
                     }
                     .project-item {
                         display: flex;
                         align-items: center;
-                        padding: 12px;
-                        margin-bottom: 8px;
+                        padding: 10px 12px;
+                        margin-bottom: 6px;
                         background-color: var(--vscode-editorWidget-background);
                         border-radius: 6px;
                         border: 1px solid var(--vscode-editor-lineHighlightBorder);
                         transition: all 0.2s ease;
+                        cursor: pointer;
                     }
                     .project-item:hover {
                         background-color: var(--vscode-list-hoverBackground);
@@ -154,88 +284,51 @@ export class GitTabWebview {
                     }
                     .project-checkbox {
                         margin-right: 12px;
-                        width: 18px;
-                        height: 18px;
+                        width: 16px;
+                        height: 16px;
                         cursor: pointer;
                     }
                     .project-info {
                         flex: 1;
+                        min-width: 0;
                     }
                     .project-name {
                         font-weight: 500;
-                        margin-bottom: 4px;
+                        font-size: 13px;
+                        margin-bottom: 3px;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
                     }
                     .project-path {
-                        font-size: 12px;
+                        font-size: 11px;
                         color: var(--vscode-descriptionForeground);
-                        margin-bottom: 4px;
+                        margin-bottom: 2px;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
                     }
                     .project-status {
+                        font-size: 11px;
+                        color: var(--vscode-textLink-foreground);
+                    }
+                    .status-bar {
+                        padding: 10px 15px;
+                        background-color: var(--vscode-editorWidget-background);
+                        border-top: 1px solid var(--vscode-editor-lineHighlightBorder);
                         font-size: 12px;
+                        color: var(--vscode-descriptionForeground);
+                    }
+                    .status-bar span {
+                        margin-right: 15px;
+                    }
+                    .status-bar .selected-count {
                         color: var(--vscode-textLink-foreground);
-                    }
-                    .git-actions {
-                        display: flex;
-                        gap: 8px;
-                        margin-top: 20px;
-                        padding: 15px;
-                        background-color: var(--vscode-editorWidget-background);
-                        border-radius: 6px;
-                        border: 1px solid var(--vscode-editor-lineHighlightBorder);
-                    }
-                    .git-actions h3 {
-                        margin: 0 0 15px 0;
-                        color: var(--vscode-textLink-foreground);
-                    }
-                    .action-buttons {
-                        display: flex;
-                        flex-wrap: wrap;
-                        gap: 10px;
-                    }
-                    .action-button {
-                        padding: 8px 16px;
-                        border: none;
-                        border-radius: 4px;
-                        background-color: var(--vscode-button-background);
-                        color: var(--vscode-button-foreground);
-                        cursor: pointer;
-                        font-size: 14px;
-                        display: flex;
-                        align-items: center;
-                        gap: 6px;
-                    }
-                    .action-button:hover {
-                        background-color: var(--vscode-button-hoverBackground);
-                    }
-                    .action-button:disabled {
-                        background-color: var(--vscode-button-secondaryBackground);
-                        color: var(--vscode-button-secondaryForeground);
-                        cursor: not-allowed;
-                    }
-                    .status {
-                        margin-top: 15px;
-                        padding: 12px;
-                        border-radius: 6px;
-                        display: none;
-                    }
-                    .status.success {
-                        background-color: var(--vscode-editorWidget-background);
-                        border: 1px solid var(--vscode-changesResourceForeground);
-                        color: var(--vscode-changesResourceForeground);
-                    }
-                    .status.error {
-                        background-color: var(--vscode-editorWidget-background);
-                        border: 1px solid var(--vscode-errorForeground);
-                        color: var(--vscode-errorForeground);
-                    }
-                    .status.info {
-                        background-color: var(--vscode-editorWidget-background);
-                        border: 1px solid var(--vscode-foreground);
-                        color: var(--vscode-foreground);
+                        font-weight: 500;
                     }
                     .loading {
                         text-align: center;
-                        padding: 20px;
+                        padding: 40px;
                         color: var(--vscode-descriptionForeground);
                     }
                     .no-projects {
@@ -243,64 +336,112 @@ export class GitTabWebview {
                         padding: 40px;
                         color: var(--vscode-descriptionForeground);
                     }
-                    .branch-selector {
-                        margin-left: 10px;
-                        padding: 4px 8px;
-                        border: 1px solid var(--vscode-input-border);
-                        border-radius: 4px;
-                        background-color: var(--vscode-input-background);
-                        color: var(--vscode-input-foreground);
-                    }
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>Git Projects</h1>
-                        <div class="controls">
-                            <button onclick="refreshProjects()">🔄 Refresh</button>
-                            <button onclick="selectAll()">Select All</button>
-                            <button onclick="clearSelection()">Clear Selection</button>
+                <div class="split-container">
+                    <div class="top-pane">
+                        <div class="tab-container">
+                            <button class="tab active" onclick="switchTab('git-commands')">Git Commands</button>
+                            <button class="tab" onclick="switchTab('settings')">Settings</button>
+                        </div>
+                        <div class="tab-content" id="tab-git-commands">
+                            <div class="git-commands-grid">
+                                <div class="command-card" id="cmd-pull" onclick="executeGitCommand('pull')">
+                                    <div class="command-icon">📥</div>
+                                    <div class="command-name">Git Pull</div>
+                                    <div class="command-desc">Pull latest changes</div>
+                                </div>
+                                <div class="command-card" id="cmd-push" onclick="executeGitCommand('push')">
+                                    <div class="command-icon">📤</div>
+                                    <div class="command-name">Git Push</div>
+                                    <div class="command-desc">Push local changes</div>
+                                </div>
+                                <div class="command-card" id="cmd-fetch" onclick="executeGitCommand('fetch')">
+                                    <div class="command-icon">🔄</div>
+                                    <div class="command-name">Git Fetch</div>
+                                    <div class="command-desc">Fetch from remote</div>
+                                </div>
+                                <div class="command-card" id="cmd-status" onclick="executeGitCommand('status')">
+                                    <div class="command-icon">📋</div>
+                                    <div class="command-name">Status</div>
+                                    <div class="command-desc">Check git status</div>
+                                </div>
+                                <div class="command-card" id="cmd-checkout" onclick="showCheckoutDialog()">
+                                    <div class="command-icon">🌿</div>
+                                    <div class="command-name">Checkout</div>
+                                    <div class="command-desc">Switch branch</div>
+                                </div>
+                                <div class="command-card" id="cmd-commit" onclick="showCommitDialog()">
+                                    <div class="command-icon">💾</div>
+                                    <div class="command-name">Commit</div>
+                                    <div class="command-desc">Commit changes</div>
+                                </div>
+                                <div class="command-card" id="cmd-branch" onclick="showBranchDialog()">
+                                    <div class="command-icon">🌳</div>
+                                    <div class="command-name">Branch</div>
+                                    <div class="command-desc">Manage branches</div>
+                                </div>
+                                <div class="command-card" id="cmd-custom" onclick="showCustomCommandDialog()">
+                                    <div class="command-icon">⚙️</div>
+                                    <div class="command-name">Custom</div>
+                                    <div class="command-desc">Custom command</div>
+                                </div>
+                            </div>
+
+                            <div id="commandInputArea"></div>
+                        </div>
+                        <div class="tab-content" id="tab-settings" style="display: none;">
+                            <div class="command-input-group">
+                                <label>Default Branch</label>
+                                <input type="text" id="defaultBranch" value="main" placeholder="main">
+                            </div>
+                            <div class="command-input-group">
+                                <label>Default Commit Message</label>
+                                <input type="text" id="defaultCommitMessage" value="Auto commit" placeholder="Commit message">
+                            </div>
+                            <div class="command-input-group">
+                                <label>Auto Approve Operations</label>
+                                <input type="checkbox" id="autoApprove">
+                                <button onclick="saveSettings()">Save Settings</button>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="projectList" class="project-list"></div>
-
-                    <div id="gitActions" class="git-actions">
-                        <h3>Git Actions</h3>
-                        <div class="action-buttons">
-                            <button id="pullButton" onclick="gitPull()" disabled>
-                                📥 Git Pull
-                            </button>
-                            <button id="switchButton" onclick="gitSwitchBranch()" disabled>
-                                🌿 Switch Branch
-                                <select id="branchSelector" class="branch-selector">
-                                    <option value="main">main</option>
-                                    <option value="master">master</option>
-                                    <option value="develop">develop</option>
-                                </select>
-                            </button>
-                            <button id="statusButton" onclick="gitStatus()" disabled>
-                                📋 Status
-                            </button>
-                            <button id="commitButton" onclick="gitCommit()" disabled>
-                                💾 Commit
-                            </button>
+                    <div class="bottom-pane">
+                        <div class="bottom-header">
+                            <h2>Git Projects</h2>
+                            <div class="bottom-controls">
+                                <button onclick="refreshProjects()">🔄 Refresh</button>
+                                <button onclick="selectAllProjects()">Select All</button>
+                                <button onclick="clearSelection()">Clear</button>
+                            </div>
+                        </div>
+                        <div class="project-list-container" id="projectList"></div>
+                        <div class="status-bar">
+                            <span>Total: <span id="totalCount">0</span></span>
+                            <span>Selected: <span class="selected-count" id="selectedCount">0</span></span>
                         </div>
                     </div>
-
-                    <div id="status" class="status"></div>
                 </div>
 
                 <script>
                     const vscode = acquireVsCodeApi();
                     let projects = [];
                     let selectedProjects = new Set();
+                    let currentBranches = [];
 
-                    // 初始化
                     window.addEventListener('load', () => {
                         refreshProjects();
                     });
+
+                    function switchTab(tabName) {
+                        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                        document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+                        
+                        event.target.classList.add('active');
+                        document.getElementById('tab-' + tabName).style.display = 'block';
+                    }
 
                     function refreshProjects() {
                         document.getElementById('projectList').innerHTML = '<div class="loading">Loading projects...</div>';
@@ -311,7 +452,8 @@ export class GitTabWebview {
                         projects = projectsData;
                         selectedProjects = new Set(selectedIds);
                         renderProjects();
-                        updateActionButtons();
+                        updateCommandCards();
+                        updateStatusBar();
                     }
 
                     function renderProjects() {
@@ -326,20 +468,7 @@ export class GitTabWebview {
                         projects.forEach(project => {
                             const projectItem = document.createElement('div');
                             projectItem.className = 'project-item' + (selectedProjects.has(project.id) ? ' selected' : '');
-                            projectItem.innerHTML = \`
-                                <input type="checkbox" 
-                                       class="project-checkbox" 
-                                       \${selectedProjects.has(project.id) ? 'checked' : ''} 
-                                       onchange="toggleProjectSelection('\${project.id}', this.checked)">
-                                <div class="project-info">
-                                    <div class="project-name">\${project.name}</div>
-                                    <div class="project-path">\${project.relativePath}</div>
-                                    \${project.isGitRepo ? 
-                                        \`<div class="project-status">Git: \${project.currentBranch || 'No branch'} | \${project.hasRemote ? 'Has remote' : 'No remote'}</div>\` : 
-                                        \`<div class="project-status">Not a Git repository</div>\`
-                                    }
-                                </div>
-                            \`;
+                            projectItem.innerHTML = '\n                                <input type="checkbox" \n                                       class="project-checkbox" \n                                       ' + (selectedProjects.has(project.id) ? 'checked' : '') + ' \n                                       onchange="toggleProjectSelection(\'' + project.id + '\', this.checked)">\n                                <div class="project-info">\n                                    <div class="project-name">' + project.name + '</div>\n                                    <div class="project-path">' + project.relativePath + '</div>\n                                    ' + (project.isGitRepo ? \n                                        '<div class="project-status">Git: ' + (project.currentBranch || 'No branch') + ' | ' + (project.hasRemote ? 'Has remote' : 'No remote') + '</div>' : \n                                        '<div class="project-status">Not a Git repository</div>') + \n                                '</div>\n                            ';
                             projectList.appendChild(projectItem);
                         });
                     }
@@ -352,87 +481,163 @@ export class GitTabWebview {
                         });
                     }
 
-                    function selectAll() {
-                        projects.forEach(project => {
-                            selectedProjects.add(project.id);
-                        });
-                        renderProjects();
-                        updateActionButtons();
+                    function selectAllProjects() {
+                        vscode.postMessage({ command: 'selectAllProjects' });
                     }
 
                     function clearSelection() {
-                        selectedProjects.clear();
-                        renderProjects();
-                        updateActionButtons();
+                        vscode.postMessage({ command: 'clearSelection' });
                     }
 
-                    function updateActionButtons() {
+                    function updateCommandCards() {
                         const hasSelection = selectedProjects.size > 0;
                         const hasGitProjects = projects.some(p => p.isGitRepo && selectedProjects.has(p.id));
                         
-                        document.getElementById('pullButton').disabled = !hasGitProjects;
-                        document.getElementById('switchButton').disabled = !hasGitProjects;
-                        document.getElementById('statusButton').disabled = !hasGitProjects;
-                        document.getElementById('commitButton').disabled = !hasGitProjects;
-                    }
-
-                    function gitPull() {
-                        const projectIds = Array.from(selectedProjects);
-                        vscode.postMessage({
-                            command: 'gitPull',
-                            projectIds: projectIds
+                        const commands = ['cmd-pull', 'cmd-push', 'cmd-fetch', 'cmd-status', 'cmd-checkout', 'cmd-commit', 'cmd-branch', 'cmd-custom'];
+                        commands.forEach(cmdId => {
+                            const card = document.getElementById(cmdId);
+                            if (card) {
+                                if (hasGitProjects) {
+                                    card.classList.remove('disabled');
+                                } else {
+                                    card.classList.add('disabled');
+                                }
+                            }
                         });
                     }
 
-                    function gitSwitchBranch() {
-                        const branch = document.getElementById('branchSelector').value;
-                        const projectIds = Array.from(selectedProjects);
-                        vscode.postMessage({
-                            command: 'gitSwitchBranch',
-                            projectIds: projectIds,
-                            branch: branch
-                        });
+                    function updateStatusBar() {
+                        document.getElementById('totalCount').textContent = projects.length;
+                        document.getElementById('selectedCount').textContent = selectedProjects.size;
                     }
 
-                    function gitStatus() {
+                    function executeGitCommand(command) {
+                        if (selectedProjects.size === 0) {
+                            alert('Please select at least one project first');
+                            return;
+                        }
+                        
                         const projectIds = Array.from(selectedProjects);
-                        vscode.postMessage({
-                            command: 'gitStatus',
-                            projectIds: projectIds
-                        });
+                        
+                        switch(command) {
+                            case 'pull':
+                                vscode.postMessage({ command: 'gitPull', projectIds: projectIds });
+                                break;
+                            case 'push':
+                                vscode.postMessage({ command: 'gitPush', projectIds: projectIds });
+                                break;
+                            case 'fetch':
+                                vscode.postMessage({ command: 'gitFetch', projectIds: projectIds });
+                                break;
+                            case 'status':
+                                vscode.postMessage({ command: 'gitStatus', projectIds: projectIds });
+                                break;
+                        }
                     }
 
-                    function gitCommit() {
-                        const commitMessage = prompt('Enter commit message:');
-                        if (commitMessage) {
-                            const projectIds = Array.from(selectedProjects);
-                            vscode.postMessage({
-                                command: 'gitCommit',
+                    function showCheckoutDialog() {
+                        if (selectedProjects.size === 0) {
+                            alert('Please select at least one project first');
+                            return;
+                        }
+                        
+                        const projectIds = Array.from(selectedProjects);
+                        const defaultBranch = document.getElementById('defaultBranch')?.value || 'main';
+                        
+                        const branch = prompt('Enter branch name to checkout:', defaultBranch);
+                        if (branch) {
+                            vscode.postMessage({ 
+                                command: 'gitSwitchBranch', 
                                 projectIds: projectIds,
-                                commitMessage: commitMessage
+                                branch: branch
                             });
                         }
                     }
 
-                    function showStatus(message, type) {
-                        const status = document.getElementById('status');
-                        status.textContent = message;
-                        status.className = 'status ' + type;
-                        status.style.display = 'block';
+                    function showCommitDialog() {
+                        if (selectedProjects.size === 0) {
+                            alert('Please select at least one project first');
+                            return;
+                        }
                         
-                        setTimeout(() => {
-                            status.style.display = 'none';
-                        }, 5000);
+                        const projectIds = Array.from(selectedProjects);
+                        const defaultMessage = document.getElementById('defaultCommitMessage')?.value || 'Auto commit';
+                        
+                        const message = prompt('Enter commit message:', defaultMessage);
+                        if (message) {
+                            vscode.postMessage({ 
+                                command: 'gitCommit', 
+                                projectIds: projectIds,
+                                commitMessage: message
+                            });
+                        }
                     }
 
-                    // 监听来自VSCode的消息
+                    function showBranchDialog() {
+                        if (selectedProjects.size === 0) {
+                            alert('Please select at least one project first');
+                            return;
+                        }
+                        
+                        const action = prompt('Branch action:\n1. List branches (list)\n2. Create branch (create)\n3. Delete branch (delete)\n\nEnter action:');
+                        if (!action) return;
+                        
+                        const projectIds = Array.from(selectedProjects);
+                        
+                        if (action === 'list' || action === '1') {
+                            vscode.postMessage({ 
+                                command: 'gitCustomCommand', 
+                                projectIds: projectIds,
+                                customCommand: 'branch -a'
+                            });
+                        } else if (action === 'create' || action === '2') {
+                            const branchName = prompt('Enter new branch name:');
+                            if (branchName) {
+                                vscode.postMessage({ 
+                                    command: 'gitCustomCommand', 
+                                    projectIds: projectIds,
+                                    customCommand: 'checkout -b ' + branchName
+                                });
+                            }
+                        } else if (action === 'delete' || action === '3') {
+                            const branchName = prompt('Enter branch name to delete:');
+                            if (branchName) {
+                                vscode.postMessage({ 
+                                    command: 'gitCustomCommand', 
+                                    projectIds: projectIds,
+                                    customCommand: 'branch -d ' + branchName
+                                });
+                            }
+                        }
+                    }
+
+                    function showCustomCommandDialog() {
+                        if (selectedProjects.size === 0) {
+                            alert('Please select at least one project first');
+                            return;
+                        }
+                        
+                        const projectIds = Array.from(selectedProjects);
+                        const command = prompt('Enter custom git command (e.g., log --oneline, stash):');
+                        if (command) {
+                            vscode.postMessage({ 
+                                command: 'gitCustomCommand', 
+                                projectIds: projectIds,
+                                customCommand: command
+                            });
+                        }
+                    }
+
+                    function saveSettings() {
+                        alert('Settings saved! (Note: Settings are currently stored locally)');
+                    }
+
                     window.addEventListener('message', event => {
                         const message = event.data;
-                        
-                        if (message.command === 'updateProjects') {
-                            updateProjects(message.projects, message.selectedProjectIds);
-                        } else if (message.command === 'showStatus') {
-                            showStatus(message.message, message.type);
+                        switch (message.command) {
+                            case 'updateProjects':
+                                updateProjects(message.projects, message.selectedProjectIds);
+                                break;
                         }
                     });
                 </script>
@@ -442,88 +647,124 @@ export class GitTabWebview {
     }
 
     private handleRefreshProjects(): void {
-        this._panel?.webview.postMessage({
-            command: 'showStatus',
-            message: 'Refreshing projects...',
-            type: 'info'
-        });
-
         if (this._refreshCallback) {
             this._refreshCallback();
-        } else {
-            setTimeout(() => {
-                this._panel?.webview.postMessage({
-                    command: 'updateProjects',
-                    projects: this._projects,
-                    selectedProjectIds: this._selectedProjectIds
-                });
-            }, 500);
         }
     }
 
     private handleToggleProjectSelection(projectId: string, selected: boolean): void {
+        const project = this._projects.find(p => p.id === projectId);
+        if (!project) return;
+
         if (selected) {
             this._selectedProjectIds.push(projectId);
         } else {
-            const index = this._selectedProjectIds.indexOf(projectId);
-            if (index > -1) {
-                this._selectedProjectIds.splice(index, 1);
-            }
+            this._selectedProjectIds = this._selectedProjectIds.filter(id => id !== projectId);
         }
 
-        this._panel?.webview.postMessage({
-            command: 'updateProjects',
-            projects: this._projects,
-            selectedProjectIds: this._selectedProjectIds
-        });
+        this.updateWebviewProjects();
+    }
+
+    private handleSelectAllProjects(): void {
+        this._selectedProjectIds = this._projects
+            .filter(p => p.isGitRepo)
+            .map(p => p.id);
+        this.updateWebviewProjects();
+    }
+
+    private handleClearSelection(): void {
+        this._selectedProjectIds = [];
+        this.updateWebviewProjects();
     }
 
     private async handleGitPull(projectIds: string[]): Promise<void> {
-        this._panel?.webview.postMessage({
-            command: 'showStatus',
-            message: 'Starting Git Pull...',
-            type: 'info'
-        });
-
         const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0) return;
+
         const results = await GitUtils.executeGitOperations(projects, 'pull');
-        this.showGitOperationResults(results);
+        this.showResults(results);
     }
 
-    private async handleGitSwitchBranch(projectIds: string[], branch: string): Promise<void> {
-        this._panel?.webview.postMessage({
-            command: 'showStatus',
-            message: `Switching to branch ${branch}...`,
-            type: 'info'
-        });
-
+    private async handleGitPush(projectIds: string[]): Promise<void> {
         const projects = this.getProjectsFromIds(projectIds);
-        const results = await GitUtils.executeGitOperations(projects, 'switch-branch', branch);
-        this.showGitOperationResults(results);
+        if (projects.length === 0) return;
+
+        const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, 'push');
+        this.showResults(results);
+    }
+
+    private async handleGitFetch(projectIds: string[]): Promise<void> {
+        const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0) return;
+
+        const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, 'fetch');
+        this.showResults(results);
     }
 
     private async handleGitStatus(projectIds: string[]): Promise<void> {
-        this._panel?.webview.postMessage({
-            command: 'showStatus',
-            message: 'Checking Git status...',
-            type: 'info'
-        });
-
         const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0) return;
+
         const results = await GitUtils.executeGitOperations(projects, 'status');
-        this.showGitOperationResults(results);
+        this.showResults(results);
+    }
+
+    private async handleGitSwitchBranch(projectIds: string[], branch: string): Promise<void> {
+        const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0 || !branch) return;
+
+        const results = await GitUtils.executeGitOperations(projects, 'switch-branch', branch);
+        this.showResults(results);
+        this.refreshCallback();
     }
 
     private async handleGitCommit(projectIds: string[], commitMessage: string): Promise<void> {
-        this._panel?.webview.postMessage({
-            command: 'showStatus',
-            message: `Committing changes: "${commitMessage}"...`,
-            type: 'info'
-        });
-
         const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0 || !commitMessage) return;
+
         const results = await GitUtils.executeGitOperations(projects, 'commit', undefined, commitMessage);
-        this.showGitOperationResults(results);
+        this.showResults(results);
+    }
+
+    private async handleGitCustomCommand(projectIds: string[], customCommand: string): Promise<void> {
+        const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0 || !customCommand) return;
+
+        const results = await GitUtils.executeGitOperations(projects, 'custom', undefined, undefined, customCommand);
+        this.showResults(results);
+    }
+
+    private async handleLoadBranches(projectIds: string[]): Promise<void> {
+        const projects = this.getProjectsFromIds(projectIds);
+        if (projects.length === 0) return;
+
+        const firstProject = projects[0];
+        const result = await GitUtils.gitBranches(firstProject);
+        
+        if (result.success && result.output) {
+            const branches = this.parseBranchOutput(result.output);
+            this._panel?.webview.postMessage({
+                command: 'updateBranchSelector',
+                branches: branches
+            });
+        }
+    }
+
+    private parseBranchOutput(output: string): string[] {
+        const lines = output.split('\n');
+        const branches: string[] = [];
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+                const branchName = trimmed.replace(/^\*\s*/, '').replace(/^\s+/, '');
+                if (branchName && !branchName.includes('->')) {
+                    branches.push(branchName);
+                }
+            }
+        }
+        
+        return branches;
     }
 
     private getProjectsFromIds(projectIds: string[]): Project[] {
@@ -532,52 +773,63 @@ export class GitTabWebview {
             .filter(project => project !== undefined) as Project[];
     }
 
-    private showGitOperationResults(results: GitOperationResult[]): void {
+    private showResults(results: GitOperationResult[]): void {
         const successful = results.filter(r => r.success);
         const failed = results.filter(r => !r.success);
 
         if (successful.length > 0) {
-            this._panel?.webview.postMessage({
-                command: 'showStatus',
-                message: `Successfully completed operations on ${successful.length} project(s).`,
-                type: 'success'
-            });
+            vscode.window.showInformationMessage(
+                `Successfully completed operations on ${successful.length} project(s).`
+            );
         }
 
         if (failed.length > 0) {
             const errorMessages = failed.map(r => `${r.project?.name}: ${r.error || r.message}`).join('\n');
-            this._panel?.webview.postMessage({
-                command: 'showStatus',
-                message: `Failed operations on ${failed.length} project(s):\n${errorMessages}`,
-                type: 'error'
+            vscode.window.showErrorMessage(
+                `Failed operations on ${failed.length} project(s):\n${errorMessages}`
+            );
+        }
+    }
+
+    private updateWebviewProjects(): void {
+        if (this._panel) {
+            this._panel.webview.postMessage({
+                command: 'updateProjects',
+                projects: this._projects,
+                selectedProjectIds: this._selectedProjectIds
             });
+        }
+    }
+
+    private refreshCallback(): void {
+        if (this._refreshCallback) {
+            this._refreshCallback();
         }
     }
 
     public updateProjects(projects: Project[], selectedProjectIds: string[]): void {
         this._projects = projects;
         this._selectedProjectIds = selectedProjectIds;
-        
+        this.updateWebviewProjects();
+    }
+
+    public updateBranchSelector(branches: string[]): void {
         if (this._panel) {
             this._panel.webview.postMessage({
-                command: 'updateProjects',
-                projects: projects,
-                selectedProjectIds: selectedProjectIds
+                command: 'updateBranchSelector',
+                branches: branches
             });
         }
     }
 
     public show(): void {
-        this._panel?.reveal();
+        if (this._panel) {
+            this._panel.reveal(vscode.ViewColumn.One);
+        }
     }
 
     public dispose(): void {
+        this._disposables.forEach(d => d.dispose());
         this._panel?.dispose();
-        while (this._disposables.length) {
-            const x = this._disposables.pop();
-            if (x) {
-                x.dispose();
-            }
-        }
     }
 }

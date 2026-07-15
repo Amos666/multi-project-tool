@@ -10,7 +10,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onView:multi-project-tool.main-view"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -38,123 +38,30 @@
     },
     "commands": [
       {
-        "command": "multi-project-tool.openJsonTab",
-        "title": "Multi-Project Tool: Open JSON Tab",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.openGitTab",
-        "title": "Multi-Project Tool: Open Git Tab",
+        "command": "multi-project-tool.openMainView",
+        "title": "Multi-Project Tool: Open Main View",
         "category": "Multi-Project Tool"
       },
       {
         "command": "multi-project-tool.refreshProjects",
         "title": "Refresh Projects",
         "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.gitPull",
-        "title": "Git Pull",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.gitSwitchBranch",
-        "title": "Switch Branch",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.gitCustomCommand",
-        "title": "Custom Command",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.selectAllProjects",
-        "title": "Select All",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.deselectAllProjects",
-        "title": "Deselect All",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.toggleProjectSelection",
-        "title": "Toggle Selection",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.showLog",
-        "title": "Show Log",
-        "category": "Multi-Project Tool"
-      },
-      {
-        "command": "multi-project-tool.clearLog",
-        "title": "Clear Log",
-        "category": "Multi-Project Tool"
       }
     ],
     "views": {
       "multi-project-tool": [
         {
-          "id": "multi-project-tool.json-tab",
-          "name": "JSON Settings",
-          "when": "config.multi-project-tool.showJsonTab"
-        },
-        {
-          "id": "multi-project-tool.git-tab",
-          "name": "Git Projects",
-          "when": "config.multi-project-tool.showGitTab"
+          "id": "multi-project-tool.main-view",
+          "name": "Multi Project Tools",
+          "type": "webview"
         }
       ]
     },
     "menus": {
       "commandPalette": [
         {
-          "command": "multi-project-tool.openJsonTab",
+          "command": "multi-project-tool.openMainView",
           "when": "false"
-        },
-        {
-          "command": "multi-project-tool.openGitTab",
-          "when": "false"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "multi-project-tool.refreshProjects",
-          "when": "view == multi-project-tool.git-tab",
-          "group": "navigation"
-        },
-        {
-          "command": "multi-project-tool.selectAllProjects",
-          "when": "view == multi-project-tool.git-tab",
-          "group": "navigation"
-        },
-        {
-          "command": "multi-project-tool.deselectAllProjects",
-          "when": "view == multi-project-tool.git-tab",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "multi-project-tool.toggleProjectSelection",
-          "when": "view == multi-project-tool.git-tab && viewItem =~ /project$/",
-          "group": "inline"
-        },
-        {
-          "command": "multi-project-tool.gitPull",
-          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
-          "group": "git@1"
-        },
-        {
-          "command": "multi-project-tool.gitSwitchBranch",
-          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
-          "group": "git@2"
-        },
-        {
-          "command": "multi-project-tool.gitCustomCommand",
-          "when": "view == multi-project-tool.git-tab && viewItem =~ /git-project/",
-          "group": "git@3"
         }
       ]
     },
@@ -182,6 +89,70 @@
           "minimum": 1,
           "maximum": 10,
           "description": "Maximum depth to scan for Git projects"
+        },
+        "multi-project-tool.commonParameters": {
+          "type": "object",
+          "default": {},
+          "description": "Global JSON parameters for command variable substitution"
+        },
+        "multi-project-tool.defaultShell": {
+          "type": "string",
+          "enum": ["git-bash", "cmd", "powershell", "wsl"],
+          "default": "git-bash",
+          "description": "Default shell type for custom commands"
+        },
+        "multi-project-tool.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh project list on filesystem changes"
+        },
+        "multi-project-tool.logRetention": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Maximum number of log entries to keep"
+        },
+        "multi-project-tool.concurrency": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Number of projects to execute commands concurrently"
+        },
+        "multi-project-tool.commandTimeout": {
+          "type": "number",
+          "default": 300,
+          "minimum": 10,
+          "maximum": 3600,
+          "description": "Command execution timeout in seconds"
+        },
+        "multi-project-tool.customCommands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "alias": { "type": "string" },
+              "content": { "type": "string" }
+            },
+            "required": ["id", "alias", "content"]
+          },
+          "default": [],
+          "description": "Saved custom commands"
+        },
+        "multi-project-tool.envVariables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "value": { "type": "string" }
+            },
+            "required": ["key", "value"]
+          },
+          "default": [],
+          "description": "Environment variables injected during command execution"
         }
       }
     }
