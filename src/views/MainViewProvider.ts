@@ -1310,8 +1310,9 @@ function closeCreateBranchModal() {
 
 function confirmCreateBranch() {
     if (pendingBranchName) {
+        const branch = pendingBranchName;
         closeCreateBranchModal();
-        vscode.postMessage({ command: 'createBranch', branch: pendingBranchName });
+        vscode.postMessage({ command: 'createBranch', branch: branch });
     }
 }
 
