@@ -943,7 +943,13 @@ body {
 
             <div class="project-list-header">
                 <span><span data-i18n="project.title">Projects</span> (<span id="projectCount">0</span>)</span>
-                <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px;">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" style="cursor: pointer;">
+                        <span data-i18n="project.selectAll">Select All</span>
+                    </label>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                </div>
             </div>
 
             <div class="project-list-container" id="projectList">
@@ -1003,7 +1009,13 @@ body {
 
             <div class="project-list-header">
                 <span><span data-i18n="project.title">Projects</span> (<span id="customProjectCount">0</span>)</span>
-                <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px;">
+                        <input type="checkbox" id="customSelectAllCheckbox" onchange="toggleCustomSelectAll(this.checked)" style="cursor: pointer;">
+                        <span data-i18n="project.selectAll">Select All</span>
+                    </label>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                </div>
             </div>
 
             <div class="project-list-container" id="customProjectList">
@@ -1221,6 +1233,22 @@ function toggleProjectSelection(projectId) {
     updatePushBadge();
     updateSelectionWarning();
     vscode.postMessage({ command: 'toggleProjectSelection', projectId: projectId });
+}
+
+function toggleSelectAll(checked) {
+    if (checked) {
+        selectAllProjects();
+    } else {
+        deselectAllProjects();
+    }
+}
+
+function toggleCustomSelectAll(checked) {
+    if (checked) {
+        selectAllProjects();
+    } else {
+        deselectAllProjects();
+    }
 }
 
 function selectAllProjects() {
@@ -1642,6 +1670,20 @@ function updateProjectList() {
 
     document.getElementById('projectCount').textContent = projects.length;
     document.getElementById('customProjectCount').textContent = projects.length;
+
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    if (selectAllCheckbox) {
+        const gitProjects = projects.filter(p => p.isGitRepo);
+        const allSelected = gitProjects.length > 0 && gitProjects.every(p => selectedProjectIds.has(p.id));
+        selectAllCheckbox.checked = allSelected;
+    }
+
+    const customSelectAllCheckbox = document.getElementById('customSelectAllCheckbox');
+    if (customSelectAllCheckbox) {
+        const gitProjects = projects.filter(p => p.isGitRepo);
+        const allSelected = gitProjects.length > 0 && gitProjects.every(p => selectedProjectIds.has(p.id));
+        customSelectAllCheckbox.checked = allSelected;
+    }
 }
 
 function updatePushBadge() { document.getElementById('pushBadge').textContent = selectedProjectIds.size; }

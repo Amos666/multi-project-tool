@@ -17,6 +17,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
         // Project list
         'project.title': 'Projects',
+        'project.selectAll': 'Select All',
         'project.loading': 'Loading...',
         'project.noProjects': 'No projects found',
         'project.noBranch': 'No branch',
@@ -131,6 +132,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
         // Project list
         'project.title': '项目',
+        'project.selectAll': '全选',
         'project.loading': 'Loading...',
         'project.noProjects': 'No projects found',
         'project.noBranch': 'No branch',
