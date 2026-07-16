@@ -10,6 +10,7 @@ export interface WorkspaceConfig {
         logRetention: number;
         concurrency: number;
         commandTimeout: number;
+        language: string;
     };
     customCommands: Array<{
         id: string;
@@ -29,7 +30,8 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
         autoRefresh: true,
         logRetention: 50,
         concurrency: 1,
-        commandTimeout: 300
+        commandTimeout: 300,
+        language: 'en'
     },
     customCommands: [],
     envVariables: []
@@ -109,7 +111,8 @@ export class ConfigStore {
                 autoRefresh: config?.settings?.autoRefresh !== undefined ? config.settings.autoRefresh : true,
                 logRetention: config?.settings?.logRetention || 50,
                 concurrency: config?.settings?.concurrency || 1,
-                commandTimeout: config?.settings?.commandTimeout || 300
+                commandTimeout: config?.settings?.commandTimeout || 300,
+                language: config?.settings?.language || 'en'
             },
             customCommands: config?.customCommands || [],
             envVariables: config?.envVariables || []

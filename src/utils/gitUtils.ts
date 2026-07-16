@@ -106,6 +106,45 @@ export class GitUtils {
         }
     }
 
+    public static async gitBranchExists(project: Project, branchName: string): Promise<boolean> {
+        try {
+            const result = await this.executeGitCommand(project.path, 'branch -a');
+            if (!result.success) return false;
+            const branches = result.output.split('\n').map(b => b.trim());
+            const cleanBranch = branchName.replace(/^remotes\/origin\//, '');
+            return branches.some(b => b.replace('* ', '').replace(/^remotes\/origin\//, '') === cleanBranch);
+        } catch {
+            return false;
+        }
+    }
+
+    public static async gitCreateBranch(project: Project, branchName: string): Promise<GitOperationResult> {
+        logManager.info(`Creating and switching to branch "${branchName}" for project: ${project.name}`);
+        try {
+            const result = await this.executeGitCommand(project.path, `checkout -b ${branchName}`);
+            if (result.success) {
+                logManager.success(`Successfully created and switched to branch "${branchName}" in ${project.name}`, result.output);
+            } else {
+                logManager.error(`Failed to create branch in ${project.name}`, result.error || result.output);
+            }
+            return {
+                success: result.success,
+                message: result.success ? `Successfully created and switched to ${branchName} in ${project.name}` : `Failed to create branch in ${project.name}`,
+                project: project,
+                output: result.output,
+                error: result.error
+            };
+        } catch (error) {
+            logManager.error(`Error creating branch in ${project.name}: ${error}`);
+            return {
+                success: false,
+                message: `Error creating branch in ${project.name}: ${error}`,
+                project: project,
+                error: error as string
+            };
+        }
+    }
+
     public static async gitCommit(project: Project, message: string): Promise<GitOperationResult> {
         logManager.info(`Committing changes for project: ${project.name}`);
         try {

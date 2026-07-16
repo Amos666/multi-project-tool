@@ -5,6 +5,7 @@ import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
+import { translations, Language, t } from '../utils/i18n';
 
 interface CustomCommand {
     id: string;
@@ -51,6 +52,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _logContainerHeight: number = 60;
     private _pythonTxtCommands: PythonTxtCommand[] = [];
     private _projectScanner: ProjectScanner;
+    private _language: Language = 'en';
 
     constructor(private readonly _extensionUri: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
@@ -83,7 +85,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                 try {
                     return await Promise.race([
                         this._projectScanner.getProjectInfo(project),
-                        new Promise<Project>((resolve) => setTimeout(() => resolve(project), 3000))
+                        new Promise<Project>((resolve) => setTimeout(() => resolve(project), 15000))
                     ]);
                 } catch {
                     return project;
@@ -110,6 +112,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this._logRetention = config.settings.logRetention;
         this._concurrency = config.settings.concurrency;
         this._commandTimeout = config.settings.commandTimeout;
+        this._language = (config.settings.language as Language) || 'en';
     }
 
     private async loadCommands(): Promise<void> {
@@ -148,6 +151,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'gitCommit': await this.handleGitCommit(message.message); break;
                     case 'gitChange': await this.handleGitChange(); break;
                     case 'gitBranch': await this.handleGitBranch(message.branch); break;
+                    case 'createBranch': await this.handleCreateBranch(message.branch); break;
                     case 'getBranchList': await this.handleGetBranchList(message.projectId); break;
                     case 'gitPush': await this.handleGitPush(); break;
                     case 'refreshProjects': await this.handleRefreshProjects(); break;
@@ -166,6 +170,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'logHeightChange': this.handleLogHeightChange(message.height); break;
                     case 'savePythonTxtCommands': await this.handleSavePythonTxtCommands(message.commands); break;
                     case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
+                    case 'setLanguage': this.handleSetLanguage(message.language); break;
                 }
             }
         );
@@ -175,6 +180,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         const css = this.getCss();
         const htmlBody = this.getHtmlBody();
         const js = this.getJavaScript();
+        const i18nScript = `<script>const i18nTranslations = ${JSON.stringify(translations)}; let currentLang = '${this._language}'; function t(key) { return i18nTranslations[currentLang]?.[key] || i18nTranslations.en?.[key] || key; } function applyTranslations() { document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); }); document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); }); document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); }); }</script>`;
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -184,7 +190,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     <title>Multi Project Tools</title>
     <style>${css}</style>
 </head>
-<body>${htmlBody}<script>${js}</script></body>
+<body>${htmlBody}${i18nScript}<script>${js}</script></body>
 </html>`;
     }
 
@@ -903,58 +909,58 @@ body {
         return `
     <div class="tab-bar">
         <div class="tab active" onclick="switchTab('git')">
-            <span>🌿</span><span>Git</span>
+            <span>🌿</span><span data-i18n="tab.git">Git</span>
         </div>
         <div class="tab" onclick="switchTab('custom')">
-            <span>💻</span><span>Cmd</span>
+            <span>💻</span><span data-i18n="tab.custom">Cmd</span>
         </div>
         <div class="tab" onclick="switchTab('settings')">
-            <span>⚙️</span><span>Set</span>
+            <span>⚙️</span><span data-i18n="tab.settings">Set</span>
         </div>
         <div class="tab" onclick="switchTab('txtcmd')">
-            <span>🐍</span><span>Pyt</span>
+            <span>🐍</span><span data-i18n="tab.txtcmd">Pyt</span>
         </div>
     </div>
 
     <div class="tab-content">
         <div id="tab-git" class="tab-panel active">
             <div class="git-actions">
-                <button class="git-btn pull" onclick="executeGitAction('pull')"><span>📥</span><span>Pull</span></button>
-                <button class="git-btn commit" onclick="executeGitAction('commit')"><span>✓</span><span>Commit</span></button>
-                <button class="git-btn change" onclick="executeGitAction('change')"><span>📊</span><span>Change</span></button>
+                <button class="git-btn pull" onclick="executeGitAction('pull')"><span>📥</span><span data-i18n="git.pull">Pull</span></button>
+                <button class="git-btn commit" onclick="executeGitAction('commit')"><span>✓</span><span data-i18n="git.commit">Commit</span></button>
+                <button class="git-btn change" onclick="executeGitAction('change')"><span>📊</span><span data-i18n="git.change">Change</span></button>
                 <div class="git-branch-selector">
-                    <button class="git-btn branch" onclick="executeGitAction('branch')"><span>🌿</span><span>Branch</span></button>
+                    <button class="git-btn branch" onclick="executeGitAction('branch')"><span>🌿</span><span data-i18n="git.branch">Branch</span></button>
                     <div style="position: relative; flex: 1;">
-                        <input type="text" id="branchInput" class="branch-input" placeholder="选择分支..." onclick="onBranchInputClick(event)" autocomplete="off" oninput="filterBranchList(this.value)">
+                        <input type="text" id="branchInput" class="branch-input" data-i18n-placeholder="branch.selectPlaceholder" placeholder="Select branch..." onclick="onBranchInputClick(event)" autocomplete="off" oninput="filterBranchList(this.value)">
                         <div class="branch-dropdown" id="branchDropdown">
-                            <div class="dropdown-loading" id="branchLoading">加载中...</div>
+                            <div class="dropdown-loading" id="branchLoading" data-i18n="branch.loading">Loading...</div>
                             <div class="dropdown-content" id="branchList"></div>
                         </div>
                     </div>
                 </div>
-                <button class="git-btn push" onclick="executeGitAction('push')"><span>📤</span><span>Push</span><span class="badge" id="pushBadge">0</span></button>
+                <button class="git-btn push" onclick="executeGitAction('push')"><span>📤</span><span data-i18n="git.push">Push</span><span class="badge" id="pushBadge">0</span></button>
             </div>
 
             <div class="project-list-header">
-                <span>项目 (<span id="projectCount">0</span>)</span>
-                <button class="refresh-btn" onclick="refreshProjects()" title="刷新">🔄</button>
+                <span><span data-i18n="project.title">Projects</span> (<span id="projectCount">0</span>)</span>
+                <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
             </div>
 
             <div class="project-list-container" id="projectList">
-                <div class="no-projects-message">Loading...</div>
+                <div class="no-projects-message" data-i18n="project.loading">Loading...</div>
             </div>
 
             <div class="log-container" id="logContainer">
                 <div class="log-resizer" id="logResizer"></div>
                 <div class="log-header" onclick="toggleLog()">
-                    <span>日志</span>
-                    <span class="clear-btn" onclick="clearLogs(event)">清除</span>
+                    <span data-i18n="log.title">Logs</span>
+                    <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
                 </div>
                 <div class="log-content" id="logContent">
                     <div class="log-entry info">
                         <span class="timestamp">[--:--:--]</span>
                         <span class="status-icon">▶</span>
-                        <span class="message">Multi Project Tools ready</span>
+                        <span class="message" data-i18n="log.ready">Multi Project Tools ready</span>
                     </div>
                 </div>
             </div>
@@ -963,7 +969,7 @@ body {
         <div id="tab-custom" class="tab-panel">
             <div class="custom-command-header">
                 <label style="font-size: 10px; color: var(--brand-text-muted); display: flex; align-items: center;">
-                    Shell:
+                    <span data-i18n="cmd.shell">Shell:</span>
                     <select class="shell-selector" id="shellSelector" onchange="setShell(this.value)">
                         <option value="git-bash">Git Bash</option>
                         <option value="cmd">CMD</option>
@@ -971,50 +977,50 @@ body {
                         <option value="wsl">WSL</option>
                     </select>
                 </label>
-                <button class="add-cmd-btn" onclick="showCommandEditor()">+ 添加</button>
+                <button class="add-cmd-btn" onclick="showCommandEditor()" data-i18n="cmd.add">+ Add</button>
             </div>
 
             <div class="command-editor" id="commandEditor">
                 <div class="form-group">
-                    <label for="commandAlias">命令别名</label>
+                    <label for="commandAlias" data-i18n="cmd.alias">Command Alias</label>
                     <input type="text" id="commandAlias" placeholder="deploy-all">
                 </div>
                 <div class="form-group">
-                    <label for="commandContent">命令内容</label>
+                    <label for="commandContent" data-i18n="cmd.content">Command Content</label>
                     <textarea id="commandContent" placeholder="npm run build&#10;npm run deploy"></textarea>
                 </div>
                 <div class="btn-group">
-                    <button class="btn btn-primary" onclick="saveCommand()">保存</button>
-                    <button class="btn btn-secondary" onclick="hideCommandEditor()">取消</button>
+                    <button class="btn btn-primary" onclick="saveCommand()" data-i18n="cmd.save">Save</button>
+                    <button class="btn btn-secondary" onclick="hideCommandEditor()" data-i18n="cmd.cancel">Cancel</button>
                 </div>
             </div>
 
             <div class="command-list" id="commandList">
-                <div class="empty-state">暂无命令</div>
+                <div class="empty-state" data-i18n="cmd.empty">No commands</div>
             </div>
 
-            <div class="selection-warning" id="selectionWarning">请先选择项目</div>
+            <div class="selection-warning" id="selectionWarning" data-i18n="cmd.selectProject">Please select projects first</div>
 
             <div class="project-list-header">
-                <span>项目 (<span id="customProjectCount">0</span>)</span>
-                <button class="refresh-btn" onclick="refreshProjects()" title="刷新">🔄</button>
+                <span><span data-i18n="project.title">Projects</span> (<span id="customProjectCount">0</span>)</span>
+                <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
             </div>
 
             <div class="project-list-container" id="customProjectList">
-                <div class="no-projects-message">Loading...</div>
+                <div class="no-projects-message" data-i18n="project.loading">Loading...</div>
             </div>
 
             <div class="log-container" id="customLogContainer">
                 <div class="log-resizer" id="customLogResizer"></div>
                 <div class="log-header" onclick="toggleLog()">
-                    <span>日志</span>
-                    <span class="clear-btn" onclick="clearLogs(event)">清除</span>
+                    <span data-i18n="log.title">Logs</span>
+                    <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
                 </div>
                 <div class="log-content" id="customLogContent">
                     <div class="log-entry info">
                         <span class="timestamp">[--:--:--]</span>
                         <span class="status-icon">▶</span>
-                        <span class="message">Multi Project Tools ready</span>
+                        <span class="message" data-i18n="log.ready">Multi Project Tools ready</span>
                     </div>
                 </div>
             </div>
@@ -1023,45 +1029,55 @@ body {
         <div id="tab-settings" class="tab-panel">
             <div class="settings-panel">
                 <div class="settings-section">
-                    <h3>📋 全局参数</h3>
-                    <div class="subtitle">定义全局参数，通过 ${'{paramName}'} 引用</div>
+                    <h3>🌐 <span data-i18n="settings.language">Language</span></h3>
+                    <div class="settings-row">
+                        <select class="shell-selector" id="languageSelector" style="width: auto; flex: none;" onchange="changeLanguage(this.value)">
+                            <option value="en">English</option>
+                            <option value="zh">中文</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>📋 <span data-i18n="settings.globalParams">Global Parameters</span></h3>
+                    <div class="subtitle" data-i18n="settings.globalParamsDesc">Define global parameters, referenced via ${'${paramName}'}</div>
                     <textarea class="json-editor" id="commonParams" placeholder='{"deployBucket": "my-bucket"}'></textarea>
                     <div class="btn-group" style="margin-top: 10px;">
-                        <button class="btn btn-secondary" onclick="resetCommonParams()">恢复默认</button>
-                        <button class="btn btn-primary" onclick="saveCommonParams()">保存</button>
+                        <button class="btn btn-secondary" onclick="resetCommonParams()" data-i18n="settings.resetDefault">Reset Default</button>
+                        <button class="btn btn-primary" onclick="saveCommonParams()" data-i18n="cmd.save">Save</button>
                     </div>
                     <div id="jsonStatus" class="status-message"></div>
                 </div>
 
                 <div class="settings-section">
-                    <h3>🔧 环境变量</h3>
-                    <div class="subtitle">执行命令时注入到 Shell 环境中</div>
+                    <h3>🔧 <span data-i18n="settings.envVars">Environment Variables</span></h3>
+                    <div class="subtitle" data-i18n="settings.envVarsDesc">Injected into Shell environment during command execution</div>
                     <div class="env-variable-list" id="envVariableList"></div>
-                    <button class="btn btn-secondary" onclick="addEnvVariable()">+ 添加变量</button>
+                    <button class="btn btn-secondary" onclick="addEnvVariable()" data-i18n="settings.addVar">+ Add Variable</button>
                 </div>
 
                 <div class="settings-section">
-                    <h3>⚙️ 其他设置</h3>
+                    <h3>⚙️ <span data-i18n="settings.other">Other Settings</span></h3>
                     <div class="settings-row">
-                        <label>自动刷新</label>
+                        <label data-i18n="settings.autoRefresh">Auto Refresh</label>
                         <div class="toggle-switch" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
                     </div>
                     <div class="settings-row">
-                        <label>日志保留条数</label>
+                        <label data-i18n="settings.logRetention">Log Retention</label>
                         <div style="display: flex; align-items: center;">
                             <input type="number" id="logRetentionInput" min="1" max="1000" value="50">
-                            <span class="unit">条</span>
+                            <span class="unit" data-i18n="unit.entries">entries</span>
                         </div>
                     </div>
                     <div class="settings-row">
-                        <label>并发执行数</label>
+                        <label data-i18n="settings.concurrency">Concurrency</label>
                         <div style="display: flex; align-items: center;">
                             <input type="number" id="concurrencyInput" min="1" max="10" value="1">
-                            <span class="unit">个</span>
+                            <span class="unit" data-i18n="unit.count"></span>
                         </div>
                     </div>
                     <div class="settings-row">
-                        <label>默认 Shell</label>
+                        <label data-i18n="settings.defaultShell">Default Shell</label>
                         <select class="shell-selector" id="defaultShellSelector" style="width: auto; flex: none;">
                             <option value="git-bash">Git Bash</option>
                             <option value="cmd">CMD</option>
@@ -1070,14 +1086,14 @@ body {
                         </select>
                     </div>
                     <div class="settings-row">
-                        <label>命令超时</label>
+                        <label data-i18n="settings.commandTimeout">Command Timeout</label>
                         <div style="display: flex; align-items: center;">
                             <input type="number" id="commandTimeoutInput" min="10" max="3600" value="300">
-                            <span class="unit">秒</span>
+                            <span class="unit" data-i18n="unit.seconds">sec</span>
                         </div>
                     </div>
                     <div class="btn-group" style="margin-top: 12px;">
-                        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+                        <button class="btn btn-primary" onclick="saveSettings()" data-i18n="settings.saveSettings">Save Settings</button>
                     </div>
                 </div>
             </div>
@@ -1087,35 +1103,35 @@ body {
             <div class="txtcmd-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
                 <div class="txtcmd-commands" style="flex: 1; overflow-y: auto; padding: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: 600; font-size: 12px;">Python 文本转换命令</span>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="addPythonTxtCmd()">+ 新建</button>
+                        <span style="font-weight: 600; font-size: 12px;" data-i18n="pytxt.title">Python Text Transform Commands</span>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="addPythonTxtCmd()" data-i18n="pytxt.new">+ New</button>
                     </div>
-                    <div class="subtitle" style="margin-bottom: 8px; font-size: 11px;">使用编辑器当前选中的文本作为输入，执行 Python 命令，输出替换选中内容</div>
+                    <div class="subtitle" style="margin-bottom: 8px; font-size: 11px;" data-i18n="pytxt.desc">Use selected text as input, execute Python command, output replaces selection</div>
                     <div id="pythonTxtCmdList" style="display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>
 
                 <div id="pythonTxtCmdEditor" style="display: none; padding: 8px; border-bottom: 1px solid var(--brand-border); gap: 8px; flex-direction: column;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 600; font-size: 12px;" id="pythonTxtCmdEditorTitle">编辑命令</span>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px;" onclick="closePythonTxtCmdEditor()">× 关闭</button>
+                        <span style="font-weight: 600; font-size: 12px;" id="pythonTxtCmdEditorTitle" data-i18n="pytxt.editTitle">Edit Command</span>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px;" onclick="closePythonTxtCmdEditor()" data-i18n="pytxt.close">× Close</button>
                     </div>
-                    <input type="text" id="pythonTxtCmdAlias" placeholder="命令别名" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 12px;">
-                    <textarea id="pythonTxtCmdContent" placeholder="Python 代码，使用 sys.stdin.read() 读取输入，print 输出结果" rows="6" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
+                    <input type="text" id="pythonTxtCmdAlias" data-i18n-placeholder="pytxt.aliasPlaceholder" placeholder="Command alias" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 12px;">
+                    <textarea id="pythonTxtCmdContent" data-i18n-placeholder="pytxt.contentPlaceholder" placeholder="Python code, use sys.stdin.read() for input, print for output" rows="6" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
                     <div style="display: flex; gap: 6px;">
-                        <button class="btn btn-primary" style="font-size: 11px; padding: 4px 12px;" onclick="savePythonTxtCmd()">保存</button>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="runPythonTxtCmdFromEditor()">运行</button>
+                        <button class="btn btn-primary" style="font-size: 11px; padding: 4px 12px;" onclick="savePythonTxtCmd()" data-i18n="pytxt.save">Save</button>
+                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="runPythonTxtCmdFromEditor()" data-i18n="pytxt.run">Run</button>
                     </div>
                 </div>
 
                 <div class="log-container" id="txtCmdLogContainer">
                     <div class="log-resizer" id="txtCmdLogResizer"></div>
                     <div class="log-header" onclick="toggleTxtCmdLog()">
-                        <span class="log-title">📝 执行日志</span>
+                        <span class="log-title">📝 <span data-i18n="pytxt.logTitle">Execution Log</span></span>
                         <span class="log-toggle-icon" id="txtCmdLogToggle">▼</span>
                     </div>
                     <div class="log-content" id="txtCmdLogContent">
                         <div class="log-entry info">
-                            <span class="message">选择文本后运行 Python 命令即可转换</span>
+                            <span class="message" data-i18n="pytxt.logReady">Select text and run Python command to transform</span>
                         </div>
                     </div>
                 </div>
@@ -1126,16 +1142,32 @@ body {
     <div id="commitModal" class="modal-overlay" style="display: none;">
         <div class="modal-dialog">
             <div class="modal-header">
-                <span class="modal-title">提交确认</span>
+                <span class="modal-title" data-i18n="commit.title">Commit Confirmation</span>
                 <button class="modal-close" onclick="closeCommitModal()">×</button>
             </div>
             <div class="modal-body">
-                <label style="font-size: 12px; display: block; margin-bottom: 6px;">提交信息（留空则使用默认）：</label>
+                <label style="font-size: 12px; display: block; margin-bottom: 6px;" data-i18n="commit.message">Commit message (leave empty for default):</label>
                 <input type="text" id="commitMessageInput" class="modal-input" placeholder="Auto commit" autocomplete="off">
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeCommitModal()">取消</button>
-                <button class="btn btn-primary" onclick="confirmCommit()">确认提交</button>
+                <button class="btn btn-secondary" onclick="closeCommitModal()" data-i18n="commit.cancel">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmCommit()" data-i18n="commit.confirm">Confirm Commit</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="createBranchModal" class="modal-overlay" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span class="modal-title" data-i18n="branch.createConfirm">Create Branch Confirmation</span>
+                <button class="modal-close" onclick="closeCreateBranchModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 12px; margin-bottom: 6px;" id="createBranchMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateBranchModal()" data-i18n="commit.cancel">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmCreateBranch()" data-i18n="branch.create">Create Branch</button>
             </div>
         </div>
     </div>`;
@@ -1158,7 +1190,7 @@ let logInitHeight = '60px';
 let branchList = [];
 let currentBranch = '';
 
-window.addEventListener('load', () => { vscode.postMessage({ command: 'init' }); });
+window.addEventListener('load', () => { vscode.postMessage({ command: 'init' }); applyTranslations(); });
 
 function switchTab(tabId) {
     currentTab = tabId;
@@ -1208,7 +1240,7 @@ function deselectAllProjects() {
 }
 
 function executeGitAction(action) {
-    if (selectedProjectIds.size === 0) { alert('Please select at least one project'); return; }
+    if (selectedProjectIds.size === 0) { alert(t('project.selectAtLeastOne')); return; }
     const btn = document.querySelector('.git-btn.' + action);
     if (btn) btn.classList.add('executing');
 
@@ -1224,7 +1256,7 @@ function executeGitAction(action) {
             if (branchName) {
                 vscode.postMessage({ command: 'gitBranch', branch: branchName });
             } else {
-                alert('请选择或输入分支名称');
+                alert(t('branch.selectOrInput'));
                 if (btn) btn.classList.remove('executing');
             }
             break;
@@ -1256,8 +1288,47 @@ function confirmCommit() {
     vscode.postMessage({ command: 'gitCommit', message: message });
 }
 
+let pendingBranchName = '';
+
+function showCreateBranchConfirm(branch, projectCount) {
+    pendingBranchName = branch;
+    const modal = document.getElementById('createBranchModal');
+    const msg = document.getElementById('createBranchMessage');
+    if (modal && msg) {
+        msg.textContent = t('branch.createMessage').replace('%branch%', branch).replace('%count%', projectCount);
+        modal.style.display = 'flex';
+    }
+}
+
+function closeCreateBranchModal() {
+    const modal = document.getElementById('createBranchModal');
+    if (modal) modal.style.display = 'none';
+    pendingBranchName = '';
+    const btn = document.querySelector('.git-btn.branch');
+    if (btn) btn.classList.remove('executing');
+}
+
+function confirmCreateBranch() {
+    if (pendingBranchName) {
+        closeCreateBranchModal();
+        vscode.postMessage({ command: 'createBranch', branch: pendingBranchName });
+    }
+}
+
 function refreshProjects() { vscode.postMessage({ command: 'refreshProjects' }); }
 function setShell(shell) { vscode.postMessage({ command: 'setShell', shell: shell }); }
+
+function changeLanguage(lang) {
+    currentLang = lang;
+    applyTranslations();
+    vscode.postMessage({ command: 'setLanguage', language: lang });
+    // Re-render dynamic content
+    updateProjectList();
+    updateCommandList();
+    renderLogs();
+    renderTxtCmdLogs();
+    renderPythonTxtCmdList();
+}
 
 function onBranchInputClick(e) {
     e.stopPropagation();
@@ -1349,7 +1420,7 @@ function hideCommandEditor() {
 function saveCommand() {
     const alias = document.getElementById('commandAlias').value.trim();
     const content = document.getElementById('commandContent').value.trim();
-    if (!alias || !content) { alert('请填写命令别名和内容'); return; }
+    if (!alias || !content) { alert(t('cmd.fillAliasAndContent')); return; }
 
     const command = {
         id: editingCommandId || Date.now().toString(),
@@ -1407,7 +1478,7 @@ function saveSettings() {
         commandTimeout: parseInt(document.getElementById('commandTimeoutInput').value) || 300
     };
     vscode.postMessage({ command: 'saveSettings', settings: settings });
-    alert('Settings saved!');
+    alert(t('settings.settingsSaved'));
 }
 
 function toggleAutoRefresh() {
@@ -1513,9 +1584,9 @@ function toggleLog() {
 function updateProjectList() {
     const list1 = document.getElementById('projectList');
     const list2 = document.getElementById('customProjectList');
-    
+
     if (projects.length === 0) {
-        list1.innerHTML = '<div class="no-projects-message">No projects found</div>';
+        list1.innerHTML = '<div class="no-projects-message">' + t('project.noProjects') + '</div>';
         list2.innerHTML = list1.innerHTML;
         return;
     }
@@ -1549,7 +1620,7 @@ function updateProjectList() {
 
             const branch = document.createElement('div');
             branch.className = 'project-branch';
-            branch.innerHTML = '<span>🌿</span>' + (p.currentBranch || 'No branch');
+            branch.innerHTML = '<span>🌿</span>' + (p.currentBranch || t('project.noBranch'));
             info.appendChild(branch);
 
             item.appendChild(info);
@@ -1582,7 +1653,7 @@ function updateSelectionWarning() {
 function updateCommandList() {
     const list = document.getElementById('commandList');
     if (customCommands.length === 0) {
-        list.innerHTML = '<div class="empty-state">暂无命令</div>';
+        list.innerHTML = '<div class="empty-state">' + t('cmd.empty') + '</div>';
         return;
     }
 
@@ -1614,21 +1685,21 @@ function updateCommandList() {
 
         const runBtn = document.createElement('button');
         runBtn.className = 'cmd-action-btn run';
-        runBtn.title = '运行';
+        runBtn.title = t('cmd.run');
         runBtn.textContent = '▶';
         runBtn.onclick = function() { runCommand(cmd.id); };
         actions.appendChild(runBtn);
 
         const editBtn = document.createElement('button');
         editBtn.className = 'cmd-action-btn edit';
-        editBtn.title = '编辑';
+        editBtn.title = t('cmd.edit');
         editBtn.textContent = '✎';
         editBtn.onclick = function() { showCommandEditor(cmd.id); };
         actions.appendChild(editBtn);
 
         const delBtn = document.createElement('button');
         delBtn.className = 'cmd-action-btn delete';
-        delBtn.title = '删除';
+        delBtn.title = t('cmd.delete');
         delBtn.textContent = '🗑';
         delBtn.onclick = function() { deleteCommand(cmd.id); };
         actions.appendChild(delBtn);
@@ -1684,9 +1755,9 @@ function addLogEntry(entry) {
 function renderLogs() {
     const content1 = document.getElementById('logContent');
     const content2 = document.getElementById('customLogContent');
-    
+
     if (logs.length === 0) {
-        content1.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">Multi Project Tools ready</span></div>';
+        content1.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">' + t('log.ready') + '</span></div>';
         content2.innerHTML = content1.innerHTML;
         return;
     }
@@ -1718,7 +1789,7 @@ let txtCmdLogs = [];
 
 function addPythonTxtCmd() {
     pythonTxtEditingId = null;
-    document.getElementById('pythonTxtCmdEditorTitle').textContent = '新建命令';
+    document.getElementById('pythonTxtCmdEditorTitle').textContent = t('pytxt.newTitle');
     document.getElementById('pythonTxtCmdAlias').value = '';
     document.getElementById('pythonTxtCmdContent').value = 'import sys\\n\\ntext = sys.stdin.read()\\nresult = text\\nprint(result)';
     document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
@@ -1728,7 +1799,7 @@ function editPythonTxtCmd(id) {
     const cmd = pythonTxtCommands.find(c => c.id === id);
     if (!cmd) return;
     pythonTxtEditingId = id;
-    document.getElementById('pythonTxtCmdEditorTitle').textContent = '编辑命令';
+    document.getElementById('pythonTxtCmdEditorTitle').textContent = t('pytxt.editTitle');
     document.getElementById('pythonTxtCmdAlias').value = cmd.alias;
     document.getElementById('pythonTxtCmdContent').value = cmd.content;
     document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
@@ -1742,7 +1813,7 @@ function closePythonTxtCmdEditor() {
 function savePythonTxtCmd() {
     const alias = document.getElementById('pythonTxtCmdAlias').value.trim();
     const content = document.getElementById('pythonTxtCmdContent').value;
-    if (!alias) { alert('请输入命令别名'); return; }
+    if (!alias) { alert(t('pytxt.inputAlias')); return; }
 
     if (pythonTxtEditingId) {
         const idx = pythonTxtCommands.findIndex(c => c.id === pythonTxtEditingId);
@@ -1761,7 +1832,7 @@ function savePythonTxtCmd() {
 }
 
 function deletePythonTxtCmd(id) {
-    if (!confirm('确定删除该命令？')) return;
+    if (!confirm(t('pytxt.confirmDelete'))) return;
     pythonTxtCommands = pythonTxtCommands.filter(c => c.id !== id);
     vscode.postMessage({ command: 'savePythonTxtCommands', commands: pythonTxtCommands });
     if (pythonTxtEditingId === id) closePythonTxtCmdEditor();
@@ -1775,7 +1846,7 @@ function runPythonTxtCmd(id) {
 }
 
 function runPythonTxtCmdFromEditor() {
-    const alias = document.getElementById('pythonTxtCmdAlias').value.trim() || '临时命令';
+    const alias = document.getElementById('pythonTxtCmdAlias').value.trim() || t('pytxt.tempCmd');
     const content = document.getElementById('pythonTxtCmdContent').value;
     vscode.postMessage({ command: 'runPythonTxtCmd', cmd: { id: 'temp', alias, content } });
 }
@@ -1784,7 +1855,7 @@ function renderPythonTxtCmdList() {
     const list = document.getElementById('pythonTxtCmdList');
     if (!list) return;
     if (pythonTxtCommands.length === 0) {
-        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground); font-size: 11px; padding: 10px; text-align: center;">暂无命令，点击"新建"添加</div>';
+        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground); font-size: 11px; padding: 10px; text-align: center;">' + t('pytxt.empty') + '</div>';
         return;
     }
     list.innerHTML = '';
@@ -1808,8 +1879,8 @@ function renderPythonTxtCmdList() {
         const runBtn = document.createElement('button');
         runBtn.className = 'btn btn-secondary';
         runBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
-        runBtn.textContent = '▶ 运行';
-        runBtn.title = '运行';
+        runBtn.textContent = t('pytxt.runBtn');
+        runBtn.title = t('pytxt.run');
         runBtn.onclick = function(e) { e.stopPropagation(); runPythonTxtCmd(cmd.id); };
         actionsDiv.appendChild(runBtn);
 
@@ -1817,7 +1888,7 @@ function renderPythonTxtCmdList() {
         editBtn.className = 'btn btn-secondary';
         editBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
         editBtn.textContent = '✎';
-        editBtn.title = '编辑';
+        editBtn.title = t('cmd.edit');
         editBtn.onclick = function(e) { e.stopPropagation(); editPythonTxtCmd(cmd.id); };
         actionsDiv.appendChild(editBtn);
 
@@ -1825,7 +1896,7 @@ function renderPythonTxtCmdList() {
         deleteBtn.className = 'btn btn-secondary';
         deleteBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
         deleteBtn.textContent = '🗑';
-        deleteBtn.title = '删除';
+        deleteBtn.title = t('cmd.delete');
         deleteBtn.onclick = function(e) { e.stopPropagation(); deletePythonTxtCmd(cmd.id); };
         actionsDiv.appendChild(deleteBtn);
 
@@ -1859,7 +1930,7 @@ function renderTxtCmdLogs() {
     const content = document.getElementById('txtCmdLogContent');
     if (!content) return;
     if (txtCmdLogs.length === 0) {
-        content.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">选择文本后运行 Python 命令即可转换</span></div>';
+        content.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">' + t('pytxt.logReady') + '</span></div>';
         return;
     }
     content.innerHTML = txtCmdLogs.map(entry => {
@@ -1941,6 +2012,19 @@ window.addEventListener('message', event => {
             document.getElementById('defaultShellSelector').value = message.settings.defaultShell;
             document.getElementById('commandTimeoutInput').value = message.settings.commandTimeout;
             document.getElementById('shellSelector').value = message.settings.defaultShell;
+            if (message.settings.language) {
+                document.getElementById('languageSelector').value = message.settings.language;
+            }
+            break;
+        case 'setLanguage':
+            currentLang = message.language;
+            applyTranslations();
+            document.getElementById('languageSelector').value = message.language;
+            updateProjectList();
+            updateCommandList();
+            renderLogs();
+            renderTxtCmdLogs();
+            renderPythonTxtCmdList();
             break;
         case 'jsonError':
             const jsonStatus = document.getElementById('jsonStatus');
@@ -1950,7 +2034,7 @@ window.addEventListener('message', event => {
             break;
         case 'jsonSuccess':
             const jsonStatus2 = document.getElementById('jsonStatus');
-            jsonStatus2.textContent = '已保存';
+            jsonStatus2.textContent = t('settings.saved');
             jsonStatus2.className = 'status-message success';
             setTimeout(() => { jsonStatus2.textContent = ''; jsonStatus2.className = 'status-message'; }, 2000);
             break;
@@ -1971,6 +2055,9 @@ window.addEventListener('message', event => {
         case 'addTxtCmdLog':
             addTxtCmdLogEntry(message.entry);
             break;
+        case 'showCreateBranchConfirm':
+            showCreateBranchConfirm(message.branch, message.projectCount);
+            break;
     }
 });`;
     }
@@ -1982,6 +2069,12 @@ window.addEventListener('message', event => {
             height: this._logContainerHeight
         });
         this.updateWebview();
+    }
+
+    private async handleSetLanguage(language: string): Promise<void> {
+        this._language = language as Language;
+        this.saveAllConfig();
+        this._view?.webview.postMessage({ command: 'languageChanged', language: this._language });
     }
 
     private handleToggleLogExpanded(expanded: boolean): void {
@@ -2001,7 +2094,7 @@ window.addEventListener('message', event => {
     private async handleRunPythonTxtCmd(cmd: PythonTxtCommand): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            this.addTxtCmdLog('没有活动的文本编辑器', 'error');
+            this.addTxtCmdLog(t('backend.noEditor', this._language), 'error');
             return;
         }
 
@@ -2009,11 +2102,11 @@ window.addEventListener('message', event => {
         const selectedText = editor.document.getText(selection);
 
         if (!selectedText || selectedText.trim().length === 0) {
-            this.addTxtCmdLog('请先在编辑器中选择要转换的文本', 'error');
+            this.addTxtCmdLog(t('backend.selectText', this._language), 'error');
             return;
         }
 
-        this.addTxtCmdLog(`执行命令: ${cmd.alias}`, 'info');
+        this.addTxtCmdLog(`${t('backend.execCmd', this._language)}: ${cmd.alias}`, 'info');
 
         try {
             const result = await this.executePythonTransform(selectedText, cmd.content);
@@ -2021,12 +2114,12 @@ window.addEventListener('message', event => {
                 await editor.edit(editBuilder => {
                     editBuilder.replace(selection, result.output);
                 });
-                this.addTxtCmdLog(`转换成功，输出 ${result.output.length} 字符`, 'success');
+                this.addTxtCmdLog(`${t('backend.transformSuccess', this._language)} ${result.output.length} ${t('backend.chars', this._language)}`, 'success');
             } else {
-                this.addTxtCmdLog(`执行失败: ${result.error}`, 'error', result.error);
+                this.addTxtCmdLog(`${t('backend.execFailed', this._language)}: ${result.error}`, 'error', result.error);
             }
         } catch (error: any) {
-            this.addTxtCmdLog(`执行出错: ${error.message}`, 'error');
+            this.addTxtCmdLog(`${t('backend.execError', this._language)}: ${error.message}`, 'error');
         }
     }
 
@@ -2054,7 +2147,7 @@ window.addEventListener('message', event => {
                     if (error) {
                         const errMsg = error.message;
                         if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
-                            resolve({ success: false, output: '', error: 'Python 未找到，请确保已安装 Python 并加入系统 PATH' });
+                            resolve({ success: false, output: '', error: t('backend.pythonNotFound', this._language) });
                         } else {
                             resolve({ success: false, output: stdout, error: stderr.trim() || errMsg });
                         }
@@ -2075,7 +2168,7 @@ window.addEventListener('message', event => {
 
     private addTxtCmdLog(message: string, type: 'success' | 'error' | 'info' = 'info', details?: string): void {
         const now = new Date();
-        const timestamp = now.toLocaleTimeString('zh-CN', { hour12: false });
+        const timestamp = now.toLocaleTimeString(this._language === 'zh' ? 'zh-CN' : 'en-US', { hour12: false });
         this._view?.webview.postMessage({
             command: 'addTxtCmdLog',
             entry: { timestamp, type, message, details }
@@ -2113,7 +2206,30 @@ window.addEventListener('message', event => {
     private async handleGitPull(): Promise<void> { await this.executeGitOperation('pull'); }
     private async handleGitCommit(message: string): Promise<void> { await this.executeGitOperation('commit', undefined, message); }
     private async handleGitChange(): Promise<void> { await this.executeGitOperation('status'); }
-    private async handleGitBranch(branch: string): Promise<void> { await this.executeGitOperation('switch-branch', branch); }
+    private async handleGitBranch(branch: string): Promise<void> {
+        const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id) && p.isGitRepo);
+        if (selectedProjects.length === 0) {
+            vscode.window.showInformationMessage(t('backend.noGitProjects', this._language));
+            return;
+        }
+
+        const firstProject = selectedProjects[0];
+        const branchExists = await GitUtils.gitBranchExists(firstProject, branch);
+
+        if (!branchExists) {
+            this._view?.webview.postMessage({
+                command: 'showCreateBranchConfirm',
+                branch: branch,
+                projectCount: selectedProjects.length
+            });
+        } else {
+            await this.executeGitOperation('switch-branch', branch);
+        }
+    }
+
+    private async handleCreateBranch(branch: string): Promise<void> {
+        await this.executeGitOperation('create-branch', branch);
+    }
 
     private async handleGetBranchList(projectId: string): Promise<void> {
         const project = this._projects.find(p => p.id === projectId);
@@ -2154,7 +2270,7 @@ window.addEventListener('message', event => {
     private async executeGitOperation(operation: string, branch?: string, commitMessage?: string, customCommand?: string): Promise<void> {
         const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id) && p.isGitRepo);
         if (selectedProjects.length === 0) {
-            vscode.window.showInformationMessage('No Git projects selected');
+            vscode.window.showInformationMessage(t('backend.noGitProjects', this._language));
             return;
         }
 
@@ -2163,7 +2279,7 @@ window.addEventListener('message', event => {
         let successCount = 0;
         for (const project of selectedProjects) {
             this.addLog('├── ' + project.name + ' (' + (project.currentBranch || 'no branch') + ')', undefined, project.name);
-            
+
             try {
                 let result: GitOperationResult;
                 switch (operation) {
@@ -2171,6 +2287,7 @@ window.addEventListener('message', event => {
                     case 'commit': result = await GitUtils.gitCommit(project, commitMessage || ''); break;
                     case 'status': result = await GitUtils.gitStatus(project); break;
                     case 'switch-branch': result = await GitUtils.gitSwitchBranch(project, branch || ''); break;
+                    case 'create-branch': result = await GitUtils.gitCreateBranch(project, branch || ''); break;
                     case 'custom': result = await GitUtils.gitCustomCommand(project, customCommand || ''); break;
                     default: result = { success: false, message: 'Unknown operation', project };
                 }
@@ -2186,12 +2303,13 @@ window.addEventListener('message', event => {
             }
         }
 
-        this.addLog('✓ 完成 — ' + successCount + '/' + selectedProjects.length + ' 成功', successCount === selectedProjects.length ? 'success' : 'error');
+        this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
         await this.loadProjects();
         this.updateWebview();
     }
 
     private async handleRefreshProjects(): Promise<void> {
+        this._projectScanner.clearCache();
         await this.loadProjects();
         this.updateWebview();
     }
@@ -2228,7 +2346,7 @@ window.addEventListener('message', event => {
 
         const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id));
         if (selectedProjects.length === 0) {
-            vscode.window.showInformationMessage('No projects selected');
+            vscode.window.showInformationMessage(t('backend.noProjects', this._language));
             return;
         }
 
@@ -2238,12 +2356,12 @@ window.addEventListener('message', event => {
         let successCount = 0;
         for (const project of selectedProjects) {
             this.addLog('├── ' + project.name, undefined, project.name);
-            
+
             const commands = command.content.split('\n').filter(c => c.trim());
             for (const cmd of commands) {
                 const resolvedCmd = this.resolveCommandVariables(cmd);
                 this.addLog('│   $ ' + resolvedCmd, 'info', project.name);
-                
+
                 try {
                     const result = await this.executeShellCommand(project.path, resolvedCmd);
                     if (result.success) {
@@ -2260,7 +2378,7 @@ window.addEventListener('message', event => {
             }
         }
 
-        this.addLog('✓ 完成 — ' + successCount + '/' + selectedProjects.length + ' 成功', successCount === selectedProjects.length ? 'success' : 'error');
+        this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
     }
 
     private resolveCommandVariables(command: string): string {
@@ -2308,7 +2426,7 @@ window.addEventListener('message', event => {
                         resolve({
                             success: false,
                             output: stdout.trim(),
-                            error: `[${shellName}] 命令未找到。请将 "${shellName}" 加入系统 PATH 环境变量后重试。`
+                            error: `[${shellName}] ${t('backend.shellNotFound', this._language)} "${shellName}" ${t('backend.toPath', this._language)}`
                         });
                     } else {
                         resolve({ success: false, output: stdout.trim(), error: stderr.trim() || errMsg });
@@ -2352,7 +2470,7 @@ window.addEventListener('message', event => {
             this.saveAllConfig();
             this._view?.webview.postMessage({ command: 'jsonSuccess' });
         } catch (error) {
-            this._view?.webview.postMessage({ command: 'jsonError', error: 'JSON 格式错误: ' + error });
+            this._view?.webview.postMessage({ command: 'jsonError', error: t('backend.jsonError', this._language) + error });
         }
     }
 
@@ -2392,7 +2510,8 @@ window.addEventListener('message', event => {
                 autoRefresh: this._autoRefresh,
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
-                commandTimeout: this._commandTimeout
+                commandTimeout: this._commandTimeout,
+                language: this._language
             },
             customCommands: this._customCommands,
             envVariables: this._envVariables
@@ -2407,8 +2526,8 @@ window.addEventListener('message', event => {
 
     private addLog(message: string, type: 'success' | 'error' | 'info' = 'info', projectName?: string, shellType?: string): void {
         const now = new Date();
-        const timestamp = now.toLocaleTimeString('zh-CN', { hour12: false });
-        
+        const timestamp = now.toLocaleTimeString(this._language === 'zh' ? 'zh-CN' : 'en-US', { hour12: false });
+
         this._logs.push({ timestamp, type, message, projectName, shellType });
 
         if (this._logs.length > this._logRetention) {
@@ -2427,6 +2546,7 @@ window.addEventListener('message', event => {
         this._view?.webview.postMessage({ command: 'updateCommands', commands: this._customCommands });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
         this._view?.webview.postMessage({ command: 'updatePythonTxtCommands', commands: this._pythonTxtCommands });
+        this._view?.webview.postMessage({ command: 'setLanguage', language: this._language });
         this._view?.webview.postMessage({
             command: 'updateSettings',
             settings: {
@@ -2435,7 +2555,8 @@ window.addEventListener('message', event => {
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
                 defaultShell: this._currentShell,
-                commandTimeout: this._commandTimeout
+                commandTimeout: this._commandTimeout,
+                language: this._language
             }
         });
     }

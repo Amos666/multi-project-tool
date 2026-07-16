@@ -134,15 +134,25 @@ export class ProjectScanner {
         const gitInfo: Partial<Project> = {};
 
         try {
-            const branchResult = await this.executeGitCommand(repoPath, 'branch --show-current');
-            if (branchResult.success) {
+            // Run all git commands in parallel for speed
+            const [branchResult, remoteResult, statusResult] = await Promise.all([
+                this.executeGitCommand(repoPath, 'branch --show-current'),
+                this.executeGitCommand(repoPath, 'remote -v'),
+                this.executeGitCommand(repoPath, 'status --porcelain')
+            ]);
+
+            if (branchResult.success && branchResult.output.trim()) {
                 gitInfo.currentBranch = branchResult.output.trim();
+            } else {
+                // Fallback: try rev-parse --abbrev-ref HEAD
+                const fallbackResult = await this.executeGitCommand(repoPath, 'rev-parse --abbrev-ref HEAD');
+                if (fallbackResult.success && fallbackResult.output.trim()) {
+                    gitInfo.currentBranch = fallbackResult.output.trim();
+                }
             }
 
-            const remoteResult = await this.executeGitCommand(repoPath, 'remote -v');
             gitInfo.hasRemote = remoteResult.success && remoteResult.output.trim().length > 0;
 
-            const statusResult = await this.executeGitCommand(repoPath, 'status --porcelain');
             if (statusResult.success) {
                 const lines = statusResult.output.split('\n').filter(line => line.trim().length > 0);
                 gitInfo.changeCount = lines.length;

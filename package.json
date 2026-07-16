@@ -2,9 +2,10 @@
   "name": "multi-project-tool",
   "displayName": "Multi-Project Tool",
   "description": "A VSCode extension for managing multiple projects with unified Git operations and configuration management",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "publisher": "default",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.120.0"
   },
   "categories": [
     "Other"
@@ -21,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "@types/vscode": "^1.125.0",
+    "@types/vscode": "^1.120.0",
     "@vscode/test-electron": "^2.3.8",
     "rimraf": "^5.0.5",
     "typescript": "^5.9.3"
