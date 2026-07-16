@@ -2287,7 +2287,18 @@ window.addEventListener('message', event => {
                     case 'commit': result = await GitUtils.gitCommit(project, commitMessage || ''); break;
                     case 'status': result = await GitUtils.gitStatus(project); break;
                     case 'switch-branch': result = await GitUtils.gitSwitchBranch(project, branch || ''); break;
-                    case 'create-branch': result = await GitUtils.gitCreateBranch(project, branch || ''); break;
+                    case 'create-branch': 
+                        if (!branch) {
+                            result = { success: false, message: 'Branch name is required', project };
+                        } else {
+                            const exists = await GitUtils.gitBranchExists(project, branch);
+                            if (exists) {
+                                result = await GitUtils.gitSwitchBranch(project, branch);
+                            } else {
+                                result = await GitUtils.gitCreateBranch(project, branch);
+                            }
+                        }
+                        break;
                     case 'custom': result = await GitUtils.gitCustomCommand(project, customCommand || ''); break;
                     default: result = { success: false, message: 'Unknown operation', project };
                 }
