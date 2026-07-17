@@ -2407,32 +2407,56 @@ window.addEventListener('message', event => {
         const shellLabel = this.getShellLabel(this._currentShell);
         this.addLog('▶ [' + shellLabel + '] ' + command.alias + ' — ' + selectedProjects.length + ' projects');
 
+        // 将多行命令合并为单个 shell 命令，共享上下文变量
+        const commandLines = command.content.split('\n').filter(c => c.trim());
+        const mergedCommand = this.mergeCommands(commandLines);
+
         let successCount = 0;
         for (const project of selectedProjects) {
             this.addLog('├── ' + project.name, undefined, project.name);
 
-            const commands = command.content.split('\n').filter(c => c.trim());
-            for (const cmd of commands) {
+            // 显示执行的命令
+            for (const cmd of commandLines) {
                 const resolvedCmd = this.resolveCommandVariables(cmd);
                 this.addLog('│   $ ' + resolvedCmd, 'info', project.name);
+            }
 
-                try {
-                    const result = await this.executeShellCommand(project.path, resolvedCmd);
-                    if (result.success) {
-                        successCount++;
-                        this.addLog('│   ✓ ' + (result.output || 'Completed'), 'success', project.name);
-                    } else {
-                        this.addLog('│   ✗ ' + (result.error || result.output), 'error', project.name);
-                        break;
-                    }
-                } catch (error) {
-                    this.addLog('│   ✗ Error: ' + error, 'error', project.name);
-                    break;
+            try {
+                const resolvedMerged = this.resolveCommandVariables(mergedCommand);
+                const result = await this.executeShellCommand(project.path, resolvedMerged);
+                if (result.success) {
+                    successCount++;
+                    this.addLog('│   ✓ ' + (result.output || 'Completed'), 'success', project.name);
+                } else {
+                    this.addLog('│   ✗ ' + (result.error || result.output), 'error', project.name);
                 }
+            } catch (error) {
+                this.addLog('│   ✗ Error: ' + error, 'error', project.name);
             }
         }
 
         this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
+    }
+
+    private mergeCommands(commands: string[]): string {
+        if (commands.length === 0) return '';
+        if (commands.length === 1) return commands[0];
+
+        // 根据不同 shell 使用不同的命令连接符
+        switch (this._currentShell) {
+            case 'git-bash':
+            case 'wsl':
+                // bash 使用分号连接命令
+                return commands.join('; ');
+            case 'cmd':
+                // cmd 使用 & 连接命令
+                return commands.join(' & ');
+            case 'powershell':
+                // PowerShell 使用分号连接命令
+                return commands.join('; ');
+            default:
+                return commands.join('; ');
+        }
     }
 
     private resolveCommandVariables(command: string): string {
