@@ -3,12 +3,27 @@
   "displayName": "Multi-Project Tool",
   "description": "A VSCode extension for managing multiple projects with unified Git operations and configuration management",
   "version": "1.0.0",
-  "publisher": "default",
+  "publisher": "ghema",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghema/multi-project-tool.git"
+  },
+  "keywords": [
+    "multi-project",
+    "git",
+    "project management",
+    "batch operations",
+    "custom commands"
+  ],
   "engines": {
     "vscode": "^1.120.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "SCM Providers",
+    "Snippets"
   ],
   "activationEvents": [
     "onView:multi-project-tool.main-view"
