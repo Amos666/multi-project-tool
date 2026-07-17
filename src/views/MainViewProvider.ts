@@ -2407,26 +2407,24 @@ window.addEventListener('message', event => {
         const shellLabel = this.getShellLabel(this._currentShell);
         this.addLog('▶ [' + shellLabel + '] ' + command.alias + ' — ' + selectedProjects.length + ' projects');
 
-        // 将多行命令合并为单个 shell 命令，共享上下文变量
         const commandLines = command.content.split('\n').filter(c => c.trim());
-        const mergedCommand = this.mergeCommands(commandLines);
 
         let successCount = 0;
         for (const project of selectedProjects) {
             this.addLog('├── ' + project.name, undefined, project.name);
 
-            // 显示执行的命令
-            for (const cmd of commandLines) {
-                const resolvedCmd = this.resolveCommandVariables(cmd);
-                this.addLog('│   $ ' + resolvedCmd, 'info', project.name);
-            }
-
             try {
-                const resolvedMerged = this.resolveCommandVariables(mergedCommand);
-                const result = await this.executeShellCommand(project.path, resolvedMerged);
+                const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
+                // 为每条命令注入追踪：输出 "$ command => executed result: output"
+                const tracedCommand = this.injectCommandTracing(resolvedLines);
+                const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
+                    if (line.trim()) {
+                        this.addLog('│   ' + line, 'info', project.name);
+                    }
+                });
                 if (result.success) {
                     successCount++;
-                    this.addLog('│   ✓ ' + (result.output || 'Completed'), 'success', project.name);
+                    this.addLog('│   ✓ Completed', 'success', project.name);
                 } else {
                     this.addLog('│   ✗ ' + (result.error || result.output), 'error', project.name);
                 }
@@ -2438,25 +2436,58 @@ window.addEventListener('message', event => {
         this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
     }
 
+    private injectCommandTracing(lines: string[]): string {
+        // 为每条命令生成 "$ command => executed result: output" 格式的追踪输出
+        // 使用临时文件捕获每条命令的输出，确保变量在同一 shell 上下文中共享
+        const shell = this._currentShell;
+        const tracedLines: string[] = [];
+        const os = require('os');
+        const path = require('path');
+        const resultFile = path.join(os.tmpdir(), `mpt_result_${Date.now()}.txt`);
+        const resultFileCmd = `%TEMP%\\mpt_result_${Date.now()}.txt`;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('#')) {
+                tracedLines.push(line);
+                continue;
+            }
+
+            if (shell === 'git-bash' || shell === 'wsl') {
+                // bash: printf 不换行输出命令前缀，命令输出重定向到临时文件，再 cat 出来
+                tracedLines.push(`printf '$ ${line} => executed result: '`);
+                tracedLines.push(`${line} > "${resultFile}" 2>&1`);
+                tracedLines.push(`cat "${resultFile}"`);
+                tracedLines.push(`echo`);
+                tracedLines.push(`rm -f "${resultFile}"`);
+            } else if (shell === 'powershell') {
+                tracedLines.push(`Write-Host -NoNewline '$ ${line} => executed result: '`);
+                tracedLines.push(`${line} > '${resultFile}' 2>&1`);
+                tracedLines.push(`Get-Content '${resultFile}'`);
+                tracedLines.push(`Write-Host`);
+                tracedLines.push(`Remove-Item '${resultFile}' -ErrorAction SilentlyContinue`);
+            } else if (shell === 'cmd') {
+                // cmd: <nul set /p= 输出不换行的前缀
+                tracedLines.push(`<nul set /p=$ ${line} => executed result: `);
+                tracedLines.push(`${line} > "${resultFileCmd}" 2>&1`);
+                tracedLines.push(`type "${resultFileCmd}"`);
+                tracedLines.push(`echo.`);
+                tracedLines.push(`del "${resultFileCmd}" 2>nul`);
+            } else {
+                tracedLines.push(line);
+            }
+        }
+        return tracedLines.join('\n');
+    }
+
     private mergeCommands(commands: string[]): string {
         if (commands.length === 0) return '';
         if (commands.length === 1) return commands[0];
 
-        // 根据不同 shell 使用不同的命令连接符
-        switch (this._currentShell) {
-            case 'git-bash':
-            case 'wsl':
-                // bash 使用分号连接命令
-                return commands.join('; ');
-            case 'cmd':
-                // cmd 使用 & 连接命令
-                return commands.join(' & ');
-            case 'powershell':
-                // PowerShell 使用分号连接命令
-                return commands.join('; ');
-            default:
-                return commands.join('; ');
-        }
+        // 将命令按换行符连接，作为完整脚本执行
+        // 这样注释行和变量都可以正常工作
+        return commands.join('\n');
     }
 
     private resolveCommandVariables(command: string): string {
@@ -2467,51 +2498,256 @@ window.addEventListener('message', event => {
         return result;
     }
 
-    private async executeShellCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
+    private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void): Promise<{ success: boolean; output: string; error?: string }> {
         return new Promise((resolve) => {
             const timeout = this._commandTimeout * 1000;
             let shell = this._currentShell;
-            let shellCmd = '';
+            let shellArgs: string[] = [];
+            let useShell = false;
+
+            // 将多行命令写到临时文件，然后让 shell 读取执行
+            // 这样可以避免复杂的引号转义问题，且完全支持多行脚本
+            const fs = require('fs');
+            const os = require('os');
+            const path = require('path');
+            const tmpFile = path.join(os.tmpdir(), `mpt_cmd_${Date.now()}_${Math.random().toString(36).slice(2)}.sh`);
+            const tmpCmdFile = process.platform === 'win32'
+                ? path.join(os.tmpdir(), `mpt_cmd_${Date.now()}_${Math.random().toString(36).slice(2)}.cmd`)
+                : tmpFile;
+
+            try {
+                if (shell === 'git-bash' || shell === 'wsl') {
+                    fs.writeFileSync(tmpFile, command, 'utf8');
+                } else if (shell === 'cmd') {
+                    // cmd 不支持多行，将换行转为 & 连接
+                    const cmdContent = command.split('\n').filter(l => l.trim()).join(' & ');
+                    fs.writeFileSync(tmpCmdFile, `@echo off\r\n${cmdContent}\r\n`, 'utf8');
+                } else if (shell === 'powershell') {
+                    fs.writeFileSync(tmpFile, command, 'utf8');
+                }
+            } catch (e) {
+                // 写文件失败，回退到旧方式
+                if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+                if (fs.existsSync(tmpCmdFile)) fs.unlinkSync(tmpCmdFile);
+                return this.executeShellCommandLegacy(cwd, command, onOutput, shell).then(resolve);
+            }
 
             switch (shell) {
                 case 'git-bash':
-                    shellCmd = 'bash -c "' + command.replace(/"/g, '\\"') + '"';
+                    shellArgs = [tmpFile];
+                    useShell = false;
                     break;
                 case 'cmd':
-                    shellCmd = 'cmd /c "' + command.replace(/"/g, '\\"') + '"';
+                    shellArgs = ['/c', tmpCmdFile];
+                    useShell = false;
                     break;
                 case 'powershell':
-                    shellCmd = 'powershell -Command "' + command.replace(/"/g, '\\"') + '"';
+                    shellArgs = ['-ExecutionPolicy', 'Bypass', '-File', tmpFile];
+                    useShell = false;
                     break;
                 case 'wsl':
-                    shellCmd = 'wsl -e bash -c "' + command.replace(/"/g, '\\"') + '"';
+                    shellArgs = ['-e', 'bash', tmpFile];
+                    useShell = false;
                     break;
             }
 
             const cp = require('child_process');
 
-            cp.exec(shellCmd, {
+            let stdoutBuf = '';
+            let stderrBuf = '';
+            const collectedStdout: string[] = [];
+            const collectedStderr: string[] = [];
+
+            // 将 shell 标识映射为实际可执行文件名
+            let commandName: string;
+            switch (shell) {
+                case 'git-bash':
+                    commandName = 'bash';  // PATH 中是 bash 或 bash.exe
+                    break;
+                case 'cmd':
+                    commandName = process.env.ComSpec || 'cmd.exe';
+                    break;
+                case 'powershell':
+                    commandName = 'powershell.exe';
+                    break;
+                case 'wsl':
+                    commandName = 'wsl.exe';
+                    break;
+                default:
+                    commandName = shell;
+            }
+            let commandArgs = shellArgs;
+
+            const child = cp.spawn(commandName, commandArgs, {
                 cwd,
-                timeout,
                 env: { ...process.env, ...this.getEnvVariables() },
                 encoding: 'utf8',
-                maxBuffer: 1024 * 1024 * 10
-            }, (error: Error | null, stdout: string, stderr: string) => {
-                if (error) {
-                    const errMsg = error.message;
-                    if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
-                        const shellName = shell === 'git-bash' ? 'bash.exe' : shell;
-                        resolve({
-                            success: false,
-                            output: stdout.trim(),
-                            error: `[${shellName}] ${t('backend.shellNotFound', this._language)} "${shellName}" ${t('backend.toPath', this._language)}`
-                        });
-                    } else {
-                        resolve({ success: false, output: stdout.trim(), error: stderr.trim() || errMsg });
+                shell: useShell
+            });
+
+            // 设置超时
+            const timer = setTimeout(() => {
+                try { child.kill(); } catch (e) { /* ignore */ }
+            }, timeout);
+
+            if (child.stdout) {
+                child.stdout.setEncoding('utf8');
+                child.stdout.on('data', (data: string) => {
+                    stdoutBuf += data;
+                    collectedStdout.push(data);
+                    const lines = stdoutBuf.split(/\r?\n/);
+                    stdoutBuf = lines.pop() || '';
+                    for (const line of lines) {
+                        if (onOutput) onOutput(line);
                     }
+                });
+            }
+
+            if (child.stderr) {
+                child.stderr.setEncoding('utf8');
+                child.stderr.on('data', (data: string) => {
+                    stderrBuf += data;
+                    collectedStderr.push(data);
+                    const lines = stderrBuf.split(/\r?\n/);
+                    stderrBuf = lines.pop() || '';
+                    for (const line of lines) {
+                        if (onOutput) onOutput(line);
+                    }
+                });
+            }
+
+            child.on('close', (code: number | null) => {
+                clearTimeout(timer);
+                // 处理剩余的缓冲
+                if (stdoutBuf.trim() && onOutput) onOutput(stdoutBuf.trim());
+                if (stderrBuf.trim() && onOutput) onOutput(stderrBuf.trim());
+
+                // 清理临时文件
+                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
+                try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
+
+                const allStdout = collectedStdout.join('').trim();
+                const allStderr = collectedStderr.join('').trim();
+
+                if (code !== 0 && code !== null) {
+                    resolve({
+                        success: false,
+                        output: allStdout,
+                        error: allStderr || `Exit code: ${code}`
+                    });
                 } else {
-                    resolve({ success: true, output: stdout.trim() });
+                    resolve({
+                        success: true,
+                        output: allStdout
+                    });
                 }
+            });
+
+            child.on('error', (error: Error) => {
+                clearTimeout(timer);
+                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
+                try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
+
+                const errMsg = error.message;
+                if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
+                    const shellName = shell === 'git-bash' ? 'bash.exe' : shell;
+                    resolve({
+                        success: false,
+                        output: collectedStdout.join('').trim(),
+                        error: `[${shellName}] ${t('backend.shellNotFound', this._language)} "${shellName}" ${t('backend.toPath', this._language)}`
+                    });
+                } else {
+                    resolve({
+                        success: false,
+                        output: collectedStdout.join('').trim(),
+                        error: collectedStderr.join('').trim() || errMsg
+                    });
+                }
+            });
+        });
+    }
+
+    private async executeShellCommandLegacy(cwd: string, command: string, onOutput: ((line: string) => void) | undefined, shell: string): Promise<{ success: boolean; output: string; error?: string }> {
+        return new Promise((resolve) => {
+            const timeout = this._commandTimeout * 1000;
+            let shellCmd = '';
+
+            switch (shell) {
+                case 'git-bash':
+                    shellCmd = 'bash -c \'' + command.replace(/'/g, "'\"'\"'") + '\'';
+                    break;
+                case 'cmd':
+                    shellCmd = 'cmd /c "' + command.replace(/\n/g, ' & ').replace(/"/g, '""') + '"';
+                    break;
+                case 'powershell':
+                    shellCmd = 'powershell -Command "' + command.replace(/"/g, '""') + '"';
+                    break;
+                case 'wsl':
+                    shellCmd = 'wsl -e bash -c \'' + command.replace(/'/g, "'\"'\"'") + '\'';
+                    break;
+            }
+
+            const cp = require('child_process');
+            let stdoutBuf = '';
+            let stderrBuf = '';
+            const collectedStdout: string[] = [];
+            const collectedStderr: string[] = [];
+
+            const child = cp.spawn(shellCmd, [], {
+                cwd,
+                env: { ...process.env, ...this.getEnvVariables() },
+                encoding: 'utf8',
+                shell: true
+            });
+
+            const timer = setTimeout(() => {
+                try { child.kill(); } catch (e) { /* ignore */ }
+            }, timeout);
+
+            if (child.stdout) {
+                child.stdout.setEncoding('utf8');
+                child.stdout.on('data', (data: string) => {
+                    stdoutBuf += data;
+                    collectedStdout.push(data);
+                    const lines = stdoutBuf.split(/\r?\n/);
+                    stdoutBuf = lines.pop() || '';
+                    for (const line of lines) {
+                        if (onOutput) onOutput(line);
+                    }
+                });
+            }
+
+            if (child.stderr) {
+                child.stderr.setEncoding('utf8');
+                child.stderr.on('data', (data: string) => {
+                    stderrBuf += data;
+                    collectedStderr.push(data);
+                    const lines = stderrBuf.split(/\r?\n/);
+                    stderrBuf = lines.pop() || '';
+                    for (const line of lines) {
+                        if (onOutput) onOutput(line);
+                    }
+                });
+            }
+
+            child.on('close', (code: number | null) => {
+                clearTimeout(timer);
+                if (stdoutBuf.trim() && onOutput) onOutput(stdoutBuf.trim());
+                if (stderrBuf.trim() && onOutput) onOutput(stderrBuf.trim());
+
+                const allStdout = collectedStdout.join('').trim();
+                const allStderr = collectedStderr.join('').trim();
+
+                if (code !== 0 && code !== null) {
+                    resolve({ success: false, output: allStdout, error: allStderr || `Exit code: ${code}` });
+                } else {
+                    resolve({ success: true, output: allStdout });
+                }
+            });
+
+            child.on('error', (error: Error) => {
+                clearTimeout(timer);
+                resolve({ success: false, output: collectedStdout.join('').trim(), error: error.message });
             });
         });
     }
