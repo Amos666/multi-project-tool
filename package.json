@@ -3,7 +3,7 @@
   "displayName": "Multi-Project Tool",
   "description": "A VSCode extension for managing multiple projects with unified Git operations and configuration management",
   "version": "1.0.0",
-  "publisher": "ghema",
+  "publisher": "ghemail",
   "license": "MIT",
   "icon": "resources/icon.png",
   "repository": {
