@@ -163,62 +163,58 @@ function strokeRoundedRect(x0, y0, x1, y1, radius, w, r, g, b, a = 255) {
 }
 
 // ===== Draw the icon =====
+// 与 icon.svg 保持一致的几何设计：主分支主干 + 分叉臂 + 3 节点 + 底部堆叠文件线
 // Brand colors
 const C_PRIMARY = [125, 207, 255];   // #7dcfff light cyan
-const C_RED = [247, 118, 142];       // #f7768e
-const C_YELLOW = [224, 175, 104];    // #e0af68
 const C_GREEN = [158, 206, 106];     // #9ece6a
 const C_TEXT = [192, 202, 245];      // #c0caf5
-const C_BRANCH = [158, 206, 106];    // green for branch nodes
+const C_MUTED = [134, 143, 178];     // 文件线弱化色
 
-// Terminal window geometry
-const WIN_X0 = 14, WIN_Y0 = 20, WIN_X1 = 114, WIN_Y1 = 108;
-const WIN_RADIUS = 8;
-const TITLE_H = 12;
-const STROKE = 3;
+// SVG viewBox 24x24 映射到 128x128，留 8px 边距 → 实际绘制区 [16,112] x [16,112]
+// 缩放系数: 128/24 ≈ 5.333
+function sx(v) { return 16 + v * 5.333; }  // 不使用，改用更宽松的布局
+const S = 128 / 24;
+const OX = 0, OY = 0;  // 直接缩放，因为 viewBox 没有留白
+function X(v) { return Math.round(OX + v * S); }
+function Y(v) { return Math.round(OY + v * S); }
 
-// 1. Terminal window border (rounded rect)
-strokeRoundedRect(WIN_X0, WIN_Y0, WIN_X1, WIN_Y1, WIN_RADIUS, STROKE, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
+// 主分支主干：x=6, y=4 → y=14.5
+const STROKE_W = Math.max(3, Math.round(1.6 * S * 0.85));  // 适配 RGBA 像素，略细
+drawLine(X(6), Y(4), X(6), Y(14.5), STROKE_W, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
 
-// 2. Title bar separator line
-fillRect(WIN_X0 + WIN_RADIUS, WIN_Y0 + TITLE_H, WIN_X1 - WIN_RADIUS, WIN_Y0 + TITLE_H + 1, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2], 180);
+// 分叉臂：从 (6,14.5) 曲线到 (12,10.5)
+// 用多段直线近似贝塞尔曲线
+const segs = 16;
+let prevX = X(6), prevY = Y(14.5);
+for (let i = 1; i <= segs; i++) {
+    const t = i / segs;
+    // 近似 SVG 路径 "c3 0 3-4 6-4" 的贝塞尔
+    const cx = 6 + 3 * t;
+    const cy = 14.5 + (-4) * t * t;  // 简化的曲线
+    const nx = X(cx), ny = Y(cy);
+    drawLine(prevX, prevY, nx, ny, STROKE_W, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
+    prevX = nx; prevY = ny;
+}
 
-// 3. Title bar dots (mac-style traffic lights)
-fillCircle(WIN_X0 + 12, WIN_Y0 + 6, 2.5, C_RED[0], C_RED[1], C_RED[2]);
-fillCircle(WIN_X0 + 22, WIN_Y0 + 6, 2.5, C_YELLOW[0], C_YELLOW[1], C_YELLOW[2]);
-fillCircle(WIN_X0 + 32, WIN_Y0 + 6, 2.5, C_GREEN[0], C_GREEN[1], C_GREEN[2]);
+// 节点半径（SVG r=1.6，像素化需稍大避免锯齿）
+const NODE_R = Math.max(4, Math.round(1.6 * S * 0.95));
 
-// 4. Terminal text lines (3 lines, like code)
-const TEXT_X = WIN_X0 + 10;
-const TEXT_W = 38;
-fillRect(TEXT_X, WIN_Y0 + 24, TEXT_X + TEXT_W, WIN_Y0 + 26, C_TEXT[0], C_TEXT[1], C_TEXT[2]);
-fillRect(TEXT_X, WIN_Y0 + 32, TEXT_X + 28, WIN_Y0 + 34, C_TEXT[0], C_TEXT[1], C_TEXT[2], 200);
-fillRect(TEXT_X, WIN_Y0 + 40, TEXT_X + 34, WIN_Y0 + 42, C_TEXT[0], C_TEXT[1], C_TEXT[2], 180);
+// 主分支顶端节点 (6, 5) - 绿色
+fillCircle(X(6), Y(5), NODE_R, C_GREEN[0], C_GREEN[1], C_GREEN[2]);
 
-// 5. Git branch icon (right side of terminal, overlapping)
-// A vertical line with a node, and a branch line going up-right
-const BRANCH_CX = 88;
-const BRANCH_CY = 78;
+// 分叉臂顶端节点 (12, 10.5) - 绿色
+fillCircle(X(12), Y(10.5), NODE_R, C_GREEN[0], C_GREEN[1], C_GREEN[2]);
 
-// Main vertical branch line (bottom node to top)
-drawLine(BRANCH_CX, BRANCH_CY + 12, BRANCH_CX, BRANCH_CY - 14, 3, C_BRANCH[0], C_BRANCH[1], C_BRANCH[2]);
+// 主分支底端节点 (6, 19.5) - 主色
+fillCircle(X(6), Y(19.5), NODE_R, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
 
-// Branch arm (curve up-right) - approximate with line segments
-const armEndX = BRANCH_CX + 16;
-const armEndY = BRANCH_CY - 14;
-drawLine(BRANCH_CX, BRANCH_CY, armEndX, armEndY, 3, C_BRANCH[0], C_BRANCH[1], C_BRANCH[2]);
-
-// Bottom node (commit)
-fillCircle(BRANCH_CX, BRANCH_CY + 14, 5, C_BRANCH[0], C_BRANCH[1], C_BRANCH[2]);
-strokeCircle(BRANCH_CX, BRANCH_CY + 14, 5, 2, 26, 27, 38); // dark inner
-
-// Top node (main branch tip)
-fillCircle(BRANCH_CX, BRANCH_CY - 14, 5, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
-strokeCircle(BRANCH_CX, BRANCH_CY - 14, 5, 2, 26, 27, 38);
-
-// Arm tip node (branch tip)
-fillCircle(armEndX, armEndY, 5, C_PRIMARY[0], C_PRIMARY[1], C_PRIMARY[2]);
-strokeCircle(armEndX, armEndY, 5, 2, 26, 27, 38);
+// 底部堆叠文件线（多项目概念）
+// 三条水平线，透明度递减
+const FILE_X0 = X(11.5), FILE_X1 = X(20.5);
+const FILE_W = STROKE_W - 1;
+fillRect(FILE_X0, Y(16.5) - Math.floor(FILE_W/2), FILE_X1, Y(16.5) + Math.floor(FILE_W/2), C_TEXT[0], C_TEXT[1], C_TEXT[2], 255);
+fillRect(FILE_X0, Y(19.5) - Math.floor(FILE_W/2), FILE_X1, Y(19.5) + Math.floor(FILE_W/2), C_TEXT[0], C_TEXT[1], C_TEXT[2], 255);
+fillRect(FILE_X0, Y(22.5) - Math.floor(FILE_W/2), FILE_X1, Y(22.5) + Math.floor(FILE_W/2), C_TEXT[0], C_TEXT[1], C_TEXT[2], 140);
 
 // ===== Encode PNG =====
 function crc32(buf) {

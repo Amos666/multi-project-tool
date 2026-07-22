@@ -18,11 +18,14 @@ export const translations: Record<Language, Record<string, string>> = {
         // Project list
         'project.title': 'Projects',
         'project.selectAll': 'Select All',
+        'project.selected': 'Selected',
         'project.loading': 'Loading...',
         'project.noProjects': 'No projects found',
         'project.noBranch': 'No branch',
         'project.refresh': 'Refresh',
         'project.selectAtLeastOne': 'Please select at least one project',
+        'project.collapse': 'Collapse project list',
+        'project.expand': 'Expand project list',
 
         // Branch
         'branch.selectPlaceholder': 'Select branch...',
@@ -133,11 +136,14 @@ export const translations: Record<Language, Record<string, string>> = {
         // Project list
         'project.title': '项目',
         'project.selectAll': '全选',
+        'project.selected': '已选择',
         'project.loading': 'Loading...',
         'project.noProjects': 'No projects found',
         'project.noBranch': 'No branch',
         'project.refresh': '刷新',
         'project.selectAtLeastOne': '请至少选择一个项目',
+        'project.collapse': '收起项目列表',
+        'project.expand': '展开项目列表',
 
         // Branch
         'branch.selectPlaceholder': '选择分支...',

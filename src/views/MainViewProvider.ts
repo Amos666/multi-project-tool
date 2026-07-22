@@ -197,30 +197,46 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private getCss(): string {
         return `
 :root {
-    --brand-background: #1a1b26;
-    --brand-surface: #24283b;
-    --brand-surface-raised: #2f3347;
-    --brand-surface-hover: #363b54;
-    --brand-border: #3b4261;
-    --brand-border-subtle: #2f3347;
+    /* 与 VS Code 主题色板协调的深色基调（Tokyo Night 调优版） */
+    --brand-background: #16161e;
+    --brand-surface: #1a1b26;
+    --brand-surface-raised: #24283b;
+    --brand-surface-hover: #2f3347;
+    --brand-border: #2f3347;
+    --brand-border-subtle: #1f2233;
     --brand-text: #c0caf5;
     --brand-text-secondary: #a9b1d6;
     --brand-text-muted: #565f89;
-    --brand-text-inverse: #1a1b26;
+    --brand-text-inverse: #16161e;
     --brand-primary: #7dcfff;
     --brand-primary-hover: #89dceb;
-    --brand-primary-subtle: rgba(125, 207, 255, 0.1);
+    --brand-primary-subtle: rgba(125, 207, 255, 0.08);
     --state-success: #9ece6a;
     --state-warning: #e0af68;
     --state-error: #f7768e;
     --state-info: #7aa2f7;
-    --radius-sm: 3px;
+    /* 圆角系统：遵循 VS Code 的克制风格 */
+    --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
+    /* 间距系统：统一 4px 基准 */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 12px;
+    --space-lg: 16px;
+    /* 阴影：轻量、低对比，符合 VS Code 风格 */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+    /* 字体栈：优先 VS Code 内置字体，回退到系统字体 */
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Segoe WPC', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+    --font-mono: 'Cascadia Code', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1.4;
     margin: 0;
     padding: 0;
     background-color: var(--brand-background);
@@ -229,12 +245,20 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
+
+/* 滚动条：模拟 VS Code 原生细窄滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--brand-surface-hover); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--brand-border); }
 
 .tab-bar {
     display: flex;
     background-color: var(--brand-surface);
-    border-bottom: 1px solid var(--brand-border);
+    border-bottom: 1px solid var(--brand-border-subtle);
     flex-shrink: 0;
 }
 
@@ -247,11 +271,23 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 5px;
     font-size: 11px;
+    font-weight: 500;
     color: var(--brand-text-muted);
-    transition: all 0.2s ease;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    user-select: none;
 }
+
+.tab-icon, .git-icon, .refresh-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.git-icon { width: 13px; height: 13px; }
+
+.tab:hover { color: var(--brand-text-secondary); background-color: rgba(255, 255, 255, 0.02); }
 
 .tab.active {
     color: var(--brand-primary);
@@ -277,30 +313,32 @@ body {
 
 .git-actions {
     display: flex;
-    gap: 2px;
-    padding: 6px 8px;
+    gap: 4px;
+    padding: 8px;
     background-color: var(--brand-surface);
-    border-bottom: 1px solid var(--brand-border);
+    border-bottom: 1px solid var(--brand-border-subtle);
     flex-wrap: wrap;
 }
 
 .git-btn {
     flex: 1;
     min-width: 50px;
-    padding: 6px 2px;
+    padding: 7px 4px;
     background-color: var(--brand-surface-raised);
-    border: none;
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
     color: var(--brand-text);
     font-size: 10px;
+    font-weight: 500;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
     position: relative;
     overflow: hidden;
+    font-family: var(--font-ui);
 }
 
 .git-btn::before {
@@ -310,25 +348,29 @@ body {
     top: 0;
     bottom: 0;
     width: 2px;
+    opacity: 0.85;
 }
 
-.git-btn.pull::before { background-color: #7aa2f7; }
-.git-btn.commit::before { background-color: #9ece6a; }
-.git-btn.change::before { background-color: #e0af68; }
+.git-btn.pull::before { background-color: var(--state-info); }
+.git-btn.commit::before { background-color: var(--state-success); }
+.git-btn.change::before { background-color: var(--state-warning); }
 .git-btn.branch::before { background-color: var(--brand-primary); }
-.git-btn.push::before { background-color: #89dceb; }
+.git-btn.push::before { background-color: var(--brand-primary-hover); }
 
-.git-btn:hover:not(:disabled) { filter: brightness(1.1); }
-.git-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.git-btn.executing { background-color: var(--brand-primary); color: var(--brand-text-inverse); }
+.git-btn:hover:not(:disabled) { background-color: var(--brand-surface-hover); border-color: var(--brand-border); }
+.git-btn:active:not(:disabled) { transform: scale(0.97); }
+.git-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.git-btn.executing { background-color: var(--brand-primary); color: var(--brand-text-inverse); border-color: var(--brand-primary); }
 
 .git-btn .badge {
     background-color: var(--brand-primary);
     color: var(--brand-text-inverse);
     font-size: 9px;
-    padding: 1px 3px;
+    font-weight: 600;
+    padding: 1px 5px;
     border-radius: 8px;
     margin-left: 2px;
+    line-height: 1.4;
 }
 
 .git-branch-selector {
@@ -338,9 +380,12 @@ body {
     align-items: center;
     position: relative;
     background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
-    border: none;
+    transition: border-color 0.15s ease;
 }
+
+.git-branch-selector:focus-within { border-color: var(--brand-primary); }
 
 .branch-input {
     flex: 1;
@@ -348,11 +393,12 @@ body {
     border: none;
     background: transparent;
     color: var(--brand-text);
-    font-size: 10px;
+    font-size: 11px;
     outline: none;
     cursor: pointer;
     width: 100%;
     box-sizing: border-box;
+    font-family: var(--font-mono);
 }
 
 .branch-input::placeholder { color: var(--brand-text-muted); }
@@ -370,13 +416,13 @@ body {
     z-index: 100;
     max-height: 150px;
     overflow-y: auto;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    box-shadow: var(--shadow-md);
 }
 
 .branch-dropdown.show { display: block; }
 
 .dropdown-loading {
-    padding: 8px;
+    padding: 10px;
     font-size: 11px;
     color: var(--brand-text-muted);
     text-align: center;
@@ -385,116 +431,186 @@ body {
 .dropdown-content { display: flex; flex-direction: column; }
 
 .dropdown-content div {
-    padding: 6px 8px;
+    padding: 6px 10px;
     font-size: 11px;
     color: var(--brand-text);
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background-color 0.1s ease;
 }
 
-.dropdown-content div:hover { background-color: var(--brand-surface-raised); }
+.dropdown-content div:hover { background-color: var(--brand-surface-hover); }
 
 .dropdown-content div.current {
-    background-color: var(--brand-primary);
-    color: var(--brand-text-inverse);
+    background-color: var(--brand-primary-subtle);
+    color: var(--brand-primary);
+    font-weight: 600;
 }
 
 .dropdown-content div.current::before { content: '✓ '; }
 
 .custom-command-header {
     display: flex;
-    gap: 6px;
-    padding: 6px 8px;
+    gap: 8px;
+    padding: 8px;
     background-color: var(--brand-surface);
-    border-bottom: 1px solid var(--brand-border);
+    border-bottom: 1px solid var(--brand-border-subtle);
 }
 
 .shell-selector {
     flex: 1;
-    padding: 4px 6px;
+    padding: 5px 8px;
     background-color: var(--brand-surface-raised);
-    border: 1px solid var(--brand-border);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
     color: var(--brand-text);
     font-size: 11px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
 }
 
+.shell-selector:hover { border-color: var(--brand-border); }
+.shell-selector:focus { border-color: var(--brand-primary); outline: none; }
+
 .add-cmd-btn {
-    padding: 4px 10px;
+    padding: 5px 12px;
     background-color: var(--brand-primary);
-    border: none;
+    border: 1px solid var(--brand-primary);
     border-radius: var(--radius-sm);
     color: var(--brand-text-inverse);
     font-size: 11px;
+    font-weight: 600;
     cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
+.add-cmd-btn:hover { background-color: var(--brand-primary-hover); border-color: var(--brand-primary-hover); }
+.add-cmd-btn:active { transform: scale(0.96); }
+
 .command-editor {
-    padding: 8px;
+    padding: 10px;
     background-color: var(--brand-surface);
-    border-bottom: 1px solid var(--brand-border);
+    border-bottom: 1px solid var(--brand-border-subtle);
     display: none;
+    animation: slideDown 0.15s ease;
 }
+
+@keyframes slideDown { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 
 .command-editor.show { display: block; }
 
-.form-group { margin-bottom: 8px; }
+.form-group { margin-bottom: 10px; }
 .form-group label {
     display: block;
-    font-size: 10px;
-    color: var(--brand-text-muted);
-    margin-bottom: 3px;
+    font-size: 11px;
+    color: var(--brand-text-secondary);
+    margin-bottom: 4px;
+    font-weight: 500;
 }
 
 .form-group input, .form-group textarea {
     width: 100%;
-    padding: 4px 6px;
+    padding: 6px 8px;
     background-color: var(--brand-background);
-    border: 1px solid var(--brand-border);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
     color: var(--brand-text);
-    font-size: 11px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    font-family: var(--font-mono);
     box-sizing: border-box;
+    transition: border-color 0.15s ease;
 }
 
-.form-group textarea { height: 60px; resize: vertical; }
+.form-group input:focus, .form-group textarea:focus {
+    border-color: var(--brand-primary);
+    outline: none;
+}
 
-.btn-group { display: flex; gap: 6px; justify-content: flex-end; }
+.form-group textarea { height: 72px; resize: vertical; }
+
+.btn-group { display: flex; gap: 8px; justify-content: flex-end; }
 
 .btn {
-    padding: 4px 10px;
-    border: none;
+    padding: 6px 14px;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
+    font-family: var(--font-ui);
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
-.btn-primary { background-color: var(--brand-primary); color: var(--brand-text-inverse); }
-.btn-secondary { background-color: transparent; border: 1px solid var(--brand-border); color: var(--brand-text-muted); }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background-color: var(--brand-primary); color: var(--brand-text-inverse); border-color: var(--brand-primary); }
+.btn-primary:hover { background-color: var(--brand-primary-hover); border-color: var(--brand-primary-hover); }
+.btn-secondary { background-color: transparent; border-color: var(--brand-border); color: var(--brand-text-secondary); }
+.btn-secondary:hover { background-color: var(--brand-surface-hover); border-color: var(--brand-text-muted); }
 
 .command-list {
     flex: 0 0 120px;
     overflow-y: auto;
-    padding: 6px;
+    padding: 8px;
     background-color: var(--brand-surface);
-    border-bottom: 1px solid var(--brand-border);
+    border-bottom: 1px solid var(--brand-border-subtle);
+    min-height: 40px;
 }
+
+/* Cmd Tab 项目列表：自动填充剩余空间，由下方 log-resizer 调节边界 */
+#customProjectList {
+    flex: 1;
+    min-height: 40px;
+}
+
+/* 通用面板分隔条：拖拽调节上方面板高度 */
+.panel-resizer {
+    height: 5px;
+    background-color: var(--brand-border-subtle);
+    cursor: ns-resize;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease;
+    position: relative;
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+}
+
+.panel-resizer:hover,
+.panel-resizer.active {
+    background-color: var(--brand-primary);
+}
+
+.panel-resizer::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px;
+    height: 2px;
+    background-color: var(--brand-text-muted);
+    border-radius: 1px;
+    opacity: 0.6;
+}
+
+.panel-resizer:hover::after,
+.panel-resizer.active::after { opacity: 1; background-color: var(--brand-text-inverse); }
 
 .command-item {
     display: flex;
     align-items: center;
-    padding: 8px;
+    padding: 10px;
     background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-md);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     gap: 8px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.command-item:hover { background-color: var(--brand-surface-hover); }
+.command-item:hover { background-color: var(--brand-surface-hover); border-color: var(--brand-border); }
 
 .command-item .cmd-main {
     flex: 1;
@@ -503,8 +619,9 @@ body {
 }
 
 .command-item .alias {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
+    font-weight: 600;
     color: var(--brand-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -513,25 +630,25 @@ body {
 }
 
 .command-item .cmd-content-preview {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--brand-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    margin-top: 2px;
+    margin-top: 3px;
 }
 
 .command-item .actions {
     display: flex;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
 .cmd-action-btn {
-    width: 24px;
-    height: 24px;
-    border: 1px solid var(--brand-border);
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--brand-border-subtle);
     background-color: var(--brand-surface);
     color: var(--brand-text-muted);
     cursor: pointer;
@@ -540,7 +657,7 @@ body {
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .cmd-action-btn:hover { background-color: var(--brand-surface-hover); }
@@ -552,39 +669,46 @@ body {
 
 .settings-section {
     background-color: var(--brand-surface);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-lg);
-    padding: 12px;
-    margin-bottom: 16px;
+    padding: 14px;
+    margin-bottom: 12px;
 }
 
 .settings-section h3 {
     margin: 0 0 10px 0;
     font-size: 12px;
+    font-weight: 600;
     color: var(--brand-primary);
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 
 .settings-section .subtitle {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--brand-text-muted);
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    line-height: 1.5;
 }
 
 .json-editor {
     width: 100%;
-    height: 120px;
-    padding: 8px;
+    height: 140px;
+    padding: 10px;
     background-color: var(--brand-background);
-    border: 1px solid var(--brand-border);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-md);
     color: var(--brand-text);
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
+    line-height: 1.6;
     resize: vertical;
     box-sizing: border-box;
+    transition: border-color 0.15s ease;
 }
+
+.json-editor:focus { border-color: var(--brand-primary); outline: none; }
 
 .env-variable-list { margin-bottom: 10px; }
 
@@ -592,170 +716,230 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px;
+    padding: 6px;
     background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
-    margin-bottom: 3px;
+    margin-bottom: 4px;
 }
 
 .env-variable-item input {
     flex: 1;
-    padding: 3px 4px;
+    padding: 4px 6px;
     background-color: var(--brand-background);
-    border: 1px solid var(--brand-border);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--brand-text);
-    font-size: 10px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    transition: border-color 0.15s ease;
 }
 
+.env-variable-item input:focus { border-color: var(--brand-primary); outline: none; }
 .env-variable-item input.key { color: var(--brand-primary); }
 .env-variable-item .separator { color: var(--brand-text-muted); font-size: 11px; }
 
 .env-variable-item .delete-btn {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     border: none;
     background: transparent;
     color: var(--brand-text-muted);
     cursor: pointer;
-    font-size: 11px;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.env-variable-item .delete-btn:hover { color: var(--state-error); }
+.env-variable-item .delete-btn:hover { color: var(--state-error); background-color: rgba(247, 118, 142, 0.1); }
 
 .settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 
 .settings-row label { font-size: 11px; color: var(--brand-text-secondary); }
 
 .settings-row input[type="number"] {
-    width: 50px;
-    padding: 3px 4px;
+    width: 60px;
+    padding: 4px 6px;
     background-color: var(--brand-surface-raised);
-    border: 1px solid var(--brand-border);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
     color: var(--brand-text);
     font-size: 11px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
+    text-align: right;
 }
 
-.settings-row .unit { font-size: 10px; color: var(--brand-text-muted); margin-left: 3px; }
+.settings-row input[type="number"]:focus { border-color: var(--brand-primary); outline: none; }
+
+.settings-row .unit { font-size: 10px; color: var(--brand-text-muted); margin-left: 4px; }
 
 .toggle-switch {
     position: relative;
     width: 36px;
     height: 20px;
-    background-color: var(--brand-text-muted);
+    background-color: var(--brand-surface-hover);
+    border: 1px solid var(--brand-border);
     border-radius: 10px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.toggle-switch.active { background-color: var(--brand-primary); }
+.toggle-switch.active { background-color: var(--brand-primary); border-color: var(--brand-primary); }
 
 .toggle-switch::after {
     content: '';
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 16px;
-    height: 16px;
-    background-color: white;
+    width: 14px;
+    height: 14px;
+    background-color: var(--brand-text);
     border-radius: 50%;
-    transition: transform 0.2s;
+    transition: transform 0.2s ease, background-color 0.2s ease;
 }
 
-.toggle-switch.active::after { transform: translateX(16px); }
+.toggle-switch.active::after { transform: translateX(16px); background-color: var(--brand-text-inverse); }
 
-.project-list-container { flex: 1; overflow-y: auto; padding: 6px; }
+.project-list-container { flex: 1; overflow-y: auto; padding: 6px; transition: max-height 0.25s ease, padding 0.25s ease, overflow 0.25s ease; }
+.project-list-container.collapsed { max-height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; }
 
 .project-list-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 8px;
+    padding: 8px 10px;
     background-color: var(--brand-surface);
     border-bottom: 1px solid var(--brand-border-subtle);
     font-size: 11px;
+    font-weight: 600;
     color: var(--brand-text-secondary);
+    letter-spacing: 0.02em;
 }
 
+.project-list-header .selected-count {
+    font-size: 11px;
+    color: var(--brand-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 2px 8px;
+    background-color: var(--brand-primary-subtle);
+    border-radius: 10px;
+}
+
+.project-list-header .collapse-btn {
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--brand-text-muted);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+    line-height: 1;
+    border-radius: var(--radius-sm);
+    transition: transform 0.2s ease, color 0.15s ease, background-color 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.project-list-header .collapse-btn:hover { color: var(--brand-primary); background-color: var(--brand-surface-hover); }
+.project-list-header .collapse-btn.collapsed { transform: rotate(-90deg); }
+
 .project-list-header .refresh-btn {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border: none;
     background: transparent;
     color: var(--brand-text-muted);
     cursor: pointer;
     font-size: 12px;
+    border-radius: var(--radius-sm);
+    transition: color 0.15s ease, background-color 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.project-list-header .refresh-btn:hover { color: var(--brand-primary); }
+.project-list-header .refresh-btn:hover { color: var(--brand-primary); background-color: var(--brand-surface-hover); }
 
 .project-item {
     display: flex;
     align-items: center;
-    padding: 8px 8px;
-    margin-bottom: 1px;
+    padding: 8px 10px;
+    margin-bottom: 2px;
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
     position: relative;
     border-left: 2px solid transparent;
 }
 
-.project-item:hover { background-color: var(--brand-surface-hover); filter: brightness(1.1); }
+.project-item:hover { background-color: var(--brand-surface-hover); }
 .project-item.selected { background-color: var(--brand-primary-subtle); border-left-color: var(--brand-primary); }
 
 .project-checkbox {
-    width: 12px;
-    height: 12px;
-    margin-right: 8px;
+    width: 13px;
+    height: 13px;
+    margin-right: 10px;
     accent-color: var(--brand-primary);
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .project-info { flex: 1; min-width: 0; }
 
 .project-name {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 500;
     color: var(--brand-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.5;
 }
 
 .project-branch {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 10px;
     color: var(--brand-text-muted);
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.branch-icon {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+    opacity: 0.85;
 }
 
 .change-count {
-    font-size: 9px;
-    padding: 1px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
     border-radius: 8px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
+    min-width: 20px;
+    text-align: center;
 }
 
 .change-count.success { color: var(--state-success); background-color: rgba(158, 206, 106, 0.1); }
-.change-count.warning { color: var(--state-warning); background-color: var(--brand-primary-subtle); }
+.change-count.warning { color: var(--state-warning); background-color: rgba(224, 175, 104, 0.1); }
 .change-count.error { color: var(--state-error); background-color: rgba(247, 118, 142, 0.12); }
 
 .log-container {
     flex-shrink: 0;
     background-color: var(--brand-surface);
-    border-top: 1px solid var(--brand-border);
+    border-top: 1px solid var(--brand-border-subtle);
     height: 60px;
     min-height: 40px;
     max-height: 80%;
@@ -767,11 +951,11 @@ body {
 .log-container.resizing { transition: none; }
 
 .log-resizer {
-    height: 4px;
+    height: 5px;
     background-color: var(--brand-border-subtle);
     cursor: ns-resize;
     flex-shrink: 0;
-    transition: background-color 0.15s;
+    transition: background-color 0.15s ease;
     position: relative;
 }
 
@@ -786,79 +970,89 @@ body {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 24px;
+    width: 28px;
     height: 2px;
     background-color: var(--brand-text-muted);
     border-radius: 1px;
+    opacity: 0.6;
 }
+
+.log-resizer:hover::after,
+.log-resizer.active::after { opacity: 1; background-color: var(--brand-text-inverse); }
 
 .log-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 8px;
+    padding: 8px 10px;
     border-bottom: 1px solid var(--brand-border-subtle);
     font-size: 11px;
+    font-weight: 600;
     color: var(--brand-text-secondary);
     cursor: pointer;
     flex-shrink: 0;
+    letter-spacing: 0.02em;
+    transition: background-color 0.15s ease;
 }
 
 .log-header:hover { background-color: var(--brand-surface-hover); }
 
 .log-header .clear-btn {
     font-size: 10px;
-    padding: 2px 6px;
+    padding: 3px 8px;
     background-color: transparent;
-    border: 1px solid var(--brand-border);
+    border: 1px solid var(--brand-border-subtle);
     border-radius: var(--radius-sm);
     color: var(--brand-text-muted);
     cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    font-family: var(--font-ui);
 }
 
-.log-header .clear-btn:hover { color: var(--state-error); border-color: var(--state-error); }
+.log-header .clear-btn:hover { color: var(--state-error); border-color: var(--state-error); background-color: rgba(247, 118, 142, 0.08); }
 
 .log-content {
-    height: calc(100% - 32px);
+    height: calc(100% - 34px);
     overflow-y: auto;
-    padding: 6px 8px;
-    font-family: 'Cascadia Code', 'Consolas', monospace;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
     font-size: 10px;
+    line-height: 1.6;
 }
 
-.log-entry { margin-bottom: 3px; line-height: 1.4; }
-.log-entry .timestamp { color: var(--brand-text-muted); margin-right: 4px; }
-.log-entry .status-icon { margin-right: 3px; }
+.log-entry { margin-bottom: 4px; line-height: 1.5; }
+.log-entry .timestamp { color: var(--brand-text-muted); margin-right: 6px; }
+.log-entry .status-icon { margin-right: 4px; }
 
 .log-entry.success .status-icon, .log-entry.success .message { color: var(--state-success); }
 .log-entry.error .status-icon, .log-entry.error .message { color: var(--state-error); }
 .log-entry.info .status-icon, .log-entry.info .message { color: var(--brand-primary); }
 
-.log-entry .project-name { color: var(--brand-primary); font-size: 10px; }
-.log-entry .shell-type { color: var(--brand-text-muted); font-style: italic; margin-right: 3px; }
+.log-entry .project-name { color: var(--brand-primary); font-size: 10px; font-weight: 600; }
+.log-entry .shell-type { color: var(--brand-text-muted); font-style: italic; margin-right: 4px; }
 .log-entry .tree-line { color: var(--brand-text-muted); padding-left: 12px; }
 .log-entry .command-line { color: var(--brand-text-secondary); }
 
-.empty-state { text-align: center; padding: 16px; color: var(--brand-text-muted); font-size: 11px; }
+.empty-state { text-align: center; padding: 20px; color: var(--brand-text-muted); font-size: 11px; }
 
 .status-message {
-    font-size: 10px;
-    margin-top: 6px;
-    padding: 4px 6px;
+    font-size: 11px;
+    margin-top: 8px;
+    padding: 6px 10px;
     border-radius: var(--radius-sm);
 }
 
-.status-message.success { color: var(--state-success); background-color: rgba(158, 206, 106, 0.1); }
-.status-message.error { color: var(--state-error); background-color: rgba(247, 118, 142, 0.12); }
+.status-message.success { color: var(--state-success); background-color: rgba(158, 206, 106, 0.08); }
+.status-message.error { color: var(--state-error); background-color: rgba(247, 118, 142, 0.1); }
 
-.no-projects-message { text-align: center; padding: 16px; color: var(--brand-text-muted); font-size: 11px; }
+.no-projects-message { text-align: center; padding: 24px; color: var(--brand-text-muted); font-size: 11px; }
 
 .selection-warning {
-    padding: 6px 8px;
-    background-color: rgba(224, 175, 104, 0.1);
-    border-bottom: 1px solid var(--brand-border);
+    padding: 8px 10px;
+    background-color: rgba(224, 175, 104, 0.08);
+    border-bottom: 1px solid var(--brand-border-subtle);
     color: var(--state-warning);
-    font-size: 10px;
+    font-size: 11px;
     text-align: center;
     display: none;
 }
@@ -867,41 +1061,57 @@ body {
 
 .modal-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.5);
     display: flex; align-items: center; justify-content: center;
     z-index: 10000;
+    backdrop-filter: blur(2px);
+    animation: fadeIn 0.15s ease;
 }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 .modal-dialog {
-    background: var(--vscode-editor-background);
+    background: var(--brand-surface);
     border: 1px solid var(--brand-border);
-    border-radius: 8px;
-    min-width: 360px; max-width: 90%;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    border-radius: var(--radius-lg);
+    min-width: 380px; max-width: 90%;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    animation: scaleIn 0.15s ease;
 }
+
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
 .modal-header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--brand-border);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--brand-border-subtle);
 }
 .modal-title { font-size: 13px; font-weight: 600; color: var(--brand-text); }
 .modal-close {
     background: none; border: none; cursor: pointer;
     color: var(--brand-text-muted); font-size: 18px; padding: 0 4px;
+    border-radius: var(--radius-sm);
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s ease, background-color 0.15s ease;
 }
-.modal-close:hover { color: var(--brand-text); }
-.modal-body { padding: 14px; }
+.modal-close:hover { color: var(--brand-text); background-color: var(--brand-surface-hover); }
+.modal-body { padding: 16px; }
 .modal-input {
     width: 100%; box-sizing: border-box;
-    padding: 6px 8px;
-    border: 1px solid var(--brand-border); border-radius: 4px;
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    padding: 8px 10px;
+    border: 1px solid var(--brand-border-subtle); border-radius: var(--radius-sm);
+    background: var(--brand-background); color: var(--brand-text);
     font-size: 12px; outline: none;
+    font-family: var(--font-mono);
+    transition: border-color 0.15s ease;
 }
-.modal-input:focus { border-color: var(--vscode-focusBorder); }
+.modal-input:focus { border-color: var(--brand-primary); }
 .modal-footer {
     display: flex; justify-content: flex-end; gap: 8px;
-    padding: 10px 14px;
-    border-top: 1px solid var(--brand-border);
+    padding: 12px 16px;
+    border-top: 1px solid var(--brand-border-subtle);
 }`;
     }
 
@@ -909,27 +1119,27 @@ body {
         return `
     <div class="tab-bar">
         <div class="tab active" onclick="switchTab('git')">
-            <span>🌿</span><span data-i18n="tab.git">Git</span>
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="tab.git">Git</span>
         </div>
         <div class="tab" onclick="switchTab('custom')">
-            <span>💻</span><span data-i18n="tab.custom">Cmd</span>
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">Cmd</span>
         </div>
         <div class="tab" onclick="switchTab('settings')">
-            <span>⚙️</span><span data-i18n="tab.settings">Set</span>
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3 8H1M15 8h-2M3.5 3.5L5 5M11 11l1.5 1.5M3.5 12.5L5 11M11 5l1.5-1.5"/></svg><span data-i18n="tab.settings">Set</span>
         </div>
         <div class="tab" onclick="switchTab('txtcmd')">
-            <span>🐍</span><span data-i18n="tab.txtcmd">Pyt</span>
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Pyt</span>
         </div>
     </div>
 
     <div class="tab-content">
         <div id="tab-git" class="tab-panel active">
             <div class="git-actions">
-                <button class="git-btn pull" onclick="executeGitAction('pull')"><span>📥</span><span data-i18n="git.pull">Pull</span></button>
-                <button class="git-btn commit" onclick="executeGitAction('commit')"><span>✓</span><span data-i18n="git.commit">Commit</span></button>
-                <button class="git-btn change" onclick="executeGitAction('change')"><span>📊</span><span data-i18n="git.change">Change</span></button>
+                <button class="git-btn pull" onclick="executeGitAction('pull')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M3 12v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/></svg><span data-i18n="git.pull">Pull</span></button>
+                <button class="git-btn commit" onclick="executeGitAction('commit')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M2 8h3.5M10.5 8H14"/></svg><span data-i18n="git.commit">Commit</span></button>
+                <button class="git-btn change" onclick="executeGitAction('change')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h7"/><path d="M6 2v6"/><path d="M3 11h7"/></svg><span data-i18n="git.change">Change</span></button>
                 <div class="git-branch-selector">
-                    <button class="git-btn branch" onclick="executeGitAction('branch')"><span>🌿</span><span data-i18n="git.branch">Branch</span></button>
+                    <button class="git-btn branch" onclick="executeGitAction('branch')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="git.branch">Branch</span></button>
                     <div style="position: relative; flex: 1;">
                         <input type="text" id="branchInput" class="branch-input" data-i18n-placeholder="branch.selectPlaceholder" placeholder="Select branch..." onclick="onBranchInputClick(event)" autocomplete="off" oninput="filterBranchList(this.value)">
                         <div class="branch-dropdown" id="branchDropdown">
@@ -938,17 +1148,19 @@ body {
                         </div>
                     </div>
                 </div>
-                <button class="git-btn push" onclick="executeGitAction('push')"><span>📤</span><span data-i18n="git.push">Push</span><span class="badge" id="pushBadge">0</span></button>
+                <button class="git-btn push" onclick="executeGitAction('push')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12V4"/><path d="M5 7l3-3 3 3"/><path d="M3 12v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/></svg><span data-i18n="git.push">Push</span></button>
             </div>
 
             <div class="project-list-header">
                 <span><span data-i18n="project.title">Projects</span> (<span id="projectCount">0</span>)</span>
                 <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="selected-count" id="gitSelectedCount"><span data-i18n="project.selected">Selected</span> 0</span>
                     <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px;">
                         <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" style="cursor: pointer;">
                         <span data-i18n="project.selectAll">Select All</span>
                     </label>
-                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                    <button class="collapse-btn" id="gitCollapseBtn" onclick="toggleProjectList('projectList', 'gitCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list">▼</button>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><svg class="refresh-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2v3h-3"/></svg></button>
                 </div>
             </div>
 
@@ -1005,16 +1217,20 @@ body {
                 <div class="empty-state" data-i18n="cmd.empty">No commands</div>
             </div>
 
+            <div class="panel-resizer" data-target="commandList"></div>
+
             <div class="selection-warning" id="selectionWarning" data-i18n="cmd.selectProject">Please select projects first</div>
 
             <div class="project-list-header">
                 <span><span data-i18n="project.title">Projects</span> (<span id="customProjectCount">0</span>)</span>
                 <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="selected-count" id="customSelectedCount"><span data-i18n="project.selected">Selected</span> 0</span>
                     <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px;">
                         <input type="checkbox" id="customSelectAllCheckbox" onchange="toggleCustomSelectAll(this.checked)" style="cursor: pointer;">
                         <span data-i18n="project.selectAll">Select All</span>
                     </label>
-                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh">🔄</button>
+                    <button class="collapse-btn" id="customCollapseBtn" onclick="toggleProjectList('customProjectList', 'customCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list">▼</button>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><svg class="refresh-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2v3h-3"/></svg></button>
                 </div>
             </div>
 
@@ -1610,6 +1826,55 @@ function toggleLog() {
     document.addEventListener('mouseup', onMouseUp);
 })();
 
+// --- Panel resizer: 拖拽调节 Cmd Tab 中命令列表/项目列表的高度 ---
+(function initPanelResizer() {
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+    let activeResizer = null;
+    let activeTarget = null;
+
+    function onMouseDown(e) {
+        const resizer = e.target.closest('.panel-resizer');
+        if (!resizer) return;
+        const targetId = resizer.dataset.target;
+        const target = targetId ? document.getElementById(targetId) : null;
+        if (!target) return;
+        e.preventDefault();
+        e.stopPropagation();
+        isResizing = true;
+        activeResizer = resizer;
+        activeTarget = target;
+        startY = e.clientY;
+        startHeight = target.getBoundingClientRect().height;
+        resizer.classList.add('active');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+    }
+
+    function onMouseMove(e) {
+        if (!isResizing || !activeTarget) return;
+        e.preventDefault();
+        const delta = e.clientY - startY;
+        const newHeight = Math.min(Math.max(40, startHeight + delta), window.innerHeight * 0.7);
+        activeTarget.style.flex = '0 0 ' + newHeight + 'px';
+    }
+
+    function onMouseUp() {
+        if (!isResizing) return;
+        isResizing = false;
+        if (activeResizer) activeResizer.classList.remove('active');
+        activeResizer = null;
+        activeTarget = null;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }
+
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+})();
+
 function updateProjectList() {
     const list1 = document.getElementById('projectList');
     const list2 = document.getElementById('customProjectList');
@@ -1649,7 +1914,7 @@ function updateProjectList() {
 
             const branch = document.createElement('div');
             branch.className = 'project-branch';
-            branch.innerHTML = '<span>🌿</span>' + (p.currentBranch || t('project.noBranch'));
+            branch.innerHTML = '<svg class="branch-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span>' + (p.currentBranch || t('project.noBranch')) + '</span>';
             info.appendChild(branch);
 
             item.appendChild(info);
@@ -1684,9 +1949,29 @@ function updateProjectList() {
         const allSelected = gitProjects.length > 0 && gitProjects.every(p => selectedProjectIds.has(p.id));
         customSelectAllCheckbox.checked = allSelected;
     }
+
+    updatePushBadge();
 }
 
-function updatePushBadge() { document.getElementById('pushBadge').textContent = selectedProjectIds.size; }
+function updatePushBadge() {
+    // 同步已选择项目数显示（Git Tab 与 Cmd Tab）
+    const count = selectedProjectIds.size;
+    const gitEl = document.getElementById('gitSelectedCount');
+    const customEl = document.getElementById('customSelectedCount');
+    if (gitEl) { gitEl.innerHTML = '<span>' + t('project.selected') + '</span> ' + count; }
+    if (customEl) { customEl.innerHTML = '<span>' + t('project.selected') + '</span> ' + count; }
+}
+
+// 展开/收起项目列表
+function toggleProjectList(listId, btnId) {
+    const list = document.getElementById(listId);
+    const btn = document.getElementById(btnId);
+    if (!list || !btn) return;
+    const collapsed = list.classList.toggle('collapsed');
+    btn.classList.toggle('collapsed', collapsed);
+    btn.textContent = collapsed ? '▶' : '▼';
+    btn.title = collapsed ? t('project.expand') : t('project.collapse');
+}
 
 function updateSelectionWarning() {
     const warning = document.getElementById('selectionWarning');

@@ -1,141 +1,198 @@
-# Multi-Project Tool VSCode Extension
+# Multi-Project Tool
 
-一个VSCode插件，用于管理多个项目，提供统一的Git操作和配置管理功能。
+A VSCode extension for managing multiple projects with unified Git operations, custom command batching, and configuration management.
 
-## 功能特性
+![Version](https://img.shields.io/badge/version-1.0.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![VSCode](https://img.shields.io/badge/VSCode-^1.120.0-37AAFF)
 
-### 1. 设置JSON Tab
-- JSON公共参数配置
-- Tab页面显示/隐藏控制
-- 配置持久化存储
+## Features
 
-### 2. Git Tab
-- 工作区目录扫描，自动识别Git项目
-- 单选和多选项目功能
-- 批量Git操作：
-  - Git Pull
-  - Git分支切换
-  - Git状态检查
-  - Git提交
+- **Auto-scan workspace** to discover Git repositories (configurable depth)
+- **Batch Git operations** across multiple projects at once (Pull / Commit / Branch / Push)
+- **Custom command batching** with shell selection (Git Bash / CMD / PowerShell / WSL)
+- **Multi-line script support** with shared context variables across lines
+- **Per-line execution log** in `$ command => executed result: output` format
+- **Project list collapse/expand** to maximize working area
+- **i18n** (English / 中文)
 
-## 项目结构
+## Prerequisites
 
-```
-multi-project-tool/
-├── src/
-│   ├── extension.ts          # 主入口文件
-│   ├── providers/           # 提供者
-│   │   ├── jsonTabProvider.ts  # JSON Tab提供者
-│   │   └── gitTabProvider.ts   # Git Tab提供者
-│   ├── models/              # 数据模型
-│   │   ├── project.ts
-│   │   └── settings.ts
-│   ├── utils/               # 工具函数
-│   │   ├── gitUtils.ts
-│   │   └── projectScanner.ts
-│   └── webviews/            # Webview UI
-│       ├── jsonTab/
-│       │   ├── JsonTabView.ts
-│       │   └── JsonTabWebview.ts
-│       └── gitTab/
-│           ├── GitTabView.ts
-│           └── GitTabWebview.ts
-├── package.json
-├── tsconfig.json
-├── vsc-extension-quickstart.md
-└── README.md
-```
+### General
+- VSCode `^1.120.0`
+- A workspace folder containing multiple project subdirectories
 
-## 安装和运行
+### Git Tab (Batch Git Operations)
+Git operations rely on the local `git` CLI:
 
-### 1. 安装依赖
+1. **Install Git** for your OS:
+   - Windows: [git-scm.com](https://git-scm.com/download/win) (includes Git Bash)
+   - macOS: `brew install git`
+   - Linux: `sudo apt install git` / `sudo dnf install git`
+2. **Add to PATH** — verify in an integrated terminal:
+   ```bash
+   git --version
+   ```
+3. **Add `bash.exe` to PATH** (Windows) — Git Tab internally invokes `bash`. With Git for Windows installed, ensure this path is on your system `PATH`:
+   ```
+   C:\Program Files\Git\bin
+   ```
+   Verify:
+   ```bash
+   bash --version
+   ```
+4. **Configure SSH key** — all Git operations use SSH remotes. Set up an SSH key for your Git host (GitHub / GitLab / Gitea / self-hosted):
+   ```bash
+   # Generate a key (no passphrase for automation, or use ssh-agent)
+   ssh-keygen -t ed25519 -C "your_email@example.com"
+
+   # Start ssh-agent and add the key
+   eval "$(ssh-agent -s)"
+   ssh-add ~/.ssh/id_ed25519
+
+   # Copy the public key and add it to your Git host
+   cat ~/.ssh/id_ed25519.pub
+   ```
+   Verify the SSH connection works for your host:
+   ```bash
+   ssh -T git@github.com     # GitHub
+   ssh -T git@gitlab.com     # GitLab
+   ```
+   Your project remote URLs must use the SSH form (e.g. `git@github.com:owner/repo.git`), not HTTPS.
+
+### Custom Commands (Cmd Tab)
+Custom commands run through your selected shell:
+
+- **Git Bash** (default): requires `bash.exe` on PATH (same as Git Tab above)
+- **CMD**: built-in on Windows
+- **PowerShell**: built-in on Windows
+- **WSL**: requires WSL installed on Windows
+
+### Python Text Transform (Pyt Tab)
+The Python text-transformation feature requires Python 3:
+
+1. **Install Python** — [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3`
+2. **Add to PATH** — verify:
+   ```bash
+   python --version
+   ```
+3. Custom Python text-transformation scripts will be invoked via the `python` command.
+
+## Tabs
+
+### Git Tab
+Batch Git operations across selected projects.
+
+| Button | Action |
+|---|---|
+| 📥 Pull | `git pull` on each selected project |
+| ✓ Commit | Prompt for commit message, then `git add . && git commit -m "..."` |
+| 📊 Change | Show working-tree change count per project |
+| 🌿 Branch | Switch to an existing branch, or create a new branch across all selected projects |
+| 📤 Push | `git push` on each selected project |
+
+- **Select All** checkbox — bulk select/deselect all Git projects
+- **Selected N** counter — shows the number of currently selected projects
+- **▼/▶ button** — collapse or expand the project list
+- Each project row shows: checkbox, name, current branch, change count
+
+### Cmd Tab
+Run custom shell commands against multiple projects at once.
+
+- **Shell selector** — choose Git Bash / CMD / PowerShell / WSL
+- **+ Add** — create a reusable command (alias + multi-line content)
+- **Multi-line scripts** — each line runs in the same shell context, so variables defined on earlier lines are available to later lines:
+  ```bash
+  VAR="hello"
+  echo $VAR           # outputs: hello
+  ```
+- **Per-line execution log** — every line is traced:
+  ```
+  $ VAR="hello" => executed result:
+  $ echo $VAR => executed result: hello
+  ```
+- **Environment variables** — inject custom env vars into every command execution
+- **Selected N** counter + **Select All** + collapse/expand (same as Git Tab)
+
+### JSON Tab
+Manage global parameters and tab visibility.
+
+- Edit JSON parameters used for `${var}` substitution in custom commands
+- Show/hide individual tabs (Git / Cmd / Pyt / JSON)
+- Reset to defaults
+
+### Pyt Tab
+Python-based text transformation utilities. Requires `python` on PATH (see Prerequisites).
+
+## Configuration
+
+All settings live under the `multi-project-tool.*` namespace in VSCode Settings:
+
+| Key | Default | Description |
+|---|---|---|
+| `showJsonTab` | `true` | Show JSON Tab |
+| `showGitTab` | `true` | Show Git Tab |
+| `gitDefaultBranch` | `main` | Default branch name |
+| `projectScanDepth` | `3` | Max depth to scan for Git projects |
+| `defaultShell` | `git-bash` | Shell for custom commands (`git-bash` / `cmd` / `powershell` / `wsl`) |
+| `autoRefresh` | `true` | Auto-refresh project list on filesystem changes |
+| `logRetention` | `50` | Max log entries kept |
+| `concurrency` | `1` | Number of projects to execute commands concurrently (1-10) |
+| `commandTimeout` | `300` | Command execution timeout in seconds |
+| `customCommands` | `[]` | Saved custom commands |
+| `envVariables` | `[]` | Environment variables injected during command execution |
+| `commonParameters` | `{}` | Global JSON parameters for command variable substitution |
+
+## Usage Example
+
+1. Open a workspace folder containing several Git projects:
+   ```
+   my-workspace/
+   ├── backend/      (.git)
+   ├── frontend/     (.git)
+   └── docs/         (.git)
+   ```
+2. Click the Multi-Project Tool icon in the Activity Bar.
+3. **Git Tab** → check the projects you want to update → click 📥 Pull. All selected repos pull in one action.
+4. **Cmd Tab** → **+ Add** → alias `deploy-all`, content:
+   ```bash
+   npm run build
+   npm run deploy
+   ```
+   Save → select target projects → click the command. Each project runs the script in its own directory, with shared context across lines.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `[bash.exe] command not found` | Add `C:\Program Files\Git\bin` to system PATH, then restart VSCode |
+| Git operations fail with permission denied | Configure SSH key for your Git host and use SSH remote URLs |
+| Projects not listed | Check `projectScanDepth` and that subfolders are Git repos |
+| Custom commands silently fail | Switch to the selected shell and run the script manually; check the per-line log |
+| `python` commands fail | Install Python 3 and ensure `python --version` works in an integrated terminal |
+| Config changes don't take effect | Reload the VSCode window (`Ctrl+R` / `Cmd+R`) |
+
+## Development
+
 ```bash
 npm install
+npm run compile       # build TypeScript
+npm run watch         # watch mode
 ```
 
-### 2. 编译TypeScript
+Press <kbd>F5</kbd> in VSCode to launch an Extension Development Host with the extension loaded.
+
+### Package & Publish
+
 ```bash
-npm run compile
+# Local package
+vsce package --no-git-tag-version -o multi-project-tool-1.0.0.vsix
+
+# Publish to Marketplace (requires PAT)
+vsce login ghema
+vsce publish
 ```
 
-### 3. 启动调试
-1. 按F5启动调试
-2. 在VSCode中打开一个包含多个Git项目的工作区
-3. 在侧边栏中可以看到"Multi-Project Tool"视图
-4. 点击"JSON Settings"或"Git Projects"标签页
+CI builds run automatically via GitHub Actions — push a `v*` tag to create a Release with the built VSIX attached.
 
-### 4. 构建发布
-```bash
-npm run compile
-vsce package
-```
+## License
 
-## 使用说明
-
-### JSON Tab功能
-- **JSON配置**: 在文本框中编辑JSON格式的公共参数
-- **Tab控制**: 通过复选框控制JSON Tab和Git Tab的显示/隐藏
-- **保存设置**: 点击"Save Settings"按钮保存配置
-- **重置设置**: 点击"Reset to Default"按钮恢复默认设置
-
-### Git Tab功能
-- **项目扫描**: 自动扫描工作区目录，识别Git项目
-- **项目选择**: 通过复选框选择单个或多个项目
-- **批量操作**: 对选中的项目执行Git操作
-  - **Git Pull**: 拉取所有远程分支的最新代码
-  - **Switch Branch**: 切换到指定分支
-  - **Status**: 查看Git状态
-  - **Commit**: 提交更改
-
-## 配置选项
-
-在VSCode设置中可以配置以下选项：
-
-```json
-{
-  "multi-project-tool.showJsonTab": true,
-  "multi-project-tool.showGitTab": true,
-  "multi-project-tool.gitDefaultBranch": "main",
-  "multi-project-tool.projectScanDepth": 3
-}
-```
-
-## 技术栈
-
-- **VSCode Extension API**: 插件开发框架
-- **TypeScript**: 类型安全的JavaScript
-- **Webview UI**: 插件界面开发
-- **Node.js**: 运行时环境
-
-## 开发注意事项
-
-1. **权限管理**: 确保插件有访问工作区文件的权限
-2. **错误处理**: 添加适当的错误处理机制
-3. **性能优化**: 项目扫描和Git操作需要考虑性能
-4. **用户体验**: 提供清晰的反馈和状态提示
-
-## 故障排除
-
-### 常见问题
-
-1. **项目不显示**: 检查工作区目录是否包含Git项目
-2. **Git操作失败**: 确保项目是有效的Git仓库
-3. **配置不生效**: 重启VSCode或重新加载窗口
-
-### 调试技巧
-
-1. 查看开发者工具控制台输出
-2. 使用VSCode的调试功能
-3. 检查插件日志文件
-
-## 贡献指南
-
-1. Fork项目
-2. 创建功能分支
-3. 提交更改
-4. 推送到分支
-5. 创建Pull Request
-
-## 许可证
-
-MIT License
+[MIT](LICENSE)
