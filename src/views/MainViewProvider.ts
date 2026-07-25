@@ -166,6 +166,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'updateEnvVariable': await this.handleUpdateEnvVariable(message.index, message.variable); break;
                     case 'deleteEnvVariable': await this.handleDeleteEnvVariable(message.index); break;
                     case 'clearLogs': this.handleClearLogs(); break;
+                    case 'exportLog': await this.handleExportLog(message.content, message.tabId); break;
                     case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
                     case 'logHeightChange': this.handleLogHeightChange(message.height); break;
                     case 'savePythonTxtCommands': await this.handleSavePythonTxtCommands(message.commands); break;
@@ -1011,6 +1012,20 @@ body {
 
 .log-header .clear-btn:hover { color: var(--state-error); border-color: var(--state-error); background-color: rgba(247, 118, 142, 0.08); }
 
+.log-header .export-btn {
+    font-size: 10px;
+    padding: 3px 8px;
+    background-color: transparent;
+    border: 1px solid var(--brand-border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--brand-text-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    font-family: var(--font-ui);
+}
+
+.log-header .export-btn:hover { color: var(--brand-primary); border-color: var(--brand-primary); background-color: var(--brand-primary-subtle); }
+
 .log-content {
     height: calc(100% - 34px);
     overflow-y: auto;
@@ -1172,7 +1187,10 @@ body {
                 <div class="log-resizer" id="logResizer"></div>
                 <div class="log-header" onclick="toggleLog()">
                     <span data-i18n="log.title">Logs</span>
-                    <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
+                    <span style="display: flex; gap: 6px;">
+                        <span class="export-btn" onclick="exportLogs(event, 'git')" data-i18n="log.export">Export Log</span>
+                        <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
+                    </span>
                 </div>
                 <div class="log-content" id="logContent">
                     <div class="log-entry info">
@@ -1242,7 +1260,10 @@ body {
                 <div class="log-resizer" id="customLogResizer"></div>
                 <div class="log-header" onclick="toggleLog()">
                     <span data-i18n="log.title">Logs</span>
-                    <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
+                    <span style="display: flex; gap: 6px;">
+                        <span class="export-btn" onclick="exportLogs(event, 'cmd')" data-i18n="log.export">Export Log</span>
+                        <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
+                    </span>
                 </div>
                 <div class="log-content" id="customLogContent">
                     <div class="log-entry info">
@@ -1355,7 +1376,11 @@ body {
                     <div class="log-resizer" id="txtCmdLogResizer"></div>
                     <div class="log-header" onclick="toggleTxtCmdLog()">
                         <span class="log-title">📝 <span data-i18n="pytxt.logTitle">Execution Log</span></span>
-                        <span class="log-toggle-icon" id="txtCmdLogToggle">▼</span>
+                        <span style="display: flex; gap: 6px; align-items: center;">
+                            <span class="export-btn" onclick="exportTxtCmdLogs(event)" data-i18n="log.export">Export Log</span>
+                            <span class="clear-btn" onclick="clearTxtCmdLogs(event)" data-i18n="log.clear">Clear</span>
+                            <span class="log-toggle-icon" id="txtCmdLogToggle">▼</span>
+                        </span>
                     </div>
                     <div class="log-content" id="txtCmdLogContent">
                         <div class="log-entry info">
@@ -1731,6 +1756,41 @@ function toggleAutoRefresh() {
 }
 
 function clearLogs(e) { e.stopPropagation(); vscode.postMessage({ command: 'clearLogs' }); }
+
+function exportLogs(e, tabId) {
+    e.stopPropagation();
+    if (logs.length === 0) return;
+    const text = logs.map(entry => {
+        const statusIcon = entry.type === 'success' ? '✓' : entry.type === 'error' ? '✗' : '▶';
+        let line = '[' + entry.timestamp + '] ' + statusIcon + ' ';
+        if (entry.shellType) line += '[' + entry.shellType + '] ';
+        if (entry.projectName) line += entry.projectName + ' ';
+        line += entry.message;
+        if (entry.details) line += '\\n    ' + entry.details;
+        return line;
+    }).join('\\n');
+    vscode.postMessage({ command: 'exportLog', content: text, tabId: tabId });
+}
+
+function exportTxtCmdLogs(e) {
+    e.stopPropagation();
+    if (txtCmdLogs.length === 0) return;
+    const text = txtCmdLogs.map(entry => {
+        const statusIcon = entry.type === 'success' ? '✓' : entry.type === 'error' ? '✗' : '▶';
+        let line = '[' + entry.timestamp + '] ' + statusIcon + ' ';
+        if (entry.shellType) line += '[' + entry.shellType + '] ';
+        line += entry.message;
+        if (entry.details) line += '\\n    ' + entry.details;
+        return line;
+    }).join('\\n');
+    vscode.postMessage({ command: 'exportLog', content: text, tabId: 'pyt' });
+}
+
+function clearTxtCmdLogs(e) {
+    e.stopPropagation();
+    txtCmdLogs = [];
+    renderTxtCmdLogs();
+}
 
 function toggleLog() {
     const containers = document.querySelectorAll('.log-container');
@@ -3121,6 +3181,24 @@ window.addEventListener('message', event => {
     private handleClearLogs(): void {
         this._logs = [];
         this.updateWebview();
+    }
+
+    private async handleExportLog(content: string, _tabId: string): Promise<void> {
+        if (!content || content.trim().length === 0) {
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument({
+            content: content,
+            language: 'plaintext'
+        });
+        const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        // Select all text
+        const fullRange = new vscode.Range(
+            doc.positionAt(0),
+            doc.positionAt(content.length)
+        );
+        editor.selection = new vscode.Selection(fullRange.start, fullRange.end);
+        editor.revealRange(fullRange);
     }
 
     private addLog(message: string, type: 'success' | 'error' | 'info' = 'info', projectName?: string, shellType?: string): void {

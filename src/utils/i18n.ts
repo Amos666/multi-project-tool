@@ -38,6 +38,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Log
         'log.title': 'Logs',
         'log.clear': 'Clear',
+        'log.export': 'Export Log',
         'log.ready': 'Multi Project Tools ready',
 
         // Custom commands
@@ -156,6 +157,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Log
         'log.title': '日志',
         'log.clear': '清除',
+        'log.export': '导出日志',
         'log.ready': 'Multi Project Tools ready',
 
         // Custom commands
