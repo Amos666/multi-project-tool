@@ -39,6 +39,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'log.title': 'Logs',
         'log.clear': 'Clear',
         'log.export': 'Export Log',
+        'log.nothingToExport': 'No logs to export',
         'log.ready': 'Multi Project Tools ready',
 
         // Custom commands
@@ -54,6 +55,18 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.run': 'Run',
         'cmd.edit': 'Edit',
         'cmd.delete': 'Delete',
+        'cmd.addCategory': '+ Category',
+        'cmd.newCommand': 'New Command',
+        'cmd.editCommand': 'Edit Command',
+        'cmd.categoryName': 'Category Name',
+        'cmd.newCategory': 'New Category',
+        'cmd.editCategory': 'Edit Category',
+        'cmd.fillCategoryName': 'Please fill in category name',
+        'cmd.addCommandHere': 'Add command here',
+        'cmd.addSubCategory': 'Add sub-category',
+        'cmd.rename': 'Rename',
+        'cmd.deleteCategoryTitle': 'Delete Category',
+        'cmd.deleteCategoryConfirm': 'This category contains commands or sub-categories. Delete it and all its contents?',
 
         // Settings
         'settings.globalParams': 'Global Parameters',
@@ -86,6 +99,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'pytxt.editTitle': 'Edit Command',
         'pytxt.newTitle': 'New Command',
         'pytxt.aliasPlaceholder': 'Command alias',
+        'pytxt.content': 'Python Code',
         'pytxt.contentPlaceholder': 'Python code, use sys.stdin.read() for input, print for output',
         'pytxt.close': '× Close',
         'pytxt.save': 'Save',
@@ -158,6 +172,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'log.title': '日志',
         'log.clear': '清除',
         'log.export': '导出日志',
+        'log.nothingToExport': '暂无日志可导出',
         'log.ready': 'Multi Project Tools ready',
 
         // Custom commands
@@ -173,6 +188,18 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.run': '运行',
         'cmd.edit': '编辑',
         'cmd.delete': '删除',
+        'cmd.addCategory': '+ 分类',
+        'cmd.newCommand': '新建命令',
+        'cmd.editCommand': '编辑命令',
+        'cmd.categoryName': '分类名称',
+        'cmd.newCategory': '新建分类',
+        'cmd.editCategory': '编辑分类',
+        'cmd.fillCategoryName': '请填写分类名称',
+        'cmd.addCommandHere': '在此添加命令',
+        'cmd.addSubCategory': '添加子分类',
+        'cmd.rename': '重命名',
+        'cmd.deleteCategoryTitle': '删除分类',
+        'cmd.deleteCategoryConfirm': '该分类下包含命令或子分类，确定删除该分类及其全部内容？',
 
         // Settings
         'settings.globalParams': '全局参数',
@@ -205,6 +232,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'pytxt.editTitle': '编辑命令',
         'pytxt.newTitle': '新建命令',
         'pytxt.aliasPlaceholder': '命令别名',
+        'pytxt.content': 'Python 代码',
         'pytxt.contentPlaceholder': 'Python 代码，使用 sys.stdin.read() 读取输入，print 输出结果',
         'pytxt.close': '× 关闭',
         'pytxt.save': '保存',

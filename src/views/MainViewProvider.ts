@@ -5,13 +5,8 @@ import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
+import { CommandTreeNode, findNodeById } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
-
-interface CustomCommand {
-    id: string;
-    alias: string;
-    content: string;
-}
 
 interface LogEntry {
     timestamp: string;
@@ -34,7 +29,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _projects: Project[] = [];
     private _selectedProjectIds: Set<string> = new Set();
     private _logs: LogEntry[] = [];
-    private _customCommands: CustomCommand[] = [];
+    private _txtCmdLogs: LogEntry[] = [];
+    private _customCommandTree: CommandTreeNode[] = [];
     private _settings: MultiProjectToolSettings = {
         showJsonTab: true,
         showGitTab: true,
@@ -50,7 +46,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _concurrency: number = 1;
     private _commandTimeout: number = 300;
     private _logContainerHeight: number = 60;
-    private _pythonTxtCommands: PythonTxtCommand[] = [];
+    private _pythonTxtCommandTree: CommandTreeNode[] = [];
     private _projectScanner: ProjectScanner;
     private _language: Language = 'en';
 
@@ -117,7 +113,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     private async loadCommands(): Promise<void> {
         const config = ConfigStore.getInstance().load();
-        this._customCommands = config.customCommands;
+        this._customCommandTree = config.customCommandTree;
     }
 
     private async loadEnvVariables(): Promise<void> {
@@ -126,7 +122,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async loadPythonTxtCommands(): Promise<void> {
-        this._pythonTxtCommands = PythonTxtCmdStore.getInstance().load();
+        this._pythonTxtCommandTree = PythonTxtCmdStore.getInstance().load();
     }
 
     public resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken): void {
@@ -156,20 +152,19 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'gitPush': await this.handleGitPush(); break;
                     case 'refreshProjects': await this.handleRefreshProjects(); break;
                     case 'setShell': await this.handleSetShell(message.shell); break;
-                    case 'addCommand': await this.handleAddCommand(message.cmd); break;
-                    case 'updateCommand': await this.handleUpdateCommand(message.cmd); break;
-                    case 'deleteCommand': await this.handleDeleteCommand(message.commandId); break;
-                    case 'runCommand': await this.handleRunCommand(message.commandId); break;
+                    case 'saveCommandTree': await this.handleSaveCommandTree(message.tabId, message.tree); break;
+                    case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
                     case 'saveSettings': await this.handleSaveSettings(message.settings); break;
                     case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
                     case 'addEnvVariable': await this.handleAddEnvVariable(message.variable); break;
                     case 'updateEnvVariable': await this.handleUpdateEnvVariable(message.index, message.variable); break;
                     case 'deleteEnvVariable': await this.handleDeleteEnvVariable(message.index); break;
                     case 'clearLogs': this.handleClearLogs(); break;
+                    case 'clearTxtCmdLogs': this._txtCmdLogs = []; break;
+                    case 'notifyInfo': vscode.window.showInformationMessage(message.message); break;
                     case 'exportLog': await this.handleExportLog(message.content, message.tabId); break;
                     case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
                     case 'logHeightChange': this.handleLogHeightChange(message.height); break;
-                    case 'savePythonTxtCommands': await this.handleSavePythonTxtCommands(message.commands); break;
                     case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
                     case 'setLanguage': this.handleSetLanguage(message.language); break;
                 }
@@ -640,7 +635,8 @@ body {
     margin-top: 3px;
 }
 
-.command-item .actions {
+.command-item .actions,
+.category-row .actions {
     display: flex;
     gap: 4px;
     flex-shrink: 0;
@@ -665,6 +661,125 @@ body {
 .cmd-action-btn.run:hover { color: var(--state-success); border-color: var(--state-success); }
 .cmd-action-btn.edit:hover { color: var(--brand-primary); border-color: var(--brand-primary); }
 .cmd-action-btn.delete:hover { color: var(--state-error); border-color: var(--state-error); }
+
+/* --- 分类层级树（cmd / pyt 两 tab 统一风格） --- */
+.tree-category { margin-bottom: 6px; }
+
+.category-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border-subtle);
+    border-radius: var(--radius-md);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    user-select: none;
+}
+
+.category-row:hover { background-color: var(--brand-surface-hover); border-color: var(--brand-border); }
+
+.cat-arrow {
+    cursor: pointer;
+    color: var(--brand-text-muted);
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+}
+
+.cat-arrow.open { transform: rotate(90deg); }
+.cat-arrow svg { width: 12px; height: 12px; display: block; }
+
+.cat-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    color: var(--brand-text-secondary);
+}
+.cat-icon svg { width: 14px; height: 14px; display: block; }
+
+.cat-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.cat-count {
+    font-size: 10px;
+    color: var(--brand-text-muted);
+    background-color: var(--brand-background);
+    border-radius: 8px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+
+.cmd-action-btn svg { width: 13px; height: 13px; display: block; }
+.cmd-action-btn.add:hover { color: var(--state-success); border-color: var(--state-success); }
+.cmd-action-btn.add-sub:hover { color: var(--brand-primary); border-color: var(--brand-primary); }
+
+/* 层级引导线：子层统一缩进并以左侧竖线连接，风格一致 */
+.tree-children {
+    margin-left: 14px;
+    padding-left: 10px;
+    padding-top: 4px;
+    border-left: 1px solid var(--brand-border-subtle);
+}
+.tree-children.hidden { display: none; }
+
+/* --- 拖放状态 --- */
+.tree-row-draggable { cursor: grab; }
+.tree-row-draggable:active { cursor: grabbing; }
+.tree-row-draggable.dragging { opacity: 0.4; }
+
+.tree-row-draggable.drop-before { box-shadow: 0 -2px 0 0 var(--brand-primary); }
+.tree-row-draggable.drop-after { box-shadow: 0 2px 0 0 var(--brand-primary); }
+.tree-row-draggable.drop-inside {
+    outline: 1px dashed var(--brand-primary);
+    outline-offset: -1px;
+    background-color: var(--brand-primary-subtle);
+}
+
+.drag-over-root { outline: 1px dashed var(--brand-primary); outline-offset: -2px; }
+
+/* --- 编辑器标题与错误提示 --- */
+.editor-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.editor-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand-text);
+}
+
+.editor-error {
+    display: none;
+    font-size: 11px;
+    color: var(--state-error);
+    margin-bottom: 6px;
+}
+
+.editor-error.show { display: block; }
+
+.btn-danger {
+    background-color: var(--state-error);
+    border-color: var(--state-error);
+    color: var(--brand-text-inverse);
+}
+.btn-danger:hover { opacity: 0.9; }
 
 .settings-panel { flex: 1; overflow-y: auto; padding: 12px; }
 
@@ -1213,21 +1328,26 @@ body {
                         <option value="wsl">WSL</option>
                     </select>
                 </label>
-                <button class="add-cmd-btn" onclick="showCommandEditor()" data-i18n="cmd.add">+ Add</button>
+                <button class="add-cmd-btn" style="background-color: var(--brand-surface-raised); color: var(--brand-text-secondary); border-color: var(--brand-border);" onclick="showCategoryEditor('cmd', null, null)" data-i18n="cmd.addCategory">+ Category</button>
+                <button class="add-cmd-btn" onclick="showCommandEditor('cmd', null, null)" data-i18n="cmd.add">+ Add</button>
             </div>
 
             <div class="command-editor" id="commandEditor">
+                <div class="editor-title-bar">
+                    <span class="editor-title" id="commandEditorTitle" data-i18n="cmd.newCommand">New Command</span>
+                </div>
+                <div class="editor-error" id="commandEditorError"></div>
                 <div class="form-group">
-                    <label for="commandAlias" data-i18n="cmd.alias">Command Alias</label>
+                    <label for="commandAlias" id="commandAliasLabel" data-i18n="cmd.alias">Command Alias</label>
                     <input type="text" id="commandAlias" placeholder="deploy-all">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="commandContentGroup">
                     <label for="commandContent" data-i18n="cmd.content">Command Content</label>
                     <textarea id="commandContent" placeholder="npm run build&#10;npm run deploy"></textarea>
                 </div>
                 <div class="btn-group">
-                    <button class="btn btn-primary" onclick="saveCommand()" data-i18n="cmd.save">Save</button>
-                    <button class="btn btn-secondary" onclick="hideCommandEditor()" data-i18n="cmd.cancel">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveEditor('cmd')" data-i18n="cmd.save">Save</button>
+                    <button class="btn btn-secondary" onclick="hideEditor('cmd')" data-i18n="cmd.cancel">Cancel</button>
                 </div>
             </div>
 
@@ -1351,25 +1471,35 @@ body {
         <div id="tab-txtcmd" class="tab-panel">
             <div class="txtcmd-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
                 <div class="txtcmd-commands" style="flex: 1; overflow-y: auto; padding: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: 600; font-size: 12px;" data-i18n="pytxt.title">Python Text Transform Commands</span>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="addPythonTxtCmd()" data-i18n="pytxt.new">+ New</button>
+                    <div class="custom-command-header" style="margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 12px; align-self: center;" data-i18n="pytxt.title">Python Text Transform Commands</span>
+                        <div style="flex: 1;"></div>
+                        <button class="add-cmd-btn" style="background-color: var(--brand-surface-raised); color: var(--brand-text-secondary); border-color: var(--brand-border);" onclick="showCategoryEditor('pyt', null, null)" data-i18n="cmd.addCategory">+ Category</button>
+                        <button class="add-cmd-btn" onclick="showCommandEditor('pyt', null, null)" data-i18n="cmd.add">+ Add</button>
                     </div>
                     <div class="subtitle" style="margin-bottom: 8px; font-size: 11px;" data-i18n="pytxt.desc">Use selected text as input, execute Python command, output replaces selection</div>
-                    <div id="pythonTxtCmdList" style="display: flex; flex-direction: column; gap: 6px;"></div>
-                </div>
 
-                <div id="pythonTxtCmdEditor" style="display: none; padding: 8px; border-bottom: 1px solid var(--brand-border); gap: 8px; flex-direction: column;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 600; font-size: 12px;" id="pythonTxtCmdEditorTitle" data-i18n="pytxt.editTitle">Edit Command</span>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px;" onclick="closePythonTxtCmdEditor()" data-i18n="pytxt.close">× Close</button>
+                    <div class="command-editor" id="pythonTxtCmdEditor" style="border: 1px solid var(--brand-border-subtle); border-radius: var(--radius-md); margin-bottom: 8px;">
+                        <div class="editor-title-bar">
+                            <span class="editor-title" id="pythonTxtCmdEditorTitle" data-i18n="cmd.newCommand">New Command</span>
+                        </div>
+                        <div class="editor-error" id="pythonTxtCmdEditorError"></div>
+                        <div class="form-group">
+                            <label for="pythonTxtCmdAlias" id="pythonTxtCmdAliasLabel" data-i18n="cmd.alias">Command Alias</label>
+                            <input type="text" id="pythonTxtCmdAlias" data-i18n-placeholder="pytxt.aliasPlaceholder" placeholder="Command alias">
+                        </div>
+                        <div class="form-group" id="pythonTxtCmdContentGroup">
+                            <label for="pythonTxtCmdContent" data-i18n="pytxt.content">Python Code</label>
+                            <textarea id="pythonTxtCmdContent" data-i18n-placeholder="pytxt.contentPlaceholder" placeholder="Python code, use sys.stdin.read() for input, print for output" rows="6"></textarea>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="saveEditor('pyt')" data-i18n="cmd.save">Save</button>
+                            <button class="btn btn-secondary" id="pythonTxtCmdRunBtn" onclick="runPythonTxtCmdFromEditor()" data-i18n="pytxt.run">Run</button>
+                            <button class="btn btn-secondary" onclick="hideEditor('pyt')" data-i18n="cmd.cancel">Cancel</button>
+                        </div>
                     </div>
-                    <input type="text" id="pythonTxtCmdAlias" data-i18n-placeholder="pytxt.aliasPlaceholder" placeholder="Command alias" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 12px;">
-                    <textarea id="pythonTxtCmdContent" data-i18n-placeholder="pytxt.contentPlaceholder" placeholder="Python code, use sys.stdin.read() for input, print for output" rows="6" style="padding: 6px 8px; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-family: monospace; font-size: 11px; resize: vertical;"></textarea>
-                    <div style="display: flex; gap: 6px;">
-                        <button class="btn btn-primary" style="font-size: 11px; padding: 4px 12px;" onclick="savePythonTxtCmd()" data-i18n="pytxt.save">Save</button>
-                        <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="runPythonTxtCmdFromEditor()" data-i18n="pytxt.run">Run</button>
-                    </div>
+
+                    <div id="pythonTxtCmdList" style="display: flex; flex-direction: column;"></div>
                 </div>
 
                 <div class="log-container" id="txtCmdLogContainer">
@@ -1423,6 +1553,22 @@ body {
                 <button class="btn btn-primary" onclick="confirmCreateBranch()" data-i18n="branch.create">Create Branch</button>
             </div>
         </div>
+    </div>
+
+    <div id="deleteCategoryModal" class="modal-overlay" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span class="modal-title" data-i18n="cmd.deleteCategoryTitle">Delete Category</span>
+                <button class="modal-close" onclick="closeDeleteCategoryModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 12px; margin-bottom: 6px;" id="deleteCategoryMessage" data-i18n="cmd.deleteCategoryConfirm">This category contains commands or sub-categories. Delete it and all its contents?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDeleteCategoryModal()" data-i18n="cmd.cancel">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDeleteCategory()" data-i18n="cmd.delete">Delete</button>
+            </div>
+        </div>
     </div>`;
     }
 
@@ -1433,9 +1579,15 @@ let currentTab = 'git';
 let projects = [];
 let selectedProjectIds = new Set();
 let logs = [];
-let customCommands = [];
+let customCommandTree = [];
+let pythonTxtCommandTree = [];
+let editorState = {
+    cmd: { mode: 'command', id: null, parentId: null },
+    pyt: { mode: 'command', id: null, parentId: null }
+};
+let draggedNode = null;
+let pendingDeleteNode = null;
 let envVariables = [];
-let editingCommandId = null;
 let logExpanded = false;
 let savedLogHeight = 180;
 let logUserResized = false;
@@ -1594,10 +1746,10 @@ function changeLanguage(lang) {
     vscode.postMessage({ command: 'setLanguage', language: lang });
     // Re-render dynamic content
     updateProjectList();
-    updateCommandList();
+    renderCommandTree('cmd');
+    renderCommandTree('pyt');
     renderLogs();
     renderTxtCmdLogs();
-    renderPythonTxtCmdList();
 }
 
 function onBranchInputClick(e) {
@@ -1665,55 +1817,210 @@ document.addEventListener('click', (e) => {
     }
 });
 
-function showCommandEditor(commandId) {
-    editingCommandId = commandId;
-    document.getElementById('commandEditor').classList.add('show');
+// --- 命令树工具（cmd / pyt 共用） ---
+function getTree(tabId) { return tabId === 'pyt' ? pythonTxtCommandTree : customCommandTree; }
+function setTree(tabId, tree) { if (tabId === 'pyt') { pythonTxtCommandTree = tree; } else { customCommandTree = tree; } }
+
+function findNode(nodes, id) {
+    for (const n of nodes) {
+        if (n.id === id) { return n; }
+        if (n.children) { const f = findNode(n.children, id); if (f) { return f; } }
+    }
+    return null;
+}
+
+function removeNodeById(nodes, id) {
+    for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].id === id) { return nodes.splice(i, 1)[0]; }
+        if (nodes[i].children) {
+            const removed = removeNodeById(nodes[i].children, id);
+            if (removed) { return removed; }
+        }
+    }
+    return null;
+}
+
+function containsId(node, id) {
+    if (node.id === id) { return true; }
+    return (node.children || []).some(c => containsId(c, id));
+}
+
+function countDescendants(node) {
+    return (node.children || []).reduce((sum, c) => sum + 1 + countDescendants(c), 0);
+}
+
+function genNodeId() { return 'node-' + Date.now() + '-' + Math.floor(Math.random() * 100000); }
+
+function saveTree(tabId) {
+    vscode.postMessage({ command: 'saveCommandTree', tabId: tabId, tree: getTree(tabId) });
+}
+
+// --- 双模式编辑器（命令 / 分类） ---
+function getEditorEls(tabId) {
+    const prefix = tabId === 'pyt' ? 'pythonTxtCmd' : 'command';
+    return {
+        Editor: document.getElementById(prefix + 'Editor'),
+        EditorTitle: document.getElementById(prefix + 'EditorTitle'),
+        EditorError: document.getElementById(prefix + 'EditorError'),
+        AliasLabel: document.getElementById(prefix + 'AliasLabel'),
+        Alias: document.getElementById(prefix + 'Alias'),
+        ContentGroup: document.getElementById(prefix + 'ContentGroup'),
+        Content: document.getElementById(prefix + 'Content'),
+        RunBtn: document.getElementById(prefix + 'RunBtn')
+    };
+}
+
+function showEditorError(tabId, msg) {
+    const el = getEditorEls(tabId).EditorError;
+    el.textContent = msg;
+    el.classList.add('show');
+}
+
+function clearEditorError(tabId) {
+    const el = getEditorEls(tabId).EditorError;
+    el.textContent = '';
+    el.classList.remove('show');
+}
+
+function showCommandEditor(tabId, commandId, parentId) {
+    const els = getEditorEls(tabId);
+    const state = editorState[tabId];
+    state.mode = 'command';
+    state.id = commandId || null;
+    state.parentId = parentId || null;
+    clearEditorError(tabId);
+    els.ContentGroup.style.display = '';
+    if (els.RunBtn) { els.RunBtn.style.display = ''; }
+    els.AliasLabel.textContent = t('cmd.alias');
     if (commandId) {
-        const cmd = customCommands.find(c => c.id === commandId);
-        if (cmd) {
-            document.getElementById('commandAlias').value = cmd.alias;
-            document.getElementById('commandContent').value = cmd.content;
+        const node = findNode(getTree(tabId), commandId);
+        els.Alias.value = node ? node.name : '';
+        els.Content.value = node ? (node.content || '') : '';
+        els.EditorTitle.textContent = t('cmd.editCommand');
+    } else {
+        els.Alias.value = '';
+        els.Content.value = '';
+        els.EditorTitle.textContent = t('cmd.newCommand');
+    }
+    els.Editor.classList.add('show');
+}
+
+function showCategoryEditor(tabId, categoryId, parentId) {
+    const els = getEditorEls(tabId);
+    const state = editorState[tabId];
+    state.mode = 'category';
+    state.id = categoryId || null;
+    state.parentId = parentId || null;
+    clearEditorError(tabId);
+    els.ContentGroup.style.display = 'none';
+    if (els.RunBtn) { els.RunBtn.style.display = 'none'; }
+    els.AliasLabel.textContent = t('cmd.categoryName');
+    if (categoryId) {
+        const node = findNode(getTree(tabId), categoryId);
+        els.Alias.value = node ? node.name : '';
+        els.EditorTitle.textContent = t('cmd.editCategory');
+    } else {
+        els.Alias.value = '';
+        els.EditorTitle.textContent = t('cmd.newCategory');
+    }
+    els.Editor.classList.add('show');
+}
+
+function hideEditor(tabId) {
+    const els = getEditorEls(tabId);
+    els.Editor.classList.remove('show');
+    clearEditorError(tabId);
+    els.Alias.value = '';
+    els.Content.value = '';
+    editorState[tabId].id = null;
+    editorState[tabId].parentId = null;
+}
+
+function saveEditor(tabId) {
+    const els = getEditorEls(tabId);
+    const state = editorState[tabId];
+    const tree = getTree(tabId);
+    const name = els.Alias.value.trim();
+
+    if (state.mode === 'category') {
+        if (!name) { showEditorError(tabId, t('cmd.fillCategoryName')); return; }
+        if (state.id) {
+            const node = findNode(tree, state.id);
+            if (node) { node.name = name; }
+        } else {
+            const node = { id: genNodeId(), type: 'category', name: name, collapsed: false, children: [] };
+            if (state.parentId) {
+                const parent = findNode(tree, state.parentId);
+                if (parent) { parent.children = parent.children || []; parent.children.push(node); parent.collapsed = false; }
+                else { tree.push(node); }
+            } else { tree.push(node); }
         }
     } else {
-        document.getElementById('commandAlias').value = '';
-        document.getElementById('commandContent').value = '';
+        const content = els.Content.value.trim();
+        if (!name || !content) { showEditorError(tabId, t('cmd.fillAliasAndContent')); return; }
+        if (state.id) {
+            const node = findNode(tree, state.id);
+            if (node) { node.name = name; node.content = content; }
+        } else {
+            const node = { id: genNodeId(), type: 'command', name: name, content: content };
+            if (state.parentId) {
+                const parent = findNode(tree, state.parentId);
+                if (parent) { parent.children = parent.children || []; parent.children.push(node); parent.collapsed = false; }
+                else { tree.push(node); }
+            } else { tree.push(node); }
+        }
     }
+
+    saveTree(tabId);
+    renderCommandTree(tabId);
+    hideEditor(tabId);
 }
 
-function hideCommandEditor() {
-    editingCommandId = null;
-    document.getElementById('commandEditor').classList.remove('show');
-    document.getElementById('commandAlias').value = '';
-    document.getElementById('commandContent').value = '';
-}
-
-function saveCommand() {
-    const alias = document.getElementById('commandAlias').value.trim();
-    const content = document.getElementById('commandContent').value.trim();
-    if (!alias || !content) { alert(t('cmd.fillAliasAndContent')); return; }
-
-    const command = {
-        id: editingCommandId || Date.now().toString(),
-        alias: alias,
-        content: content
-    };
-
-    if (editingCommandId) {
-        vscode.postMessage({ command: 'updateCommand', cmd: command });
-    } else {
-        vscode.postMessage({ command: 'addCommand', cmd: command });
+// --- 删除节点（非空分类需确认） ---
+function deleteNode(tabId, nodeId) {
+    const tree = getTree(tabId);
+    const node = findNode(tree, nodeId);
+    if (!node) { return; }
+    if (node.type === 'category' && countDescendants(node) > 0) {
+        pendingDeleteNode = { tabId: tabId, id: nodeId };
+        document.getElementById('deleteCategoryModal').style.display = 'flex';
+        return;
     }
-    hideCommandEditor();
+    removeNodeById(tree, nodeId);
+    saveTree(tabId);
+    renderCommandTree(tabId);
 }
 
-function deleteCommand(commandId) { vscode.postMessage({ command: 'deleteCommand', commandId: commandId }); }
+function closeDeleteCategoryModal() {
+    document.getElementById('deleteCategoryModal').style.display = 'none';
+    pendingDeleteNode = null;
+}
 
-function runCommand(commandId) {
-    if (selectedProjectIds.size === 0) {
+function confirmDeleteCategory() {
+    if (pendingDeleteNode) {
+        const tree = getTree(pendingDeleteNode.tabId);
+        removeNodeById(tree, pendingDeleteNode.id);
+        saveTree(pendingDeleteNode.tabId);
+        renderCommandTree(pendingDeleteNode.tabId);
+    }
+    closeDeleteCategoryModal();
+}
+
+// --- 运行命令 / 折叠切换 ---
+function runCommand(tabId, commandId) {
+    if (tabId === 'cmd' && selectedProjectIds.size === 0) {
         document.getElementById('selectionWarning').classList.add('show');
         return;
     }
-    vscode.postMessage({ command: 'runCommand', commandId: commandId });
+    vscode.postMessage({ command: 'runCommand', tabId: tabId, commandId: commandId });
+}
+
+function toggleCategory(tabId, nodeId) {
+    const node = findNode(getTree(tabId), nodeId);
+    if (!node) { return; }
+    node.collapsed = !node.collapsed;
+    saveTree(tabId);
+    renderCommandTree(tabId);
 }
 
 function saveCommonParams() {
@@ -1759,7 +2066,10 @@ function clearLogs(e) { e.stopPropagation(); vscode.postMessage({ command: 'clea
 
 function exportLogs(e, tabId) {
     e.stopPropagation();
-    if (logs.length === 0) return;
+    if (logs.length === 0) {
+        vscode.postMessage({ command: 'notifyInfo', message: t('log.nothingToExport') });
+        return;
+    }
     const text = logs.map(entry => {
         const statusIcon = entry.type === 'success' ? '✓' : entry.type === 'error' ? '✗' : '▶';
         let line = '[' + entry.timestamp + '] ' + statusIcon + ' ';
@@ -1774,7 +2084,10 @@ function exportLogs(e, tabId) {
 
 function exportTxtCmdLogs(e) {
     e.stopPropagation();
-    if (txtCmdLogs.length === 0) return;
+    if (txtCmdLogs.length === 0) {
+        vscode.postMessage({ command: 'notifyInfo', message: t('log.nothingToExport') });
+        return;
+    }
     const text = txtCmdLogs.map(entry => {
         const statusIcon = entry.type === 'success' ? '✓' : entry.type === 'error' ? '✗' : '▶';
         let line = '[' + entry.timestamp + '] ' + statusIcon + ' ';
@@ -1790,6 +2103,7 @@ function clearTxtCmdLogs(e) {
     e.stopPropagation();
     txtCmdLogs = [];
     renderTxtCmdLogs();
+    vscode.postMessage({ command: 'clearTxtCmdLogs' });
 }
 
 function toggleLog() {
@@ -2038,64 +2352,297 @@ function updateSelectionWarning() {
     warning.classList.toggle('show', selectedProjectIds.size === 0);
 }
 
-function updateCommandList() {
-    const list = document.getElementById('commandList');
-    if (customCommands.length === 0) {
+// 与全应用一致的 16x16 描边风格 SVG 图标
+const TREE_ICONS = {
+    chevron: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>',
+    folder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h2.3a1.5 1.5 0 0 1 1.06.44l.7.7a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.5z"/></svg>',
+    plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+    folderPlus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h2.3a1.5 1.5 0 0 1 1.06.44l.7.7a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.5z"/><path d="M8 7.5v3.5M6.25 9.25h3.5"/></svg>',
+    pencil: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L6 12l-2.7.7L4 10l7.5-7.5z"/></svg>',
+    trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.5 4.5v-1h3v1"/><path d="M4.5 4.5l.6 8a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8"/></svg>',
+    play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4.2v7.6L12 8 5.5 4.2z"/></svg>'
+};
+
+function renderCommandTree(tabId) {
+    const list = document.getElementById(tabId === 'pyt' ? 'pythonTxtCmdList' : 'commandList');
+    const tree = getTree(tabId);
+    list.innerHTML = '';
+    if (!tree || tree.length === 0) {
         list.innerHTML = '<div class="empty-state">' + t('cmd.empty') + '</div>';
         return;
     }
+    tree.forEach(node => list.appendChild(buildTreeNode(tabId, node)));
+}
 
-    list.innerHTML = '';
-    customCommands.forEach(cmd => {
-        const preview = cmd.content.split('\\n')[0];
+function buildTreeNode(tabId, node) {
+    if (node.type === 'category') {
+        const wrap = document.createElement('div');
+        wrap.className = 'tree-category';
 
-        const item = document.createElement('div');
-        item.className = 'command-item';
+        const row = document.createElement('div');
+        row.className = 'category-row tree-row-draggable';
+        row.draggable = true;
+        // 文件夹行整体只负责展开/合并，重命名走铅笔按钮
+        row.onclick = function() { toggleCategory(tabId, node.id); };
 
-        const main = document.createElement('div');
-        main.className = 'cmd-main';
-        main.onclick = function() { showCommandEditor(cmd.id); };
+        const arrow = document.createElement('span');
+        arrow.className = 'cat-arrow' + (node.collapsed ? '' : ' open');
+        arrow.innerHTML = TREE_ICONS.chevron;
+        arrow.title = node.collapsed ? t('project.expand') : t('project.collapse');
+        row.appendChild(arrow);
 
-        const alias = document.createElement('span');
-        alias.className = 'alias';
-        alias.textContent = cmd.alias;
-        main.appendChild(alias);
+        const icon = document.createElement('span');
+        icon.className = 'cat-icon';
+        icon.innerHTML = TREE_ICONS.folder;
+        row.appendChild(icon);
 
-        const previewSpan = document.createElement('span');
-        previewSpan.className = 'cmd-content-preview';
-        previewSpan.textContent = preview;
-        main.appendChild(previewSpan);
+        const name = document.createElement('span');
+        name.className = 'cat-name';
+        name.textContent = node.name;
+        name.title = node.name;
+        row.appendChild(name);
 
-        item.appendChild(main);
+        const count = document.createElement('span');
+        count.className = 'cat-count';
+        count.textContent = (node.children || []).length;
+        row.appendChild(count);
 
         const actions = document.createElement('div');
         actions.className = 'actions';
 
-        const runBtn = document.createElement('button');
-        runBtn.className = 'cmd-action-btn run';
-        runBtn.title = t('cmd.run');
-        runBtn.textContent = '▶';
-        runBtn.onclick = function() { runCommand(cmd.id); };
-        actions.appendChild(runBtn);
+        const addCmdBtn = document.createElement('button');
+        addCmdBtn.className = 'cmd-action-btn add';
+        addCmdBtn.title = t('cmd.addCommandHere');
+        addCmdBtn.innerHTML = TREE_ICONS.plus;
+        addCmdBtn.onclick = function(e) { e.stopPropagation(); showCommandEditor(tabId, null, node.id); };
+        actions.appendChild(addCmdBtn);
+
+        const addSubBtn = document.createElement('button');
+        addSubBtn.className = 'cmd-action-btn add-sub';
+        addSubBtn.title = t('cmd.addSubCategory');
+        addSubBtn.innerHTML = TREE_ICONS.folderPlus;
+        addSubBtn.onclick = function(e) { e.stopPropagation(); showCategoryEditor(tabId, null, node.id); };
+        actions.appendChild(addSubBtn);
 
         const editBtn = document.createElement('button');
         editBtn.className = 'cmd-action-btn edit';
-        editBtn.title = t('cmd.edit');
-        editBtn.textContent = '✎';
-        editBtn.onclick = function() { showCommandEditor(cmd.id); };
+        editBtn.title = t('cmd.rename');
+        editBtn.innerHTML = TREE_ICONS.pencil;
+        editBtn.onclick = function(e) { e.stopPropagation(); showCategoryEditor(tabId, node.id, null); };
         actions.appendChild(editBtn);
 
         const delBtn = document.createElement('button');
         delBtn.className = 'cmd-action-btn delete';
         delBtn.title = t('cmd.delete');
-        delBtn.textContent = '🗑';
-        delBtn.onclick = function() { deleteCommand(cmd.id); };
+        delBtn.innerHTML = TREE_ICONS.trash;
+        delBtn.onclick = function(e) { e.stopPropagation(); deleteNode(tabId, node.id); };
         actions.appendChild(delBtn);
 
-        item.appendChild(actions);
-        list.appendChild(item);
+        row.appendChild(actions);
+        attachDndHandlers(row, tabId, node.id, true);
+        wrap.appendChild(row);
+
+        const children = document.createElement('div');
+        children.className = 'tree-children' + (node.collapsed ? ' hidden' : '');
+        (node.children || []).forEach(c => children.appendChild(buildTreeNode(tabId, c)));
+        wrap.appendChild(children);
+
+        return wrap;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'command-item tree-row-draggable';
+    item.draggable = true;
+
+    const preview = (node.content || '').split('\\n')[0];
+
+    const main = document.createElement('div');
+    main.className = 'cmd-main';
+    main.onclick = function() { showCommandEditor(tabId, node.id, null); };
+
+    const alias = document.createElement('span');
+    alias.className = 'alias';
+    alias.textContent = node.name;
+    main.appendChild(alias);
+
+    const previewSpan = document.createElement('span');
+    previewSpan.className = 'cmd-content-preview';
+    previewSpan.textContent = preview;
+    main.appendChild(previewSpan);
+
+    item.appendChild(main);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const runBtn = document.createElement('button');
+    runBtn.className = 'cmd-action-btn run';
+    runBtn.title = t('cmd.run');
+    runBtn.innerHTML = TREE_ICONS.play;
+    runBtn.onclick = function(e) { e.stopPropagation(); runCommand(tabId, node.id); };
+    actions.appendChild(runBtn);
+
+    const editBtn2 = document.createElement('button');
+    editBtn2.className = 'cmd-action-btn edit';
+    editBtn2.title = t('cmd.edit');
+    editBtn2.innerHTML = TREE_ICONS.pencil;
+    editBtn2.onclick = function(e) { e.stopPropagation(); showCommandEditor(tabId, node.id, null); };
+    actions.appendChild(editBtn2);
+
+    const delBtn2 = document.createElement('button');
+    delBtn2.className = 'cmd-action-btn delete';
+    delBtn2.title = t('cmd.delete');
+    delBtn2.innerHTML = TREE_ICONS.trash;
+    delBtn2.onclick = function(e) { e.stopPropagation(); deleteNode(tabId, node.id); };
+    actions.appendChild(delBtn2);
+
+    item.appendChild(actions);
+    attachDndHandlers(item, tabId, node.id, false);
+    return item;
+}
+
+// --- 拖放：同分类排序 / 跨分类移动 ---
+function attachDndHandlers(rowEl, tabId, nodeId, isCategory) {
+    rowEl.addEventListener('dragstart', function(e) {
+        draggedNode = { id: nodeId, tabId: tabId };
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', nodeId); } catch (err) { /* ignore */ }
+        setTimeout(function() { rowEl.classList.add('dragging'); }, 0);
+        e.stopPropagation();
+    });
+
+    rowEl.addEventListener('dragend', function() {
+        rowEl.classList.remove('dragging');
+        clearDropIndicators();
+        draggedNode = null;
+    });
+
+    rowEl.addEventListener('dragover', function(e) {
+        if (!draggedNode || draggedNode.tabId !== tabId) return;
+        if (!canDropOn(tabId, draggedNode.id, nodeId)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const pos = getDropPosition(e, rowEl, isCategory);
+        if (rowEl.dataset.dropPos === pos) return;
+        clearDropIndicators();
+        rowEl.classList.add('drop-' + pos);
+        rowEl.dataset.dropPos = pos;
+    });
+
+    rowEl.addEventListener('dragleave', function() {
+        rowEl.classList.remove('drop-before', 'drop-after', 'drop-inside');
+        delete rowEl.dataset.dropPos;
+    });
+
+    rowEl.addEventListener('drop', function(e) {
+        if (!draggedNode || draggedNode.tabId !== tabId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const pos = rowEl.dataset.dropPos || getDropPosition(e, rowEl, isCategory);
+        const dragId = draggedNode.id;
+        clearDropIndicators();
+        draggedNode = null;
+        moveNode(tabId, dragId, nodeId, pos);
     });
 }
+
+function canDropOn(tabId, dragId, targetId) {
+    if (dragId === targetId) return false;
+    const dragNode = findNode(getTree(tabId), dragId);
+    if (!dragNode) return false;
+    if (dragNode.type === 'category' && containsId(dragNode, targetId)) return false;
+    return true;
+}
+
+function getDropPosition(e, rowEl, isCategory) {
+    const rect = rowEl.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const h = rect.height || 1;
+    if (isCategory) {
+        if (y < h * 0.25) return 'before';
+        if (y > h * 0.75) return 'after';
+        return 'inside';
+    }
+    return y < h / 2 ? 'before' : 'after';
+}
+
+function clearDropIndicators() {
+    document.querySelectorAll('.drop-before, .drop-after, .drop-inside').forEach(function(el) {
+        el.classList.remove('drop-before', 'drop-after', 'drop-inside');
+        delete el.dataset.dropPos;
+    });
+    document.querySelectorAll('.drag-over-root').forEach(function(el) {
+        el.classList.remove('drag-over-root');
+    });
+}
+
+function findNodeLocation(nodes, id) {
+    for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].id === id) return { array: nodes, index: i };
+        if (nodes[i].children) {
+            const loc = findNodeLocation(nodes[i].children, id);
+            if (loc) return loc;
+        }
+    }
+    return null;
+}
+
+function moveNode(tabId, dragId, targetId, position) {
+    const tree = getTree(tabId);
+    const node = removeNodeById(tree, dragId);
+    if (!node) return;
+
+    if (!targetId) {
+        tree.push(node);
+    } else if (position === 'inside') {
+        const target = findNode(tree, targetId);
+        if (target && target.type === 'category') {
+            target.children = target.children || [];
+            target.children.push(node);
+            target.collapsed = false;
+        } else {
+            tree.push(node);
+        }
+    } else {
+        const loc = findNodeLocation(tree, targetId);
+        if (loc) {
+            loc.array.splice(position === 'after' ? loc.index + 1 : loc.index, 0, node);
+        } else {
+            tree.push(node);
+        }
+    }
+    saveTree(tabId);
+    renderCommandTree(tabId);
+}
+
+// 列表空白区域：拖放追加到根级别
+['commandList', 'pythonTxtCmdList'].forEach(function(listId) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const tabId = listId === 'pythonTxtCmdList' ? 'pyt' : 'cmd';
+
+    list.addEventListener('dragover', function(e) {
+        if (!draggedNode || draggedNode.tabId !== tabId) return;
+        if (e.target.closest && e.target.closest('.tree-row-draggable')) return;
+        e.preventDefault();
+        list.classList.add('drag-over-root');
+    });
+
+    list.addEventListener('dragleave', function(e) {
+        if (e.target.closest && e.target.closest('.tree-row-draggable')) return;
+        list.classList.remove('drag-over-root');
+    });
+
+    list.addEventListener('drop', function(e) {
+        if (!draggedNode || draggedNode.tabId !== tabId) return;
+        if (e.target.closest && e.target.closest('.tree-row-draggable')) return;
+        e.preventDefault();
+        const dragId = draggedNode.id;
+        clearDropIndicators();
+        draggedNode = null;
+        moveNode(tabId, dragId, null, null);
+    });
+});
 
 function updateEnvVariables() {
     const list = document.getElementById('envVariableList');
@@ -2169,128 +2716,14 @@ function renderLogEntry(entry) {
     return html;
 }
 
-let pythonTxtCommands = [];
-let pythonTxtEditingId = null;
 let txtCmdLogExpanded = false;
 let txtCmdSavedLogHeight = 180;
 let txtCmdLogs = [];
-
-function addPythonTxtCmd() {
-    pythonTxtEditingId = null;
-    document.getElementById('pythonTxtCmdEditorTitle').textContent = t('pytxt.newTitle');
-    document.getElementById('pythonTxtCmdAlias').value = '';
-    document.getElementById('pythonTxtCmdContent').value = 'import sys\\n\\ntext = sys.stdin.read()\\nresult = text\\nprint(result)';
-    document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
-}
-
-function editPythonTxtCmd(id) {
-    const cmd = pythonTxtCommands.find(c => c.id === id);
-    if (!cmd) return;
-    pythonTxtEditingId = id;
-    document.getElementById('pythonTxtCmdEditorTitle').textContent = t('pytxt.editTitle');
-    document.getElementById('pythonTxtCmdAlias').value = cmd.alias;
-    document.getElementById('pythonTxtCmdContent').value = cmd.content;
-    document.getElementById('pythonTxtCmdEditor').style.display = 'flex';
-}
-
-function closePythonTxtCmdEditor() {
-    pythonTxtEditingId = null;
-    document.getElementById('pythonTxtCmdEditor').style.display = 'none';
-}
-
-function savePythonTxtCmd() {
-    const alias = document.getElementById('pythonTxtCmdAlias').value.trim();
-    const content = document.getElementById('pythonTxtCmdContent').value;
-    if (!alias) { alert(t('pytxt.inputAlias')); return; }
-
-    if (pythonTxtEditingId) {
-        const idx = pythonTxtCommands.findIndex(c => c.id === pythonTxtEditingId);
-        if (idx >= 0) {
-            pythonTxtCommands[idx].alias = alias;
-            pythonTxtCommands[idx].content = content;
-        }
-    } else {
-        const newCmd = { id: 'cmd_' + Date.now(), alias, content };
-        pythonTxtCommands.push(newCmd);
-        pythonTxtEditingId = newCmd.id;
-    }
-    vscode.postMessage({ command: 'savePythonTxtCommands', commands: pythonTxtCommands });
-    renderPythonTxtCmdList();
-    closePythonTxtCmdEditor();
-}
-
-function deletePythonTxtCmd(id) {
-    if (!confirm(t('pytxt.confirmDelete'))) return;
-    pythonTxtCommands = pythonTxtCommands.filter(c => c.id !== id);
-    vscode.postMessage({ command: 'savePythonTxtCommands', commands: pythonTxtCommands });
-    if (pythonTxtEditingId === id) closePythonTxtCmdEditor();
-    renderPythonTxtCmdList();
-}
-
-function runPythonTxtCmd(id) {
-    const cmd = pythonTxtCommands.find(c => c.id === id);
-    if (!cmd) return;
-    vscode.postMessage({ command: 'runPythonTxtCmd', cmd: cmd });
-}
 
 function runPythonTxtCmdFromEditor() {
     const alias = document.getElementById('pythonTxtCmdAlias').value.trim() || t('pytxt.tempCmd');
     const content = document.getElementById('pythonTxtCmdContent').value;
     vscode.postMessage({ command: 'runPythonTxtCmd', cmd: { id: 'temp', alias, content } });
-}
-
-function renderPythonTxtCmdList() {
-    const list = document.getElementById('pythonTxtCmdList');
-    if (!list) return;
-    if (pythonTxtCommands.length === 0) {
-        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground); font-size: 11px; padding: 10px; text-align: center;">' + t('pytxt.empty') + '</div>';
-        return;
-    }
-    list.innerHTML = '';
-    pythonTxtCommands.forEach(cmd => {
-        const firstLine = cmd.content.split('\\n')[0].substring(0, 50);
-        const item = document.createElement('div');
-        item.className = 'cmd-item';
-        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; background: var(--brand-surface); border: 1px solid var(--brand-border); border-radius: 4px; cursor: pointer;';
-        item.onmouseover = function() { this.style.borderColor = 'var(--vscode-focusBorder)'; };
-        item.onmouseout = function() { this.style.borderColor = 'var(--brand-border)'; };
-
-        const infoDiv = document.createElement('div');
-        infoDiv.style.cssText = 'flex: 1; overflow: hidden;';
-        infoDiv.innerHTML = '<div style="font-weight: 600; font-size: 12px; color: var(--vscode-foreground);">' + cmd.alias + '</div>' +
-            '<div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + firstLine + '</div>';
-        item.appendChild(infoDiv);
-
-        const actionsDiv = document.createElement('div');
-        actionsDiv.style.cssText = 'display: flex; gap: 4px; margin-left: 8px;';
-
-        const runBtn = document.createElement('button');
-        runBtn.className = 'btn btn-secondary';
-        runBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
-        runBtn.textContent = t('pytxt.runBtn');
-        runBtn.title = t('pytxt.run');
-        runBtn.onclick = function(e) { e.stopPropagation(); runPythonTxtCmd(cmd.id); };
-        actionsDiv.appendChild(runBtn);
-
-        const editBtn = document.createElement('button');
-        editBtn.className = 'btn btn-secondary';
-        editBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
-        editBtn.textContent = '✎';
-        editBtn.title = t('cmd.edit');
-        editBtn.onclick = function(e) { e.stopPropagation(); editPythonTxtCmd(cmd.id); };
-        actionsDiv.appendChild(editBtn);
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn btn-secondary';
-        deleteBtn.style.cssText = 'font-size: 11px; padding: 3px 8px;';
-        deleteBtn.textContent = '🗑';
-        deleteBtn.title = t('cmd.delete');
-        deleteBtn.onclick = function(e) { e.stopPropagation(); deletePythonTxtCmd(cmd.id); };
-        actionsDiv.appendChild(deleteBtn);
-
-        item.appendChild(actionsDiv);
-        list.appendChild(item);
-    });
 }
 
 function toggleTxtCmdLog() {
@@ -2388,8 +2821,9 @@ window.addEventListener('message', event => {
     switch (message.command) {
         case 'updateProjects': projects = message.projects; updateProjectList(); break;
         case 'updateLogs': logs = message.logs; renderLogs(); break;
+        case 'updateTxtCmdLogs': txtCmdLogs = message.logs || []; renderTxtCmdLogs(); break;
         case 'addLog': addLogEntry(message.entry); break;
-        case 'updateCommands': customCommands = message.commands; updateCommandList(); break;
+        case 'updateCommandTree': setTree(message.tabId, message.tree || []); renderCommandTree(message.tabId); break;
         case 'updateEnvVariables': envVariables = message.variables; updateEnvVariables(); break;
         case 'updateBranchList': updateBranchList(message.branches, message.current); break;
         case 'updateSettings':
@@ -2409,10 +2843,10 @@ window.addEventListener('message', event => {
             applyTranslations();
             document.getElementById('languageSelector').value = message.language;
             updateProjectList();
-            updateCommandList();
+            renderCommandTree('cmd');
+            renderCommandTree('pyt');
             renderLogs();
             renderTxtCmdLogs();
-            renderPythonTxtCmdList();
             break;
         case 'jsonError':
             const jsonStatus = document.getElementById('jsonStatus');
@@ -2435,10 +2869,6 @@ window.addEventListener('message', event => {
                 savedLogHeight = restoredH;
                 logUserResized = true;
             }
-            break;
-        case 'updatePythonTxtCommands':
-            pythonTxtCommands = message.commands;
-            renderPythonTxtCmdList();
             break;
         case 'addTxtCmdLog':
             addTxtCmdLogEntry(message.entry);
@@ -2473,10 +2903,16 @@ window.addEventListener('message', event => {
         this._logContainerHeight = height;
     }
 
-    private async handleSavePythonTxtCommands(commands: PythonTxtCommand[]): Promise<void> {
-        this._pythonTxtCommands = commands;
-        PythonTxtCmdStore.getInstance().save(commands);
-        this._view?.webview.postMessage({ command: 'updatePythonTxtCommands', commands: this._pythonTxtCommands });
+    private async handleSaveCommandTree(tabId: string, tree: CommandTreeNode[]): Promise<void> {
+        const safeTree = Array.isArray(tree) ? tree : [];
+        if (tabId === 'pyt') {
+            this._pythonTxtCommandTree = safeTree;
+            PythonTxtCmdStore.getInstance().save(safeTree);
+        } else {
+            this._customCommandTree = safeTree;
+            await this.saveCommands();
+        }
+        this.updateWebview();
     }
 
     private async handleRunPythonTxtCmd(cmd: PythonTxtCommand): Promise<void> {
@@ -2557,9 +2993,14 @@ window.addEventListener('message', event => {
     private addTxtCmdLog(message: string, type: 'success' | 'error' | 'info' = 'info', details?: string): void {
         const now = new Date();
         const timestamp = now.toLocaleTimeString(this._language === 'zh' ? 'zh-CN' : 'en-US', { hour12: false });
+        const entry = { timestamp, type, message, details };
+        this._txtCmdLogs.push(entry);
+        if (this._txtCmdLogs.length > this._logRetention) {
+            this._txtCmdLogs.shift();
+        }
         this._view?.webview.postMessage({
             command: 'addTxtCmdLog',
-            entry: { timestamp, type, message, details }
+            entry
         });
     }
 
@@ -2718,30 +3159,16 @@ window.addEventListener('message', event => {
         this.saveAllConfig();
     }
 
-    private async handleAddCommand(command: CustomCommand): Promise<void> {
-        this._customCommands.push(command);
-        await this.saveCommands();
-        this.updateWebview();
-    }
-
-    private async handleUpdateCommand(command: CustomCommand): Promise<void> {
-        const index = this._customCommands.findIndex(c => c.id === command.id);
-        if (index !== -1) {
-            this._customCommands[index] = command;
-            await this.saveCommands();
-            this.updateWebview();
+    private async handleRunCommand(tabId: string, commandId: string): Promise<void> {
+        if (tabId === 'pyt') {
+            const node = findNodeById(this._pythonTxtCommandTree, commandId);
+            if (!node || node.type !== 'command') { return; }
+            await this.handleRunPythonTxtCmd({ id: node.id, alias: node.name, content: node.content || '' });
+            return;
         }
-    }
 
-    private async handleDeleteCommand(commandId: string): Promise<void> {
-        this._customCommands = this._customCommands.filter(c => c.id !== commandId);
-        await this.saveCommands();
-        this.updateWebview();
-    }
-
-    private async handleRunCommand(commandId: string): Promise<void> {
-        const command = this._customCommands.find(c => c.id === commandId);
-        if (!command) return;
+        const command = findNodeById(this._customCommandTree, commandId);
+        if (!command || command.type !== 'command') { return; }
 
         const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id));
         if (selectedProjects.length === 0) {
@@ -2750,9 +3177,9 @@ window.addEventListener('message', event => {
         }
 
         const shellLabel = this.getShellLabel(this._currentShell);
-        this.addLog('▶ [' + shellLabel + '] ' + command.alias + ' — ' + selectedProjects.length + ' projects');
+        this.addLog('▶ [' + shellLabel + '] ' + command.name + ' — ' + selectedProjects.length + ' projects');
 
-        const commandLines = command.content.split('\n').filter(c => c.trim());
+        const commandLines = (command.content || '').split('\n').filter(c => c.trim());
 
         let successCount = 0;
         for (const project of selectedProjects) {
@@ -3172,7 +3599,7 @@ window.addEventListener('message', event => {
                 commandTimeout: this._commandTimeout,
                 language: this._language
             },
-            customCommands: this._customCommands,
+            customCommandTree: this._customCommandTree,
             envVariables: this._envVariables
         };
         ConfigStore.getInstance().save(config);
@@ -3220,9 +3647,10 @@ window.addEventListener('message', event => {
     private updateWebview(): void {
         this._view?.webview.postMessage({ command: 'updateProjects', projects: this._projects });
         this._view?.webview.postMessage({ command: 'updateLogs', logs: this._logs });
-        this._view?.webview.postMessage({ command: 'updateCommands', commands: this._customCommands });
+        this._view?.webview.postMessage({ command: 'updateTxtCmdLogs', logs: this._txtCmdLogs });
+        this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'cmd', tree: this._customCommandTree });
+        this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'pyt', tree: this._pythonTxtCommandTree });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
-        this._view?.webview.postMessage({ command: 'updatePythonTxtCommands', commands: this._pythonTxtCommands });
         this._view?.webview.postMessage({ command: 'setLanguage', language: this._language });
         this._view?.webview.postMessage({
             command: 'updateSettings',

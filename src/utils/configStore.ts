@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CommandTreeNode, migrateConfig } from './configMigration';
 
 export interface WorkspaceConfig {
     settings: {
@@ -12,11 +13,7 @@ export interface WorkspaceConfig {
         commandTimeout: number;
         language: string;
     };
-    customCommands: Array<{
-        id: string;
-        alias: string;
-        content: string;
-    }>;
+    customCommandTree: CommandTreeNode[];
     envVariables: Array<{
         key: string;
         value: string;
@@ -33,7 +30,7 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
         commandTimeout: 300,
         language: 'en'
     },
-    customCommands: [],
+    customCommandTree: [],
     envVariables: []
 };
 
@@ -76,6 +73,11 @@ export class ConfigStore {
             }
             const content = fs.readFileSync(configFile, 'utf8');
             const parsed = JSON.parse(content);
+            const migration = migrateConfig(parsed);
+            if (migration.migrated) {
+                // 旧版本数据首次加载即迁移并落盘，后续保存均为新格式
+                this.save(this.mergeWithDefaults(parsed));
+            }
             return this.mergeWithDefaults(parsed);
         } catch (error) {
             console.error('Failed to load config file:', error);
@@ -104,6 +106,7 @@ export class ConfigStore {
     }
 
     private mergeWithDefaults(config: any): WorkspaceConfig {
+        const migration = migrateConfig(config);
         return {
             settings: {
                 commonParameters: config?.settings?.commonParameters || {},
@@ -114,7 +117,7 @@ export class ConfigStore {
                 commandTimeout: config?.settings?.commandTimeout || 300,
                 language: config?.settings?.language || 'en'
             },
-            customCommands: config?.customCommands || [],
+            customCommandTree: migration.customCommandTree,
             envVariables: config?.envVariables || []
         };
     }

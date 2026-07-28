@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+    CommandTreeNode,
+    legacyCommandsToTree,
+    sanitizeTree
+} from './configMigration';
 
+// 旧版本扁平结构（仅用于内置默认命令与迁移参照）
 export interface PythonTxtCommand {
     id: string;
     alias: string;
@@ -30,6 +36,23 @@ print(text.lower())`
     }
 ];
 
+// 内置默认命令包裹进 Default 分类，保持与迁移后一致的结构
+function defaultTree(): CommandTreeNode[] {
+    return legacyCommandsToTree(DEFAULT_COMMANDS);
+}
+
+function hasCommandNode(nodes: CommandTreeNode[]): boolean {
+    for (const node of nodes) {
+        if (node.type === 'command') {
+            return true;
+        }
+        if (node.children && hasCommandNode(node.children)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export class PythonTxtCmdStore {
     private static instance: PythonTxtCmdStore;
     private _configDir: string | undefined;
@@ -56,30 +79,59 @@ export class PythonTxtCmdStore {
         return this._configDir;
     }
 
-    public load(): PythonTxtCommand[] {
+    public load(): CommandTreeNode[] {
         const configPath = this.getConfigPath();
         if (!configPath) {
-            return DEFAULT_COMMANDS;
+            return defaultTree();
         }
 
         const configFile = path.join(configPath, 'customPythonTxt.json');
         try {
             if (!fs.existsSync(configFile)) {
-                return DEFAULT_COMMANDS;
+                // 首次使用：内置大小写转换示例落盘，后续可见、可编辑
+                const tree = defaultTree();
+                this.save(tree);
+                return tree;
             }
             const content = fs.readFileSync(configFile, 'utf8');
             const parsed = JSON.parse(content);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                return parsed;
+
+            // 旧版本：扁平数组 {id, alias, content}，整体迁移到 Default 分类并落盘
+            if (Array.isArray(parsed)) {
+                if (parsed.length === 0) {
+                    const tree = defaultTree();
+                    this.save(tree);
+                    return tree;
+                }
+                const tree = legacyCommandsToTree(parsed);
+                this.save(tree);
+                return tree;
             }
-            return DEFAULT_COMMANDS;
+
+            // 新版本：{ pythonTxtCommandTree: [...] }
+            if (parsed && Array.isArray(parsed.pythonTxtCommandTree)) {
+                const tree = sanitizeTree(parsed.pythonTxtCommandTree);
+                // 老文件可能缺少内置示例：树里完全没有命令节点时补一次，
+                // save 会写入 defaultsSeeded 标记，之后不再重复补充
+                if (!parsed.defaultsSeeded) {
+                    if (!hasCommandNode(tree)) {
+                        tree.push(...defaultTree());
+                    }
+                    this.save(tree);
+                }
+                return tree;
+            }
+
+            const tree = defaultTree();
+            this.save(tree);
+            return tree;
         } catch (error) {
             console.error('Failed to load python txt commands:', error);
-            return DEFAULT_COMMANDS;
+            return defaultTree();
         }
     }
 
-    public save(commands: PythonTxtCommand[]): boolean {
+    public save(tree: CommandTreeNode[]): boolean {
         const configPath = this.getConfigPath();
         if (!configPath) {
             console.warn('No workspace folder, cannot save python txt commands');
@@ -91,7 +143,8 @@ export class PythonTxtCmdStore {
                 fs.mkdirSync(configPath, { recursive: true });
             }
             const configFile = path.join(configPath, 'customPythonTxt.json');
-            fs.writeFileSync(configFile, JSON.stringify(commands, null, 2), 'utf8');
+            const payload = { pythonTxtCommandTree: tree, defaultsSeeded: true };
+            fs.writeFileSync(configFile, JSON.stringify(payload, null, 2), 'utf8');
             return true;
         } catch (error) {
             console.error('Failed to save python txt commands:', error);
