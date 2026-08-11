@@ -1,0 +1,89 @@
+{
+  "summary": {
+    "projectName": "multi-project-tool",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目拥有本地测试套件和 CI 流水线，但 CI 未集成测试执行步骤，变更可在未通过测试验证的情况下合并。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            ".github/workflows/build.yml"
+          ]
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 59,
+        "summary": "README 和 package.json 提供基本项目上下文，但无项目级 agent 路由指令，且无可观测会话验证理解行为。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 59,
+        "summary": "构建和测试脚本存在，但无可观测的执行行为证据。",
+        "findingRefs": []
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 59,
+        "summary": "测试套件存在但 CI 未集成测试执行，变更验证仅在本地可验证。",
+        "findingRefs": [
+          "ci-missing-test-execution"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 59,
+        "summary": "CI 打包验证存在，但无已观察的交付接受行为。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "无可分析会话片段，无法评估学习捕获能力。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "ci-missing-test-execution",
+      "title": "CI 流水线不执行测试套件",
+      "severity": "Medium",
+      "reason": "build.yml 在 PR 和 tag push 时执行 npm ci、编译和 VSIX 打包，但完全缺少 npm test 步骤。4 个测试套件仅在本地可验证，破坏配置的变更可通过 CI 而不被测试捕获。",
+      "expectedOutput": [
+        "PR 触发时 CI 自动运行测试套件，测试失败阻止合并。"
+      ],
+      "expectedArtifact": "CI workflow",
+      "aiFixPrompt": "/better-harness fix this issue\n\n在 CI workflow 中添加测试执行步骤，确保 PR 合并前测试通过。\n\n## Validation\n\n- 在 build.yml 的 compile 步骤后添加 npm test\n- 确认 PR 触发时测试运行并报告结果",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    }
+  ]
+}

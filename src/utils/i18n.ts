@@ -6,7 +6,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'tab.git': 'Git',
         'tab.custom': 'Cmd',
         'tab.settings': 'Set',
-        'tab.txtcmd': 'Pyt',
+        'tab.txtcmd': 'Python',
 
         // Git actions
         'git.pull': 'Pull',
@@ -139,7 +139,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'tab.git': 'Git',
         'tab.custom': 'Cmd',
         'tab.settings': 'Set',
-        'tab.txtcmd': 'Pyt',
+        'tab.txtcmd': 'Python',
 
         // Git actions
         'git.pull': 'Pull',

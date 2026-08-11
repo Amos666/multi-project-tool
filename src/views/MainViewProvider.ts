@@ -1254,11 +1254,11 @@ body {
         <div class="tab" onclick="switchTab('custom')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">Cmd</span>
         </div>
+        <div class="tab" onclick="switchTab('txtcmd')">
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Python</span>
+        </div>
         <div class="tab" onclick="switchTab('settings')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3 8H1M15 8h-2M3.5 3.5L5 5M11 11l1.5 1.5M3.5 12.5L5 11M11 5l1.5-1.5"/></svg><span data-i18n="tab.settings">Set</span>
-        </div>
-        <div class="tab" onclick="switchTab('txtcmd')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Pyt</span>
         </div>
     </div>
 
