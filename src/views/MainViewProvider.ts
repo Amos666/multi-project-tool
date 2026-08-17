@@ -145,7 +145,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'deselectAllProjects': this.handleDeselectAllProjects(); break;
                     case 'gitPull': await this.handleGitPull(); break;
                     case 'gitCommit': await this.handleGitCommit(message.message); break;
-                    case 'gitChange': await this.handleGitChange(); break;
+                    case 'gitFetch': await this.handleGitFetch(); break;
                     case 'gitBranch': await this.handleGitBranch(message.branch); break;
                     case 'createBranch': await this.handleCreateBranch(message.branch); break;
                     case 'getBranchList': await this.handleGetBranchList(message.projectId); break;
@@ -349,7 +349,7 @@ body {
 
 .git-btn.pull::before { background-color: var(--state-info); }
 .git-btn.commit::before { background-color: var(--state-success); }
-.git-btn.change::before { background-color: var(--state-warning); }
+.git-btn.fetch::before { background-color: var(--state-warning); }
 .git-btn.branch::before { background-color: var(--brand-primary); }
 .git-btn.push::before { background-color: var(--brand-primary-hover); }
 
@@ -1267,7 +1267,7 @@ body {
             <div class="git-actions">
                 <button class="git-btn pull" onclick="executeGitAction('pull')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M3 12v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/></svg><span data-i18n="git.pull">Pull</span></button>
                 <button class="git-btn commit" onclick="executeGitAction('commit')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M2 8h3.5M10.5 8H14"/></svg><span data-i18n="git.commit">Commit</span></button>
-                <button class="git-btn change" onclick="executeGitAction('change')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h7"/><path d="M6 2v6"/><path d="M3 11h7"/></svg><span data-i18n="git.change">Change</span></button>
+                <button class="git-btn fetch" onclick="executeGitAction('fetch')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M2 13h12"/></svg><span data-i18n="git.fetch">Fetch</span></button>
                 <div class="git-branch-selector">
                     <button class="git-btn branch" onclick="executeGitAction('branch')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="git.branch">Branch</span></button>
                     <div style="position: relative; flex: 1;">
@@ -1670,7 +1670,7 @@ function executeGitAction(action) {
         case 'commit':
             showCommitModal();
             break;
-        case 'change': vscode.postMessage({ command: 'gitChange' }); break;
+        case 'fetch': vscode.postMessage({ command: 'gitFetch' }); break;
         case 'branch':
             const branchInput = document.getElementById('branchInput');
             const branchName = branchInput.value.trim();
@@ -3034,7 +3034,7 @@ window.addEventListener('message', event => {
 
     private async handleGitPull(): Promise<void> { await this.executeGitOperation('pull'); }
     private async handleGitCommit(message: string): Promise<void> { await this.executeGitOperation('commit', undefined, message); }
-    private async handleGitChange(): Promise<void> { await this.executeGitOperation('status'); }
+    private async handleGitFetch(): Promise<void> { await this.executeGitOperation('fetch'); }
     private async handleGitBranch(branch: string): Promise<void> {
         const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id) && p.isGitRepo);
         if (selectedProjects.length === 0) {
@@ -3103,17 +3103,31 @@ window.addEventListener('message', event => {
             return;
         }
 
-        this.addLog('▶ git ' + operation + ' — ' + selectedProjects.length + ' projects');
+        let gitCmd: string;
+        switch (operation) {
+            case 'pull': gitCmd = 'git pull'; break;
+            case 'commit': gitCmd = 'git add . && git commit -m "' + (commitMessage || '') + '"'; break;
+            case 'fetch': gitCmd = 'git fetch'; break;
+            case 'status': gitCmd = 'git status'; break;
+            case 'switch-branch': gitCmd = 'git checkout ' + (branch || ''); break;
+            case 'create-branch': gitCmd = 'git checkout -b ' + (branch || ''); break;
+            case 'custom': gitCmd = 'git ' + (customCommand || ''); break;
+            default: gitCmd = 'git ' + operation;
+        }
+
+        this.addLog('▶ ' + gitCmd + ' — ' + selectedProjects.length + ' projects');
 
         let successCount = 0;
         for (const project of selectedProjects) {
             this.addLog('├── ' + project.name + ' (' + (project.currentBranch || 'no branch') + ')', undefined, project.name);
+            this.addLog('│   $ ' + gitCmd, 'info', project.name);
 
             try {
                 let result: GitOperationResult;
                 switch (operation) {
                     case 'pull': result = await GitUtils.gitPull(project); break;
                     case 'commit': result = await GitUtils.gitCommit(project, commitMessage || ''); break;
+                    case 'fetch': result = await GitUtils.gitFetch(project); break;
                     case 'status': result = await GitUtils.gitStatus(project); break;
                     case 'switch-branch': result = await GitUtils.gitSwitchBranch(project, branch || ''); break;
                     case 'create-branch': 
@@ -3134,12 +3148,12 @@ window.addEventListener('message', event => {
 
                 if (result.success) {
                     successCount++;
-                    this.addLog(result.output || 'Success', 'success', project.name);
+                    this.addLog('│   ✓ ' + (result.output || 'Success'), 'success', project.name);
                 } else {
-                    this.addLog(result.error || result.message, 'error', project.name);
+                    this.addLog('│   ✗ ' + (result.error || result.message), 'error', project.name);
                 }
             } catch (error) {
-                this.addLog('Error: ' + error, 'error', project.name);
+                this.addLog('│   ✗ Error: ' + error, 'error', project.name);
             }
         }
 

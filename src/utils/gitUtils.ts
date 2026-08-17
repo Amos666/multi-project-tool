@@ -33,6 +33,33 @@ export class GitUtils {
         }
     }
 
+    public static async gitFetch(project: Project): Promise<GitOperationResult> {
+        logManager.info(`Starting git fetch for project: ${project.name}`);
+        try {
+            const result = await this.executeGitCommand(project.path, 'fetch');
+            if (result.success) {
+                logManager.success(`Successfully fetched ${project.name}`, result.output);
+            } else {
+                logManager.error(`Failed to fetch ${project.name}`, result.error || result.output);
+            }
+            return {
+                success: result.success,
+                message: result.success ? `Successfully fetched ${project.name}` : `Failed to fetch ${project.name}`,
+                project: project,
+                output: result.output,
+                error: result.error
+            };
+        } catch (error) {
+            logManager.error(`Error fetching ${project.name}: ${error}`);
+            return {
+                success: false,
+                message: `Error fetching ${project.name}: ${error}`,
+                project: project,
+                error: error as string
+            };
+        }
+    }
+
     public static async gitSwitchBranch(project: Project, branch: string): Promise<GitOperationResult> {
         logManager.info(`Switching to branch "${branch}" for project: ${project.name}`);
         try {
@@ -191,10 +218,12 @@ export class GitUtils {
     private static async executeGitCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
         return new Promise((resolve) => {
             cp.exec(`git --no-pager ${command}`, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 10, timeout: 30000 }, (error, stdout, stderr) => {
+                // git 常把进度/远端信息写到 stderr,成功时也需并入输出以便日志展示完整详情
+                const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
                 if (error) {
-                    resolve({ success: false, output: stdout.trim(), error: stderr.trim() || error.message });
+                    resolve({ success: false, output: combined, error: stderr.trim() || error.message });
                 } else {
-                    resolve({ success: true, output: stdout.trim() });
+                    resolve({ success: true, output: combined });
                 }
             });
         });

@@ -11,7 +11,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Git actions
         'git.pull': 'Pull',
         'git.commit': 'Commit',
-        'git.change': 'Change',
+        'git.fetch': 'Fetch',
         'git.branch': 'Branch',
         'git.push': 'Push',
 
@@ -144,7 +144,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Git actions
         'git.pull': 'Pull',
         'git.commit': 'Commit',
-        'git.change': 'Change',
+        'git.fetch': 'Fetch',
         'git.branch': 'Branch',
         'git.push': 'Push',
 
