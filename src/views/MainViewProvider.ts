@@ -5,6 +5,7 @@ import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
+import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
 
@@ -40,6 +41,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         hiddenTabs: []
     };
     private _currentShell: string = 'git-bash';
+    private _shortcutShell: string = 'git-bash';
     private _envVariables: EnvVariable[] = [];
     private _autoRefresh: boolean = true;
     private _logRetention: number = 50;
@@ -47,6 +49,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _commandTimeout: number = 300;
     private _logContainerHeight: number = 60;
     private _pythonTxtCommandTree: CommandTreeNode[] = [];
+    private _shortcutCommandTree: CommandTreeNode[] = [];
     private _projectScanner: ProjectScanner;
     private _language: Language = 'en';
 
@@ -62,6 +65,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             await this.loadCommands();
             await this.loadEnvVariables();
             await this.loadPythonTxtCommands();
+            await this.loadShortcutCommands();
             // 项目加载可能较慢，先显示其他数据
             this.updateWebview();
             await this.loadProjects();
@@ -104,6 +108,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             hiddenTabs: []
         };
         this._currentShell = config.settings.defaultShell;
+        this._shortcutShell = config.settings.shortcutShell;
         this._autoRefresh = config.settings.autoRefresh;
         this._logRetention = config.settings.logRetention;
         this._concurrency = config.settings.concurrency;
@@ -123,6 +128,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     private async loadPythonTxtCommands(): Promise<void> {
         this._pythonTxtCommandTree = PythonTxtCmdStore.getInstance().load();
+    }
+
+    private async loadShortcutCommands(): Promise<void> {
+        this._shortcutCommandTree = ShortcutCmdStore.getInstance().load();
     }
 
     public resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken): void {
@@ -152,6 +161,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'gitPush': await this.handleGitPush(); break;
                     case 'refreshProjects': await this.handleRefreshProjects(); break;
                     case 'setShell': await this.handleSetShell(message.shell); break;
+                    case 'setShortcutShell': await this.handleSetShortcutShell(message.shell); break;
+                    case 'runShortcutCmd': await this.handleRunShortcutCmdContent(message.cmd); break;
                     case 'saveCommandTree': await this.handleSaveCommandTree(message.tabId, message.tree); break;
                     case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
                     case 'saveSettings': await this.handleSaveSettings(message.settings); break;
@@ -260,19 +271,29 @@ body {
 
 .tab {
     flex: 1;
-    padding: 10px 4px;
+    min-width: 0;
+    padding: 7px 2px 6px;
     text-align: center;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    font-size: 11px;
+    gap: 3px;
+    font-size: 9px;
     font-weight: 500;
     color: var(--brand-text-muted);
     transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
     user-select: none;
+    overflow: hidden;
+}
+
+.tab > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tab-icon, .git-icon, .refresh-icon {
@@ -1276,7 +1297,10 @@ body {
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="tab.git">Git</span>
         </div>
         <div class="tab" onclick="switchTab('custom')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">Cmd</span>
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">ProjectsCmd</span>
+        </div>
+        <div class="tab" onclick="switchTab('shortcut')">
+            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5L9.8 6l4.7.4-3.6 3 1.1 4.6L8 11.5 3.9 14l1.1-4.6-3.6-3L6.2 6z"/></svg><span data-i18n="tab.shortcut">ShortCutCmd</span>
         </div>
         <div class="tab" onclick="switchTab('txtcmd')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Python</span>
@@ -1410,6 +1434,68 @@ body {
                     </span>
                 </div>
                 <div class="log-content" id="customLogContent">
+                    <div class="log-entry info">
+                        <span class="timestamp">[--:--:--]</span>
+                        <span class="status-icon">▶</span>
+                        <span class="message" data-i18n="log.ready">Multi Project Tools ready</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-shortcut" class="tab-panel">
+            <div class="custom-command-header">
+                <label style="font-size: 10px; color: var(--brand-text-muted); display: flex; align-items: center;">
+                    <span data-i18n="cmd.shell">Shell:</span>
+                    <select class="shell-selector" id="shortcutShellSelector" onchange="setShortcutShell(this.value)">
+                        <option value="git-bash">Git Bash</option>
+                        <option value="cmd">CMD</option>
+                        <option value="powershell">PowerShell</option>
+                        <option value="wsl">WSL</option>
+                    </select>
+                </label>
+                <button class="add-cmd-btn" style="background-color: var(--brand-surface-raised); color: var(--brand-text-secondary); border-color: var(--brand-border);" onclick="showCategoryEditor('shortcut', null, null)" data-i18n="cmd.addCategory">+ Category</button>
+                <button class="add-cmd-btn" onclick="showCommandEditor('shortcut', null, null)" data-i18n="cmd.add">+ Add</button>
+            </div>
+
+            <div class="subtitle" style="font-size: 11px;" data-i18n="shortcut.desc">Runs in the workspace root directory. Change paths inside the script if needed.</div>
+
+            <div class="command-editor" id="shortcutCmdEditor">
+                <div class="editor-title-bar">
+                    <span class="editor-title" id="shortcutCmdEditorTitle" data-i18n="cmd.newCommand">New Command</span>
+                </div>
+                <div class="editor-error" id="shortcutCmdEditorError"></div>
+                <div class="form-group">
+                    <label for="shortcutCmdAlias" id="shortcutCmdAliasLabel" data-i18n="cmd.alias">Command Alias</label>
+                    <input type="text" id="shortcutCmdAlias" placeholder="clean-cache">
+                </div>
+                <div class="form-group" id="shortcutCmdContentGroup">
+                    <label for="shortcutCmdContent" data-i18n="cmd.content">Command Content</label>
+                    <textarea id="shortcutCmdContent" placeholder="npm cache clean --force&#10;echo done"></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveEditor('shortcut')" data-i18n="cmd.save">Save</button>
+                    <button class="btn btn-secondary" id="shortcutCmdRunBtn" onclick="runShortcutCmdFromEditor()" data-i18n="cmd.run">Run</button>
+                    <button class="btn btn-secondary" onclick="hideEditor('shortcut')" data-i18n="cmd.cancel">Cancel</button>
+                </div>
+            </div>
+
+            <div class="command-list" id="shortcutCommandList">
+                <div class="empty-state" data-i18n="cmd.empty">No commands</div>
+            </div>
+
+            <div class="panel-resizer" data-target="shortcutCommandList"></div>
+
+            <div class="log-container" id="shortcutLogContainer">
+                <div class="log-resizer" id="shortcutLogResizer"></div>
+                <div class="log-header" onclick="toggleLog()">
+                    <span data-i18n="log.title">Logs</span>
+                    <span style="display: flex; gap: 6px;">
+                        <span class="export-btn" onclick="exportLogs(event, 'shortcut')" data-i18n="log.export">Export Log</span>
+                        <span class="clear-btn" onclick="clearLogs(event)" data-i18n="log.clear">Clear</span>
+                    </span>
+                </div>
+                <div class="log-content" id="shortcutLogContent">
                     <div class="log-entry info">
                         <span class="timestamp">[--:--:--]</span>
                         <span class="status-icon">▶</span>
@@ -1605,10 +1691,13 @@ let selectedProjectIds = new Set();
 let logs = [];
 let customCommandTree = [];
 let pythonTxtCommandTree = [];
+let shortcutCommandTree = [];
 let currentShell = 'git-bash';
+let shortcutShell = 'git-bash';
 let editorState = {
     cmd: { mode: 'command', id: null, parentId: null },
-    pyt: { mode: 'command', id: null, parentId: null }
+    pyt: { mode: 'command', id: null, parentId: null },
+    shortcut: { mode: 'command', id: null, parentId: null }
 };
 let draggedNode = null;
 let pendingDeleteNode = null;
@@ -1626,7 +1715,7 @@ function switchTab(tabId) {
     currentTab = tabId;
     const tabs = document.querySelectorAll('.tab');
     const panels = document.querySelectorAll('.tab-panel');
-    const tabNames = ['git', 'custom', 'settings', 'txtcmd'];
+    const tabNames = ['git', 'custom', 'shortcut', 'txtcmd', 'settings'];
     tabs.forEach((t, i) => {
         if (tabNames[i] === tabId) {
             t.classList.add('active');
@@ -1769,6 +1858,19 @@ function setShell(shell) {
     vscode.postMessage({ command: 'setShell', shell: shell });
 }
 
+function setShortcutShell(shell) {
+    shortcutShell = shell;
+    renderCommandTree('shortcut');
+    vscode.postMessage({ command: 'setShortcutShell', shell: shell });
+}
+
+function runShortcutCmdFromEditor() {
+    const alias = document.getElementById('shortcutCmdAlias').value.trim() || t('pytxt.tempCmd');
+    const content = document.getElementById('shortcutCmdContent').value;
+    if (!content.trim()) { showEditorError('shortcut', t('cmd.fillAliasAndContent')); return; }
+    vscode.postMessage({ command: 'runShortcutCmd', cmd: { alias: alias, content: content, shell: shortcutShell } });
+}
+
 function changeLanguage(lang) {
     currentLang = lang;
     applyTranslations();
@@ -1847,8 +1949,16 @@ document.addEventListener('click', (e) => {
 });
 
 // --- 命令树工具（cmd / pyt 共用） ---
-function getTree(tabId) { return tabId === 'pyt' ? pythonTxtCommandTree : customCommandTree; }
-function setTree(tabId, tree) { if (tabId === 'pyt') { pythonTxtCommandTree = tree; } else { customCommandTree = tree; } }
+function getTree(tabId) {
+    if (tabId === 'pyt') { return pythonTxtCommandTree; }
+    if (tabId === 'shortcut') { return shortcutCommandTree; }
+    return customCommandTree;
+}
+function setTree(tabId, tree) {
+    if (tabId === 'pyt') { pythonTxtCommandTree = tree; }
+    else if (tabId === 'shortcut') { shortcutCommandTree = tree; }
+    else { customCommandTree = tree; }
+}
 
 function findNode(nodes, id) {
     for (const n of nodes) {
@@ -1886,7 +1996,7 @@ function saveTree(tabId) {
 
 // --- 双模式编辑器（命令 / 分类） ---
 function getEditorEls(tabId) {
-    const prefix = tabId === 'pyt' ? 'pythonTxtCmd' : 'command';
+    const prefix = tabId === 'pyt' ? 'pythonTxtCmd' : tabId === 'shortcut' ? 'shortcutCmd' : 'command';
     return {
         Editor: document.getElementById(prefix + 'Editor'),
         EditorTitle: document.getElementById(prefix + 'EditorTitle'),
@@ -1991,9 +2101,10 @@ function saveEditor(tabId) {
             const node = findNode(tree, state.id);
             if (node) { node.name = name; node.content = content; }
         } else {
-            // 新建命令直接存储当前所选执行 shell 类型（仅 cmd 页签）
+            // 新建命令直接存储当前所选执行 shell 类型（cmd / shortcut 页签）
             const node = { id: genNodeId(), type: 'command', name: name, content: content };
             if (tabId === 'cmd') { node.shell = currentShell; }
+            if (tabId === 'shortcut') { node.shell = shortcutShell; }
             if (state.parentId) {
                 const parent = findNode(tree, state.parentId);
                 if (parent) { parent.children = parent.children || []; parent.children.push(node); parent.collapsed = false; }
@@ -2416,16 +2527,18 @@ function filterTreeByShell(nodes, shell) {
 }
 
 function renderCommandTree(tabId) {
-    const list = document.getElementById(tabId === 'pyt' ? 'pythonTxtCmdList' : 'commandList');
+    const listId = tabId === 'pyt' ? 'pythonTxtCmdList' : tabId === 'shortcut' ? 'shortcutCommandList' : 'commandList';
+    const list = document.getElementById(listId);
     let tree = getTree(tabId);
     list.innerHTML = '';
     if (!tree || tree.length === 0) {
         list.innerHTML = '<div class="empty-state">' + t('cmd.empty') + '</div>';
         return;
     }
-    if (tabId === 'cmd') {
+    if (tabId === 'cmd' || tabId === 'shortcut') {
         // 下拉列表只显示当前所选 shell 类型的命令
-        tree = filterTreeByShell(tree, currentShell);
+        const shell = tabId === 'shortcut' ? shortcutShell : currentShell;
+        tree = filterTreeByShell(tree, shell);
         if (tree.length === 0) {
             list.innerHTML = '<div class="empty-state">' + t('cmd.emptyFiltered') + '</div>';
             return;
@@ -2528,7 +2641,7 @@ function buildTreeNode(tabId, node) {
     alias.textContent = node.name;
     aliasRow.appendChild(alias);
 
-    if (tabId === 'cmd') {
+    if (tabId === 'cmd' || tabId === 'shortcut') {
         const shellBadge = document.createElement('span');
         shellBadge.className = 'shell-badge';
         shellBadge.textContent = getShellLabel(node.shell || 'git-bash');
@@ -2762,17 +2875,22 @@ function addLogEntry(entry) {
 function renderLogs() {
     const content1 = document.getElementById('logContent');
     const content2 = document.getElementById('customLogContent');
+    const content3 = document.getElementById('shortcutLogContent');
 
     if (logs.length === 0) {
         content1.innerHTML = '<div class="log-entry info"><span class="timestamp">[--:--:--]</span><span class="status-icon">▶</span><span class="message">' + t('log.ready') + '</span></div>';
         content2.innerHTML = content1.innerHTML;
+        if (content3) content3.innerHTML = content1.innerHTML;
         return;
     }
 
-    content1.innerHTML = logs.map(entry => renderLogEntry(entry)).join('');
-    content2.innerHTML = content1.innerHTML;
+    const html = logs.map(entry => renderLogEntry(entry)).join('');
+    content1.innerHTML = html;
+    content2.innerHTML = html;
+    if (content3) content3.innerHTML = html;
     content1.scrollTop = content1.scrollHeight;
     content2.scrollTop = content2.scrollHeight;
+    if (content3) content3.scrollTop = content3.scrollHeight;
 }
 
 function renderLogEntry(entry) {
@@ -2907,7 +3025,10 @@ window.addEventListener('message', event => {
             document.getElementById('commandTimeoutInput').value = message.settings.commandTimeout;
             currentShell = message.settings.defaultShell;
             document.getElementById('shellSelector').value = message.settings.defaultShell;
+            shortcutShell = message.settings.shortcutShell || 'git-bash';
+            document.getElementById('shortcutShellSelector').value = shortcutShell;
             renderCommandTree('cmd');
+            renderCommandTree('shortcut');
             if (message.settings.language) {
                 document.getElementById('languageSelector').value = message.settings.language;
             }
@@ -2919,6 +3040,7 @@ window.addEventListener('message', event => {
             updateProjectList();
             renderCommandTree('cmd');
             renderCommandTree('pyt');
+            renderCommandTree('shortcut');
             renderLogs();
             renderTxtCmdLogs();
             break;
@@ -2982,6 +3104,9 @@ window.addEventListener('message', event => {
         if (tabId === 'pyt') {
             this._pythonTxtCommandTree = safeTree;
             PythonTxtCmdStore.getInstance().save(safeTree);
+        } else if (tabId === 'shortcut') {
+            this._shortcutCommandTree = safeTree;
+            ShortcutCmdStore.getInstance().save(safeTree);
         } else {
             this._customCommandTree = safeTree;
             await this.saveCommands();
@@ -3247,11 +3372,21 @@ window.addEventListener('message', event => {
         this.saveAllConfig();
     }
 
+    private async handleSetShortcutShell(shell: string): Promise<void> {
+        this._shortcutShell = shell;
+        this.saveAllConfig();
+    }
+
     private async handleRunCommand(tabId: string, commandId: string): Promise<void> {
         if (tabId === 'pyt') {
             const node = findNodeById(this._pythonTxtCommandTree, commandId);
             if (!node || node.type !== 'command') { return; }
             await this.handleRunPythonTxtCmd({ id: node.id, alias: node.name, content: node.content || '' });
+            return;
+        }
+
+        if (tabId === 'shortcut') {
+            await this.handleRunShortcutCommand(commandId);
             return;
         }
 
@@ -3298,6 +3433,52 @@ window.addEventListener('message', event => {
         }
 
         this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
+    }
+
+    private async handleRunShortcutCommand(commandId: string): Promise<void> {
+        const command = findNodeById(this._shortcutCommandTree, commandId);
+        if (!command || command.type !== 'command') { return; }
+        await this.executeShortcutCommand(command.name, command.content || '', command.shell);
+    }
+
+    private async handleRunShortcutCmdContent(cmd: { alias?: string; content?: string; shell?: string }): Promise<void> {
+        if (!cmd || typeof cmd.content !== 'string' || !cmd.content.trim()) { return; }
+        await this.executeShortcutCommand(cmd.alias || t('pytxt.tempCmd', this._language), cmd.content, cmd.shell);
+    }
+
+    private async executeShortcutCommand(name: string, content: string, shell?: string): Promise<void> {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            vscode.window.showInformationMessage(t('backend.noWorkspace', this._language));
+            return;
+        }
+        // 固定在工作区根目录执行，如需其他路径请在脚本内自行 cd
+        const cwd = workspaceFolders[0].uri.fsPath;
+
+        const runShell = shell && VALID_SHELLS.includes(shell)
+            ? shell
+            : this._shortcutShell;
+        const shellLabel = this.getShellLabel(runShell);
+        this.addLog('▶ [' + shellLabel + '] ' + name + ' — ' + cwd);
+
+        const commandLines = content.split('\n').filter(c => c.trim());
+
+        try {
+            const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
+            const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+            const result = await this.executeShellCommand(cwd, tracedCommand, (line: string) => {
+                if (line.trim()) {
+                    this.addLog('│   ' + line, 'info');
+                }
+            });
+            if (result.success) {
+                this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + name, 'success');
+            } else {
+                this.addLog('✗ ' + (result.error || result.output), 'error');
+            }
+        } catch (error) {
+            this.addLog('✗ Error: ' + error, 'error');
+        }
     }
 
     private injectCommandTracing(lines: string[], shellOverride?: string): string {
@@ -3685,6 +3866,7 @@ window.addEventListener('message', event => {
             settings: {
                 commonParameters: this._settings.commonParameters,
                 defaultShell: this._currentShell,
+                shortcutShell: this._shortcutShell,
                 autoRefresh: this._autoRefresh,
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
@@ -3742,6 +3924,7 @@ window.addEventListener('message', event => {
         this._view?.webview.postMessage({ command: 'updateTxtCmdLogs', logs: this._txtCmdLogs });
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'cmd', tree: this._customCommandTree });
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'pyt', tree: this._pythonTxtCommandTree });
+        this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'shortcut', tree: this._shortcutCommandTree });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
         this._view?.webview.postMessage({ command: 'setLanguage', language: this._language });
         this._view?.webview.postMessage({
@@ -3752,6 +3935,7 @@ window.addEventListener('message', event => {
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
                 defaultShell: this._currentShell,
+                shortcutShell: this._shortcutShell,
                 commandTimeout: this._commandTimeout,
                 language: this._language
             }

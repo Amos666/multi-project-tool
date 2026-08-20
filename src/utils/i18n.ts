@@ -4,9 +4,13 @@ export const translations: Record<Language, Record<string, string>> = {
     en: {
         // Tabs
         'tab.git': 'Git',
-        'tab.custom': 'Cmd',
+        'tab.custom': 'ProjectsCmd',
+        'tab.shortcut': 'ShortCutCmd',
         'tab.settings': 'Set',
         'tab.txtcmd': 'Python',
+
+        // Shortcut tab
+        'shortcut.desc': 'Runs in the workspace root directory. Change paths inside the script if needed.',
 
         // Git actions
         'git.pull': 'Pull',
@@ -116,6 +120,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
         'backend.noProjects': 'No projects selected',
+        'backend.noWorkspace': 'No workspace folder opened',
         'backend.completed': 'Completed',
         'backend.success': 'success',
         'backend.jsonError': 'JSON format error: ',
@@ -138,9 +143,13 @@ export const translations: Record<Language, Record<string, string>> = {
     zh: {
         // Tabs
         'tab.git': 'Git',
-        'tab.custom': 'Cmd',
+        'tab.custom': 'ProjectsCmd',
+        'tab.shortcut': 'ShortCutCmd',
         'tab.settings': 'Set',
         'tab.txtcmd': 'Python',
+
+        // Shortcut tab
+        'shortcut.desc': '固定在工作区根目录执行，如需其他路径请在脚本内自行切换。',
 
         // Git actions
         'git.pull': 'Pull',
@@ -250,6 +259,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
         'backend.noProjects': 'No projects selected',
+        'backend.noWorkspace': '未打开工作区文件夹',
         'backend.completed': '完成',
         'backend.success': '成功',
         'backend.jsonError': 'JSON 格式错误: ',

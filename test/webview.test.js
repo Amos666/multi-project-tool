@@ -84,6 +84,20 @@ test('HTML: pyt tab has category + command buttons and unified editor', () => {
     assert.ok(html.includes('id="pythonTxtCmdContentGroup"'), 'pyt editor content group');
 });
 
+test('HTML: shortcut tab has shell selector, buttons, editor and list, but no project list', () => {
+    assert.ok(html.includes('id="tab-shortcut"'), 'shortcut panel');
+    assert.ok(html.includes("switchTab('shortcut')"), 'shortcut tab button');
+    assert.ok(html.includes('id="shortcutShellSelector"'), 'shortcut shell selector');
+    assert.ok(html.includes("showCategoryEditor('shortcut', null, null)"), 'shortcut + Category button');
+    assert.ok(html.includes("showCommandEditor('shortcut', null, null)"), 'shortcut + Add button');
+    assert.ok(html.includes('id="shortcutCommandList"'), 'shortcutCommandList container');
+    assert.ok(html.includes('id="shortcutCmdEditor"'), 'shortcut editor');
+    assert.ok(html.includes("saveEditor('shortcut')"), 'shortcut save wired to unified editor');
+    assert.ok(html.includes('runShortcutCmdFromEditor()'), 'shortcut editor Run button');
+    const panel = html.split('id="tab-shortcut"')[1].split('id="tab-settings"')[0];
+    assert.ok(!panel.includes('project-list-container'), 'shortcut tab has no project list');
+});
+
 test('HTML: delete-category confirmation modal exists', () => {
     assert.ok(html.includes('id="deleteCategoryModal"'), 'deleteCategoryModal');
     assert.ok(html.includes('confirmDeleteCategory()'), 'confirm handler');
@@ -196,6 +210,22 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         await provider.handleRunCommand('pyt', 'category-id-not-command');
     });
 
+    await testAsync('host: saveCommandTree(shortcut) persists to shortcutCommands.json', async () => {
+        const tree = [{ id: 'sk1', type: 'category', name: 'Quick Cat', collapsed: false, children: [
+            { id: 'skc1', type: 'command', name: 'Pwd', content: 'pwd', shell: 'git-bash' }
+        ] }];
+        await provider.handleSaveCommandTree('shortcut', tree);
+        const onDisk = JSON.parse(fs.readFileSync(path.join(dir, '.multi-project-tool', 'shortcutCommands.json'), 'utf8'));
+        assert.deepStrictEqual(onDisk.shortcutCommandTree, tree);
+        assert.deepStrictEqual(provider._shortcutCommandTree, tree);
+    });
+
+    await testAsync('host: runCommand(shortcut) with missing id does not throw', async () => {
+        await provider.handleRunCommand('shortcut', 'missing-id');
+        await provider.handleRunShortcutCmdContent(null);
+        await provider.handleRunShortcutCmdContent({ alias: '', content: '   ' });
+    });
+
     await testAsync('host: updateWebview posts updateCommandTree for both tabs', async () => {
         const posted = [];
         provider._view = { webview: { postMessage: (m) => posted.push(m), cspSource: 'vscode-resource:' } };
@@ -204,6 +234,7 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         const tabs = new Set(treeMsgs.map(m => m.tabId));
         assert.ok(tabs.has('cmd'), 'posts cmd tree');
         assert.ok(tabs.has('pyt'), 'posts pyt tree');
+        assert.ok(tabs.has('shortcut'), 'posts shortcut tree');
         provider._view = undefined;
     });
 
@@ -263,6 +294,83 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         assert.strictEqual(p2._customCommandTree[0].children[0].name, 'OldCmd');
         assert.strictEqual(p2._pythonTxtCommandTree[0].name, 'Default');
         assert.strictEqual(p2._pythonTxtCommandTree[0].children[0].name, 'OldPy');
+
+        // 升级后首次保存不得丢失任何旧命令（tab 改名不影响数据）
+        await p2.handleSaveCommandTree('cmd', p2._customCommandTree);
+        const onDisk2 = JSON.parse(fs.readFileSync(path.join(dir2, '.multi-project-tool', 'config.json'), 'utf8'));
+        assert.strictEqual(onDisk2.customCommandTree[0].children.length, 1, 'legacy command count preserved');
+        assert.strictEqual(onDisk2.customCommandTree[0].children[0].name, 'OldCmd');
+        assert.strictEqual(onDisk2.customCommandTree[0].children[0].content, 'echo old');
+        assert.strictEqual(onDisk2.customCommandTree[0].children[0].shell, 'git-bash', 'legacy command typed as git-bash');
+        assert.strictEqual(onDisk2.customCommands, undefined, 'legacy flat key replaced by tree');
+    });
+
+    await testAsync('upgrade: previous-version tree config keeps all commands and settings, no data loss', async () => {
+        const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'mpt-upg-'));
+        setWorkspace(dir3);
+        fs.mkdirSync(path.join(dir3, '.multi-project-tool'), { recursive: true });
+        // 上一版本的数据形态：树无 shell 字段，settings 无 shortcutShell
+        fs.writeFileSync(path.join(dir3, '.multi-project-tool', 'config.json'), JSON.stringify({
+            settings: {
+                commonParameters: { env: 'prod' },
+                defaultShell: 'powershell',
+                autoRefresh: false,
+                logRetention: 100,
+                concurrency: 2,
+                commandTimeout: 600,
+                language: 'zh'
+            },
+            customCommandTree: [
+                {
+                    id: 'cat1', type: 'category', name: 'Ops', collapsed: false, children: [
+                        { id: 'c1', type: 'command', name: 'Build', content: 'npm run build' },
+                        { id: 'c2', type: 'command', name: 'Deploy', content: 'npm run deploy', shell: 'powershell' }
+                    ]
+                },
+                { id: 'c3', type: 'command', name: 'Root', content: 'echo root' }
+            ],
+            envVariables: [{ key: 'TOKEN', value: 'abc' }]
+        }));
+
+        for (const k of Object.keys(require.cache)) {
+            if (k.includes(path.sep + 'out' + path.sep)) { delete require.cache[k]; }
+        }
+        const { MainViewProvider: Mvp3 } = require('../out/views/MainViewProvider');
+        const p3 = new Mvp3(Uri.file(dir3));
+        await new Promise(r => setTimeout(r, 400));
+
+        // 所有命令原样保留
+        const flat = [];
+        const walk = (nodes) => nodes.forEach(n => { if (n.type === 'command') { flat.push(n); } else { walk(n.children || []); } });
+        walk(p3._customCommandTree);
+        assert.strictEqual(flat.length, 3, 'all 3 commands survive upgrade');
+        const byName = Object.fromEntries(flat.map(c => [c.name, c]));
+        assert.strictEqual(byName.Build.content, 'npm run build');
+        assert.strictEqual(byName.Build.shell, 'git-bash', 'untyped legacy command defaults to git-bash');
+        assert.strictEqual(byName.Deploy.shell, 'powershell', 'existing shell type preserved');
+        assert.strictEqual(byName.Root.shell, 'git-bash');
+
+        // 设置与环境变量保留，新字段 shortcutShell 取默认值
+        assert.strictEqual(p3._currentShell, 'powershell');
+        assert.strictEqual(p3._shortcutShell, 'git-bash');
+        assert.strictEqual(p3._logRetention, 100);
+        assert.strictEqual(p3._concurrency, 2);
+        assert.strictEqual(p3._commandTimeout, 600);
+        assert.deepStrictEqual(p3._envVariables, [{ key: 'TOKEN', value: 'abc' }]);
+        assert.deepStrictEqual(p3._settings.commonParameters, { env: 'prod' });
+
+        // 模拟升级后首次保存，落盘数据不得丢失
+        await p3.handleSaveCommandTree('cmd', p3._customCommandTree);
+        const onDisk3 = JSON.parse(fs.readFileSync(path.join(dir3, '.multi-project-tool', 'config.json'), 'utf8'));
+        const flat3 = [];
+        (function w(nodes) { nodes.forEach(n => { if (n.type === 'command') { flat3.push(n); } else { w(n.children || []); } }); })(onDisk3.customCommandTree);
+        assert.strictEqual(flat3.length, 3, 'all commands persisted after first save');
+        assert.strictEqual(onDisk3.settings.defaultShell, 'powershell');
+        assert.strictEqual(onDisk3.settings.shortcutShell, 'git-bash', 'new field added with default');
+        assert.strictEqual(onDisk3.settings.logRetention, 100);
+        assert.deepStrictEqual(onDisk3.envVariables, [{ key: 'TOKEN', value: 'abc' }]);
+        assert.deepStrictEqual(onDisk3.settings.commonParameters, { env: 'prod' });
+        assert.deepStrictEqual(p3._shortcutCommandTree, [], 'missing shortcut file yields empty tree');
     });
 
     summary('webview + host integration');

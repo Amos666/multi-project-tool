@@ -7,6 +7,7 @@ export interface WorkspaceConfig {
     settings: {
         commonParameters: Record<string, any>;
         defaultShell: string;
+        shortcutShell: string;
         autoRefresh: boolean;
         logRetention: number;
         concurrency: number;
@@ -24,6 +25,7 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
     settings: {
         commonParameters: {},
         defaultShell: 'git-bash',
+        shortcutShell: 'git-bash',
         autoRefresh: true,
         logRetention: 50,
         concurrency: 1,
@@ -111,6 +113,7 @@ export class ConfigStore {
             settings: {
                 commonParameters: config?.settings?.commonParameters || {},
                 defaultShell: config?.settings?.defaultShell || 'git-bash',
+                shortcutShell: config?.settings?.shortcutShell || 'git-bash',
                 autoRefresh: config?.settings?.autoRefresh !== undefined ? config.settings.autoRefresh : true,
                 logRetention: config?.settings?.logRetention || 50,
                 concurrency: config?.settings?.concurrency || 1,
