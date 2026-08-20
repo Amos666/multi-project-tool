@@ -5,7 +5,7 @@ import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
-import { CommandTreeNode, findNodeById } from '../utils/configMigration';
+import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
 
 interface LogEntry {
@@ -633,6 +633,30 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
     margin-top: 3px;
+}
+
+.command-item .alias-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.command-item .alias-row .alias {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.command-item .shell-badge {
+    flex: none;
+    font-size: 9px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--brand-border);
+    color: var(--brand-text-muted);
+    background: var(--brand-surface-raised);
+    white-space: nowrap;
 }
 
 .command-item .actions,
@@ -1581,6 +1605,7 @@ let selectedProjectIds = new Set();
 let logs = [];
 let customCommandTree = [];
 let pythonTxtCommandTree = [];
+let currentShell = 'git-bash';
 let editorState = {
     cmd: { mode: 'command', id: null, parentId: null },
     pyt: { mode: 'command', id: null, parentId: null }
@@ -1738,7 +1763,11 @@ function confirmCreateBranch() {
 }
 
 function refreshProjects() { vscode.postMessage({ command: 'refreshProjects' }); }
-function setShell(shell) { vscode.postMessage({ command: 'setShell', shell: shell }); }
+function setShell(shell) {
+    currentShell = shell;
+    renderCommandTree('cmd');
+    vscode.postMessage({ command: 'setShell', shell: shell });
+}
 
 function changeLanguage(lang) {
     currentLang = lang;
@@ -1962,7 +1991,9 @@ function saveEditor(tabId) {
             const node = findNode(tree, state.id);
             if (node) { node.name = name; node.content = content; }
         } else {
+            // 新建命令直接存储当前所选执行 shell 类型（仅 cmd 页签）
             const node = { id: genNodeId(), type: 'command', name: name, content: content };
+            if (tabId === 'cmd') { node.shell = currentShell; }
             if (state.parentId) {
                 const parent = findNode(tree, state.parentId);
                 if (parent) { parent.children = parent.children || []; parent.children.push(node); parent.collapsed = false; }
@@ -2363,13 +2394,42 @@ const TREE_ICONS = {
     play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4.2v7.6L12 8 5.5 4.2z"/></svg>'
 };
 
+function getShellLabel(shell) {
+    const labels = { 'git-bash': 'Git Bash', 'cmd': 'CMD', 'powershell': 'PowerShell', 'wsl': 'WSL' };
+    return labels[shell] || shell;
+}
+
+function filterTreeByShell(nodes, shell) {
+    // 按 shell 类型过滤命令树：分类只保留含有匹配命令的分支
+    const result = [];
+    for (const node of nodes) {
+        if (node.type === 'command') {
+            if ((node.shell || 'git-bash') === shell) { result.push(node); }
+        } else {
+            const children = filterTreeByShell(node.children || [], shell);
+            if (children.length > 0) {
+                result.push(Object.assign({}, node, { children: children }));
+            }
+        }
+    }
+    return result;
+}
+
 function renderCommandTree(tabId) {
     const list = document.getElementById(tabId === 'pyt' ? 'pythonTxtCmdList' : 'commandList');
-    const tree = getTree(tabId);
+    let tree = getTree(tabId);
     list.innerHTML = '';
     if (!tree || tree.length === 0) {
         list.innerHTML = '<div class="empty-state">' + t('cmd.empty') + '</div>';
         return;
+    }
+    if (tabId === 'cmd') {
+        // 下拉列表只显示当前所选 shell 类型的命令
+        tree = filterTreeByShell(tree, currentShell);
+        if (tree.length === 0) {
+            list.innerHTML = '<div class="empty-state">' + t('cmd.emptyFiltered') + '</div>';
+            return;
+        }
     }
     tree.forEach(node => list.appendChild(buildTreeNode(tabId, node)));
 }
@@ -2460,10 +2520,22 @@ function buildTreeNode(tabId, node) {
     main.className = 'cmd-main';
     main.onclick = function() { showCommandEditor(tabId, node.id, null); };
 
+    const aliasRow = document.createElement('div');
+    aliasRow.className = 'alias-row';
+
     const alias = document.createElement('span');
     alias.className = 'alias';
     alias.textContent = node.name;
-    main.appendChild(alias);
+    aliasRow.appendChild(alias);
+
+    if (tabId === 'cmd') {
+        const shellBadge = document.createElement('span');
+        shellBadge.className = 'shell-badge';
+        shellBadge.textContent = getShellLabel(node.shell || 'git-bash');
+        aliasRow.appendChild(shellBadge);
+    }
+
+    main.appendChild(aliasRow);
 
     const previewSpan = document.createElement('span');
     previewSpan.className = 'cmd-content-preview';
@@ -2833,7 +2905,9 @@ window.addEventListener('message', event => {
             document.getElementById('concurrencyInput').value = message.settings.concurrency;
             document.getElementById('defaultShellSelector').value = message.settings.defaultShell;
             document.getElementById('commandTimeoutInput').value = message.settings.commandTimeout;
+            currentShell = message.settings.defaultShell;
             document.getElementById('shellSelector').value = message.settings.defaultShell;
+            renderCommandTree('cmd');
             if (message.settings.language) {
                 document.getElementById('languageSelector').value = message.settings.language;
             }
@@ -3190,7 +3264,11 @@ window.addEventListener('message', event => {
             return;
         }
 
-        const shellLabel = this.getShellLabel(this._currentShell);
+        // 每个命令按自身保存的 shell 类型执行；无类型数据回退到当前所选 shell
+        const runShell = command.shell && VALID_SHELLS.includes(command.shell)
+            ? command.shell
+            : this._currentShell;
+        const shellLabel = this.getShellLabel(runShell);
         this.addLog('▶ [' + shellLabel + '] ' + command.name + ' — ' + selectedProjects.length + ' projects');
 
         const commandLines = (command.content || '').split('\n').filter(c => c.trim());
@@ -3202,7 +3280,7 @@ window.addEventListener('message', event => {
             try {
                 const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
                 // 为每条命令注入追踪：输出 "$ command => executed result: output"
-                const tracedCommand = this.injectCommandTracing(resolvedLines);
+                const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
                 const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
                     if (line.trim()) {
                         this.addLog('│   ' + line, 'info', project.name);
@@ -3222,10 +3300,10 @@ window.addEventListener('message', event => {
         this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
     }
 
-    private injectCommandTracing(lines: string[]): string {
+    private injectCommandTracing(lines: string[], shellOverride?: string): string {
         // 为每条命令生成 "$ command => executed result: output" 格式的追踪输出
         // 使用临时文件捕获每条命令的输出，确保变量在同一 shell 上下文中共享
-        const shell = this._currentShell;
+        const shell = shellOverride || this._currentShell;
         const tracedLines: string[] = [];
         const os = require('os');
         const path = require('path');
@@ -3284,10 +3362,10 @@ window.addEventListener('message', event => {
         return result;
     }
 
-    private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void): Promise<{ success: boolean; output: string; error?: string }> {
+    private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void, shellOverride?: string): Promise<{ success: boolean; output: string; error?: string }> {
         return new Promise((resolve) => {
             const timeout = this._commandTimeout * 1000;
-            let shell = this._currentShell;
+            let shell = shellOverride || this._currentShell;
             let shellArgs: string[] = [];
             let useShell = false;
 
