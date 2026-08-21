@@ -8,10 +8,20 @@ export interface CommandTreeNode {
     content?: string;
     collapsed?: boolean;
     children?: CommandTreeNode[];
+    // 仅 command 节点使用：该命令所属的执行 shell 类型
+    shell?: string;
 }
 
 export const DEFAULT_CATEGORY_NAME = 'Default';
 export const DEFAULT_CATEGORY_ID = 'default-category';
+
+export const VALID_SHELLS = ['git-bash', 'cmd', 'powershell', 'wsl'];
+// 旧版本数据没有 shell 分类，统一按 git-bash 存放
+export const DEFAULT_SHELL = 'git-bash';
+
+export function normalizeShell(shell: any): string {
+    return VALID_SHELLS.includes(shell) ? shell : DEFAULT_SHELL;
+}
 
 // 清洗并校验树节点，丢弃非法项，补齐缺省字段
 export function sanitizeTree(nodes: any): CommandTreeNode[] {
@@ -34,6 +44,7 @@ export function sanitizeTree(nodes: any): CommandTreeNode[] {
         };
         if (type === 'command') {
             node.content = typeof raw.content === 'string' ? raw.content : '';
+            node.shell = normalizeShell(raw.shell);
         } else {
             node.collapsed = raw.collapsed === true;
             node.children = sanitizeTree(raw.children);
@@ -60,7 +71,8 @@ export function legacyCommandsToTree(commands: any): CommandTreeNode[] {
             id: String(c.id),
             type: 'command' as const,
             name: c.alias,
-            content: c.content
+            content: c.content,
+            shell: normalizeShell(c.shell)
         }))
     }];
 }

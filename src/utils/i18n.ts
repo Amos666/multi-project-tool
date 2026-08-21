@@ -4,9 +4,13 @@ export const translations: Record<Language, Record<string, string>> = {
     en: {
         // Tabs
         'tab.git': 'Git',
-        'tab.custom': 'Cmd',
+        'tab.custom': 'ProjectsCmd',
+        'tab.shortcut': 'ShortCutCmd',
         'tab.settings': 'Set',
         'tab.txtcmd': 'Python',
+
+        // Shortcut tab
+        'shortcut.desc': 'Runs in the workspace root directory. Change paths inside the script if needed.',
 
         // Git actions
         'git.pull': 'Pull',
@@ -50,6 +54,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.save': 'Save',
         'cmd.cancel': 'Cancel',
         'cmd.empty': 'No commands',
+        'cmd.emptyFiltered': 'No commands for this Shell type',
         'cmd.fillAliasAndContent': 'Please fill in command alias and content',
         'cmd.selectProject': 'Please select projects first',
         'cmd.run': 'Run',
@@ -115,6 +120,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
         'backend.noProjects': 'No projects selected',
+        'backend.noWorkspace': 'No workspace folder opened',
         'backend.completed': 'Completed',
         'backend.success': 'success',
         'backend.jsonError': 'JSON format error: ',
@@ -137,9 +143,13 @@ export const translations: Record<Language, Record<string, string>> = {
     zh: {
         // Tabs
         'tab.git': 'Git',
-        'tab.custom': 'Cmd',
+        'tab.custom': 'ProjectsCmd',
+        'tab.shortcut': 'ShortCutCmd',
         'tab.settings': 'Set',
         'tab.txtcmd': 'Python',
+
+        // Shortcut tab
+        'shortcut.desc': '固定在工作区根目录执行，如需其他路径请在脚本内自行切换。',
 
         // Git actions
         'git.pull': 'Pull',
@@ -183,6 +193,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.save': '保存',
         'cmd.cancel': '取消',
         'cmd.empty': '暂无命令',
+        'cmd.emptyFiltered': '当前 Shell 类型下暂无命令',
         'cmd.fillAliasAndContent': '请填写命令别名和内容',
         'cmd.selectProject': '请先选择项目',
         'cmd.run': '运行',
@@ -248,6 +259,7 @@ export const translations: Record<Language, Record<string, string>> = {
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
         'backend.noProjects': 'No projects selected',
+        'backend.noWorkspace': '未打开工作区文件夹',
         'backend.completed': '完成',
         'backend.success': '成功',
         'backend.jsonError': 'JSON 格式错误: ',

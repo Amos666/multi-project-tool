@@ -77,15 +77,15 @@ test('load: new-format tree round-trips through save/load', () => {
     const tree = [
         {
             id: 'cat-a', type: 'category', name: 'Frontend', collapsed: false, children: [
-                { id: 'cmd-1', type: 'command', name: 'Build', content: 'npm run build' },
+                { id: 'cmd-1', type: 'command', name: 'Build', content: 'npm run build', shell: 'git-bash' },
                 {
                     id: 'cat-b', type: 'category', name: 'Nested', collapsed: true, children: [
-                        { id: 'cmd-2', type: 'command', name: 'Lint', content: 'npm run lint' }
+                        { id: 'cmd-2', type: 'command', name: 'Lint', content: 'npm run lint', shell: 'git-bash' }
                     ]
                 }
             ]
         },
-        { id: 'cmd-3', type: 'command', name: 'Root Cmd', content: 'echo root' }
+        { id: 'cmd-3', type: 'command', name: 'Root Cmd', content: 'echo root', shell: 'git-bash' }
     ];
     const base = store.load();
     base.customCommandTree = tree;

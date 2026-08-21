@@ -56,6 +56,36 @@ test('sanitizeTree: command with non-string content becomes empty string', () =>
     assert.strictEqual(out[0].content, '');
 });
 
+test('sanitizeTree: missing shell defaults to git-bash (legacy data)', () => {
+    const out = sanitizeTree([{ type: 'command', name: 'c', content: 'echo 1' }]);
+    assert.strictEqual(out[0].shell, 'git-bash');
+});
+
+test('sanitizeTree: valid shell is preserved', () => {
+    const out = sanitizeTree([
+        { type: 'command', name: 'c1', content: 'x', shell: 'cmd' },
+        { type: 'command', name: 'c2', content: 'x', shell: 'powershell' },
+        { type: 'command', name: 'c3', content: 'x', shell: 'wsl' }
+    ]);
+    assert.strictEqual(out[0].shell, 'cmd');
+    assert.strictEqual(out[1].shell, 'powershell');
+    assert.strictEqual(out[2].shell, 'wsl');
+});
+
+test('sanitizeTree: invalid shell falls back to git-bash, nested nodes covered', () => {
+    const out = sanitizeTree([
+        { type: 'command', name: 'bad', content: 'x', shell: 'fish' },
+        { type: 'category', name: 'k', children: [{ type: 'command', name: 'inner', content: 'y' }] }
+    ]);
+    assert.strictEqual(out[0].shell, 'git-bash');
+    assert.strictEqual(out[1].children[0].shell, 'git-bash');
+});
+
+test('legacyCommandsToTree: legacy commands with shell keep their type', () => {
+    const tree = legacyCommandsToTree([{ id: '1', alias: 'A', content: 'dir', shell: 'cmd' }]);
+    assert.strictEqual(tree[0].children[0].shell, 'cmd');
+});
+
 test('legacyCommandsToTree: empty/invalid input returns empty tree', () => {
     assert.deepStrictEqual(legacyCommandsToTree([]), []);
     assert.deepStrictEqual(legacyCommandsToTree(null), []);
@@ -76,8 +106,8 @@ test('legacyCommandsToTree: wraps flat commands into Default category', () => {
     assert.strictEqual(cat.name, DEFAULT_CATEGORY_NAME);
     assert.strictEqual(cat.collapsed, false);
     assert.strictEqual(cat.children.length, 2);
-    assert.deepStrictEqual(cat.children[0], { id: 'a1', type: 'command', name: 'Build', content: 'npm run build' });
-    assert.deepStrictEqual(cat.children[1], { id: 'a2', type: 'command', name: 'Test', content: 'npm test' });
+    assert.deepStrictEqual(cat.children[0], { id: 'a1', type: 'command', name: 'Build', content: 'npm run build', shell: 'git-bash' });
+    assert.deepStrictEqual(cat.children[1], { id: 'a2', type: 'command', name: 'Test', content: 'npm test', shell: 'git-bash' });
 });
 
 test('migrateConfig: new-format tree wins, migrated=false', () => {

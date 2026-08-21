@@ -138,10 +138,10 @@ test('save/load: new-format tree round-trips', () => {
     const tree = [
         {
             id: 'grp', type: 'category', name: 'Text Ops', collapsed: false, children: [
-                { id: 'up', type: 'command', name: 'Upper', content: 'import sys\nprint(sys.stdin.read().upper())' },
+                { id: 'up', type: 'command', name: 'Upper', content: 'import sys\nprint(sys.stdin.read().upper())', shell: 'git-bash' },
                 {
                     id: 'sub', type: 'category', name: 'Case', collapsed: false, children: [
-                        { id: 'low', type: 'command', name: 'Lower', content: 'import sys\nprint(sys.stdin.read().lower())' }
+                        { id: 'low', type: 'command', name: 'Lower', content: 'import sys\nprint(sys.stdin.read().lower())', shell: 'git-bash' }
                     ]
                 }
             ]

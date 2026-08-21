@@ -6,6 +6,7 @@ const suites = [
     'migration.test.js',
     'configStore.test.js',
     'pythonStore.test.js',
+    'shortcutStore.test.js',
     'webview.test.js'
 ];
 
