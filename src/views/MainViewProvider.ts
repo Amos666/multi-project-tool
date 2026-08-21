@@ -391,7 +391,8 @@ body {
 }
 
 .git-branch-selector {
-    flex: 1;
+    flex: 1 1 100%;
+    order: 10;
     min-width: 100px;
     display: flex;
     align-items: center;
@@ -452,9 +453,8 @@ body {
     font-size: 11px;
     color: var(--brand-text);
     cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-all;
     transition: background-color 0.1s ease;
 }
 
@@ -580,6 +580,16 @@ body {
 #customProjectList {
     flex: 1;
     min-height: 40px;
+}
+
+/* ShortCutCmd Tab 没有项目列表，日志面板向上延伸填满剩余空间（拖拽设置的内联 height 优先于 flex-basis） */
+#shortcutLogContainer {
+    flex: 1 0 auto;
+}
+
+/* ShortCutCmd Tab 命令列表与日志面板直接相邻，去掉双边框缝隙 */
+#shortcutCommandList {
+    border-bottom: none;
 }
 
 /* 通用面板分隔条：拖拽调节上方面板高度 */
@@ -1483,8 +1493,6 @@ body {
             <div class="command-list" id="shortcutCommandList">
                 <div class="empty-state" data-i18n="cmd.empty">No commands</div>
             </div>
-
-            <div class="panel-resizer" data-target="shortcutCommandList"></div>
 
             <div class="log-container" id="shortcutLogContainer">
                 <div class="log-resizer" id="shortcutLogResizer"></div>
