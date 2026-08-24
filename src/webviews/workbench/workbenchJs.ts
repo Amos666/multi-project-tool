@@ -32,6 +32,27 @@ function wbToast(msg, type) {
     requestAnimationFrame(function () { d.style.opacity = '1'; });
     setTimeout(function () { d.style.opacity = '0'; setTimeout(function () { d.remove(); }, 300); }, 2400);
 }
+/* 统一 SVG 图标（与其他页签一致，不使用 emoji） */
+var WB_ICON_PATHS = {
+    play: '<path d="M5.5 3.5v9l7.5-4.5z"/>',
+    stop: '<rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/>',
+    folder: '<path d="M2 4.5h4l1.5 2H14v6H2z"/>',
+    template: '<rect x="2.5" y="3" width="11" height="10" rx="1"/><path d="M2.5 6h11"/><path d="M6 3v3"/>',
+    bolt: '<path d="M8.8 2L4 9h3.2L7.2 14 12 7H8.8z"/>',
+    keyboard: '<rect x="2" y="4.5" width="12" height="7" rx="1"/><path d="M4.5 7h1M7.5 7h1M10.5 7h1M5 9.5h6"/>',
+    arrow: '<path d="M3 8h9M9 5l3 3-3 3"/>'
+};
+function wbIcon(name, color) {
+    var style = color ? ' style="stroke:' + color + '"' : '';
+    return '<svg class="wb-icon"' + style + ' viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">' + (WB_ICON_PATHS[name] || '') + '</svg>';
+}
+function wfHistIcon(result) {
+    var color = result === 'success' ? 'var(--state-success)' : result === 'stopped' ? 'var(--brand-text-muted)' : 'var(--state-error)';
+    var inner = result === 'success' ? '<path d="M5.3 8.2l1.9 1.9 3.5-4"/>'
+        : result === 'stopped' ? '<rect x="6" y="6" width="4" height="4"/>'
+            : '<path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/>';
+    return '<svg class="wb-icon" style="stroke:' + color + '" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="8" cy="8" r="6.2"/>' + inner + '</svg>';
+}
 
 window.addEventListener('message', function (event) {
     var m = event.data;
@@ -285,19 +306,48 @@ function wfToggleLink() {
 function wfCmdLabelKey(n) {
     if (n.tag === 'condition') { return 'wb.wf.expr'; }
     if (n.tag === 'confirm') { return 'wb.wf.confirmText'; }
+    if (n.tag === 'ref') { return 'wb.wf.refParam'; }
     if (n.tag === 'notify') {
         var nt = n.notifyType || 'text';
         return nt === 'cmd' ? 'wb.wf.cmd' : nt === 'http' ? 'wb.wf.notifyUrl' : 'wb.wf.notifyText';
     }
     return 'wb.wf.cmd';
 }
+function wfIsHttp(n) { return n.tag === 'notify' && (n.notifyType || 'text') === 'http'; }
+function wfSyncNotifyFields(n) {
+    var isNotify = n.tag === 'notify';
+    var isHttp = wfIsHttp(n);
+    wbEl('wfPNotifyTypeLabel').style.display = isNotify ? '' : 'none';
+    wbEl('wfPNotifyType').style.display = isNotify ? '' : 'none';
+    if (isNotify) { wbEl('wfPNotifyType').value = n.notifyType || 'text'; }
+    ['wfPHttpMethod', 'wfPHttpHeaders', 'wfPHttpBody'].forEach(function (id) {
+        wbEl(id + 'Label').style.display = isHttp ? '' : 'none';
+        wbEl(id).style.display = isHttp ? '' : 'none';
+    });
+    if (isHttp) {
+        wbEl('wfPHttpMethod').value = n.httpMethod || 'GET';
+        wbEl('wfPHttpHeaders').value = n.httpHeaders || '';
+        wbEl('wfPHttpBody').value = n.httpBody || '';
+    }
+}
+/* cmd 字段：start 隐藏；ref 仅在选择 git 页签时作为参数字段显示 */
+function wfSyncCmdField(n) {
+    var show = n.tag !== 'start' && !(n.tag === 'ref' && (n.refTab || 'cmd') !== 'git');
+    wbEl('wfPCmdLabel').style.display = show ? '' : 'none';
+    wbEl('wfPCmd').style.display = show ? '' : 'none';
+    wbEl('wfPCmdLabel').textContent = t(wfCmdLabelKey(n));
+}
 /* ---- ref 节点：引用各页签已保存命令 ---- */
+var WF_GIT_OPS = ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch'];
 function wfRefTree(tab) {
     if (tab === 'pyt') { return typeof pythonTxtCommandTree !== 'undefined' ? pythonTxtCommandTree : []; }
     if (tab === 'shortcut') { return typeof shortcutCommandTree !== 'undefined' ? shortcutCommandTree : []; }
     return typeof customCommandTree !== 'undefined' ? customCommandTree : [];
 }
 function wfRefCommands(tab) {
+    if (tab === 'git') {
+        return WF_GIT_OPS.map(function (op) { return { id: 'git:' + op, name: t('wb.wf.gitOp.' + op) }; });
+    }
     var out = [];
     (function walk(nodes, prefix) {
         (nodes || []).forEach(function (nn) {
@@ -306,6 +356,10 @@ function wfRefCommands(tab) {
         });
     })(wfRefTree(tab), '');
     return out;
+}
+/* ref→git 时参数必填的分支类操作 */
+function wfGitRefNeedsParam(cmdId) {
+    return cmdId === 'git:switch-branch' || cmdId === 'git:create-branch' || cmdId === 'git:commit';
 }
 function wfRefName(n) {
     var cmds = wfRefCommands(n.refTab || 'cmd');
@@ -330,6 +384,7 @@ function wfRefTabChange(val) {
     n.refTab = val;
     n.refCommandId = '';
     wfFillRefCmdSelect(n);
+    wfSyncCmdField(n);
     wfDraw();
 }
 function wfSchedModeChange() {
@@ -371,17 +426,12 @@ function wfSelectNode(id) {
     wbEl('wfPCmd').value = n.cmd || '';
     wbEl('wfPTimeout').value = n.timeout || 300;
     wbEl('wfPFail').value = n.failPolicy || 'stop';
-    var isNotify = n.tag === 'notify';
-    wbEl('wfPNotifyTypeLabel').style.display = isNotify ? '' : 'none';
-    wbEl('wfPNotifyType').style.display = isNotify ? '' : 'none';
-    if (isNotify) { wbEl('wfPNotifyType').value = n.notifyType || 'text'; }
+    wfSyncNotifyFields(n);
     var isRef = n.tag === 'ref';
     wbEl('wfPRefTabLabel').style.display = isRef ? '' : 'none';
     wbEl('wfPRefTab').style.display = isRef ? '' : 'none';
     wbEl('wfPRefCmdLabel').style.display = isRef ? '' : 'none';
     wbEl('wfPRefCmd').style.display = isRef ? '' : 'none';
-    wbEl('wfPCmdLabel').style.display = isRef ? 'none' : '';
-    wbEl('wfPCmd').style.display = isRef ? 'none' : '';
     if (isRef) {
         wbEl('wfPRefTab').value = n.refTab || 'cmd';
         wfFillRefCmdSelect(n);
@@ -396,11 +446,7 @@ function wfSelectNode(id) {
         wbEl('wfPSchedValue').value = n.scheduleValue || '';
         wfSchedModeChange();
     }
-    if (isRef || isStart) {
-        wbEl('wfPCmdLabel').style.display = 'none';
-        wbEl('wfPCmd').style.display = 'none';
-    }
-    wbEl('wfPCmdLabel').textContent = t(wfCmdLabelKey(n));
+    wfSyncCmdField(n);
     var deps = WF.edges.filter(function (e) { return e.to === id; })
         .map(function (e) { var u = wfNodeById(e.from); return u ? u.label : '?'; });
     wbEl('wfPDeps').textContent = deps.length ? deps.join(', ') : t('wb.wf.noDeps');
@@ -430,7 +476,7 @@ function wfEditProp(key, val) {
     var n = wfNodeById(WF.selected);
     if (!n) { return; }
     n[key] = val;
-    if (key === 'notifyType') { wbEl('wfPCmdLabel').textContent = t(wfCmdLabelKey(n)); }
+    if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
     wfDraw();
 }
 function wfDeleteSelected() {
@@ -560,6 +606,7 @@ function wfLoadTemplate(id) {
     wbToast(t('wb.wf.templateLoaded'), 'ok');
 }
 function wfDeleteTemplate(id) {
+    if (!window.confirm(t('wb.wf.deleteTemplateConfirm'))) { return; }
     vscode.postMessage({ command: 'templateDelete', id: id });
 }
 function wfSaveAsTemplate() {
@@ -577,7 +624,7 @@ function renderHistoryList() {
         return;
     }
     box.innerHTML = hist.map(function (h, i) {
-        var icon = h.result === 'success' ? '✅' : h.result === 'stopped' ? '⏹' : '❌';
+        var icon = wfHistIcon(h.result);
         var time = new Date(h.time).toTimeString().slice(0, 8);
         return '<div class="wf-list-item" onclick="wfShowHistory(' + i + ')" title="' + wbEsc(h.workflowName) + '">' +
             icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(h.workflowName) + ' · ' + (h.duration / 1000).toFixed(1) + 's · ' + time + '</span></div>';
@@ -632,14 +679,12 @@ function wfSetRunningUI(running) {
 function wfRun() {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
     if (!WF.nodes.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
-    if (wbEl('wfEnv').value === 'prod' && !window.confirm(t('wb.wf.prodConfirm'))) { return; }
     WF.batchNodeIds = [];
     wfPrepareRun();
     vscode.postMessage({
         command: 'workflowRun',
         workflow: wfCurrentWorkflowObj(),
-        shell: wbEl('wfShell').value,
-        env: wbEl('wfEnv').value
+        shell: wbEl('wfShell').value
     });
 }
 function wfPrepareRun() {
@@ -871,8 +916,6 @@ function batchRun() {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
     var built = batchBuildWorkflow();
     if (!built) { wbToast(t('wb.batch.empty'), 'err'); return; }
-    var env = wbEl('batchEnv').value;
-    if (env === 'prod' && !window.confirm(t('wb.wf.prodConfirm'))) { return; }
     WF.batchNodeIds = built.ids;
     WB.batchRunning = true;
     wbEl('batchStatus').textContent = t('wb.wf.stRunning');
@@ -881,12 +924,11 @@ function batchRun() {
     batchClearLog();
     var g = batchCurrent();
     var gLabel = g ? (g.name.indexOf('wb.batch.') === 0 ? t(g.name) : g.name) : '';
-    wfAppendOutput('hdr', '━━ ⚡ ' + gLabel + ' · ' + (g && g.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' · ' + wbEl('batchShell').value + ' ━━');
+    wfAppendOutput('hdr', '━━ ' + gLabel + ' · ' + (g && g.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' · ' + wbEl('batchShell').value + ' ━━');
     vscode.postMessage({
         command: 'workflowRun',
         workflow: built.workflow,
-        shell: wbEl('batchShell').value,
-        env: env
+        shell: wbEl('batchShell').value
     });
 }
 function batchResetPills() {
@@ -934,30 +976,30 @@ function launcherBuild() {
     var items = [];
     if (WF.running) {
         items.push({
-            icon: '⏹', label: t('wb.launcher.stopFlow'), kind: t('wb.launcher.kindFlow'),
+            icon: wbIcon('stop'), label: t('wb.launcher.stopFlow'), kind: t('wb.launcher.kindFlow'),
             run: function () { switchTab('workflow'); wfStop(); }
         });
     }
     (WB.data.workflows || []).forEach(function (wf) {
         items.push({
-            icon: '▶', label: wf.name, kind: t('wb.launcher.kindFlow'),
+            icon: wbIcon('play'), label: wf.name, kind: t('wb.launcher.kindFlow'),
             run: function () { wfLauncherRun(wf.id); }
         });
         items.push({
-            icon: '📂', label: wf.name, kind: t('wb.launcher.kindFlow'),
+            icon: wbIcon('folder'), label: wf.name, kind: t('wb.launcher.kindFlow'),
             run: function () { wfSelectFlow(wf.id); switchTab('workflow'); }
         });
     });
     (WB.data.templates || []).forEach(function (tpl) {
         items.push({
-            icon: '📦', label: tpl.builtin ? t(tpl.name) : tpl.name, kind: t('wb.launcher.kindTemplate'),
+            icon: wbIcon('template'), label: tpl.builtin ? t(tpl.name) : tpl.name, kind: t('wb.launcher.kindTemplate'),
             run: function () { wfLoadTemplate(tpl.id); }
         });
     });
     (WB.data.batchGroups || []).forEach(function (g, i) {
         var label = g.name.indexOf('wb.batch.') === 0 ? t(g.name) : g.name;
         items.push({
-            icon: '⚡', label: label, kind: t('wb.launcher.kindBatch'),
+            icon: wbIcon('bolt'), label: label, kind: t('wb.launcher.kindBatch'),
             run: function () { WB.batchIdx = i; switchTab('batch'); renderBatchGroups(); }
         });
     });
@@ -965,7 +1007,7 @@ function launcherBuild() {
         (tree || []).forEach(function (node) {
             if (node.type === 'command' && node.content) {
                 items.push({
-                    icon: '⌨', label: node.name, kind: t('wb.launcher.kindShortcut'),
+                    icon: wbIcon('keyboard'), label: node.name, kind: t('wb.launcher.kindShortcut'),
                     run: function () { vscode.postMessage({ command: 'runShortcutCmd', cmd: { alias: node.name, content: node.content, shell: node.shell } }); }
                 });
             }
@@ -976,7 +1018,7 @@ function launcherBuild() {
         ['git', 'tab.git'], ['custom', 'tab.custom'], ['shortcut', 'tab.shortcut'], ['txtcmd', 'tab.txtcmd'],
         ['settings', 'tab.settings'], ['checklist', 'tab.checklist'], ['workflow', 'tab.workflow'], ['batch', 'tab.batch']
     ].forEach(function (pair) {
-        items.push({ icon: '→', label: t(pair[1]), kind: t('wb.launcher.kindTab'), run: function () { switchTab(pair[0]); } });
+        items.push({ icon: wbIcon('arrow'), label: t(pair[1]), kind: t('wb.launcher.kindTab'), run: function () { switchTab(pair[0]); } });
     });
     return items;
 }
@@ -1028,18 +1070,24 @@ document.addEventListener('keydown', function (e) {
 });
 
 /* ==================== Hidden tabs ==================== */
+/* 可隐藏的页签（settings 承载本开关面板，始终保留） */
+var WB_ALL_TABS = ['git', 'custom', 'shortcut', 'txtcmd', 'checklist', 'workflow', 'batch'];
 function applyHiddenTabs() {
     var hidden = WB.data.hiddenTabs || [];
-    ['checklist', 'workflow', 'batch'].forEach(function (id) {
+    WB_ALL_TABS.forEach(function (id) {
         var btn = wbEl('tabBtn-' + id);
         if (!btn) { return; }
         btn.style.display = hidden.indexOf(id) >= 0 ? 'none' : '';
     });
     var hiddenSet = {};
     hidden.forEach(function (h) { hiddenSet[h] = true; });
-    if (hiddenSet[currentTab]) { switchTab('git'); }
+    if (hiddenSet[currentTab]) {
+        var next = WB_ALL_TABS.filter(function (id) { return !hiddenSet[id]; })[0];
+        switchTab(next || 'settings');
+    }
 }
 function wbToggleTab(id) {
+    if (id === 'settings') { return; }
     var hidden = WB.data.hiddenTabs || [];
     var idx = hidden.indexOf(id);
     if (idx >= 0) { hidden.splice(idx, 1); } else { hidden.push(id); }
@@ -1050,7 +1098,7 @@ function wbToggleTab(id) {
 }
 function applyTabToggles() {
     var hidden = WB.data.hiddenTabs || [];
-    ['checklist', 'workflow', 'batch'].forEach(function (id) {
+    WB_ALL_TABS.forEach(function (id) {
         var el = wbEl('wbTabToggle-' + id);
         if (el) { el.classList.toggle('active', hidden.indexOf(id) < 0); }
     });

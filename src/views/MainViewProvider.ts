@@ -1321,19 +1321,19 @@ body {
     private getHtmlBody(): string {
         return `
     <div class="tab-bar">
-        <div class="tab active" onclick="switchTab('git')">
+        <div class="tab active" id="tabBtn-git" onclick="switchTab('git')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="tab.git">Git</span>
         </div>
-        <div class="tab" onclick="switchTab('custom')">
+        <div class="tab" id="tabBtn-custom" onclick="switchTab('custom')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">ProjectsCmd</span>
         </div>
-        <div class="tab" onclick="switchTab('shortcut')">
+        <div class="tab" id="tabBtn-shortcut" onclick="switchTab('shortcut')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5L9.8 6l4.7.4-3.6 3 1.1 4.6L8 11.5 3.9 14l1.1-4.6-3.6-3L6.2 6z"/></svg><span data-i18n="tab.shortcut">ShortCutCmd</span>
         </div>
-        <div class="tab" onclick="switchTab('txtcmd')">
+        <div class="tab" id="tabBtn-txtcmd" onclick="switchTab('txtcmd')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Python</span>
         </div>
-        <div class="tab" onclick="switchTab('settings')">
+        <div class="tab" id="tabBtn-settings" onclick="switchTab('settings')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3 8H1M15 8h-2M3.5 3.5L5 5M11 11l1.5 1.5M3.5 12.5L5 11M11 5l1.5-1.5"/></svg><span data-i18n="tab.settings">Set</span>
         </div>${WORKBENCH_TAB_BUTTONS}
     </div>
@@ -1544,7 +1544,23 @@ body {
                 </div>
 
                 <div class="settings-section">
-                    <h3>🧩 <span data-i18n="settings.workbenchTabs">Workbench Tabs</span></h3>
+                    <h3>🧩 <span data-i18n="settings.tabsVisible">Tabs Visible</span></h3>
+                    <div class="settings-row">
+                        <label data-i18n="tab.git">Git</label>
+                        <div class="toggle-switch" id="wbTabToggle-git" onclick="wbToggleTab('git')"></div>
+                    </div>
+                    <div class="settings-row">
+                        <label data-i18n="tab.custom">ProjectsCmd</label>
+                        <div class="toggle-switch" id="wbTabToggle-custom" onclick="wbToggleTab('custom')"></div>
+                    </div>
+                    <div class="settings-row">
+                        <label data-i18n="tab.shortcut">ShortCutCmd</label>
+                        <div class="toggle-switch" id="wbTabToggle-shortcut" onclick="wbToggleTab('shortcut')"></div>
+                    </div>
+                    <div class="settings-row">
+                        <label data-i18n="tab.txtcmd">Python</label>
+                        <div class="toggle-switch" id="wbTabToggle-txtcmd" onclick="wbToggleTab('txtcmd')"></div>
+                    </div>
                     <div class="settings-row">
                         <label data-i18n="tab.checklist">ToDo</label>
                         <div class="toggle-switch" id="wbTabToggle-checklist" onclick="wbToggleTab('checklist')"></div>
@@ -3527,8 +3543,59 @@ window.addEventListener('message', event => {
      * Flow ref 节点执行器：按 (tab, commandId) 执行各页签已保存命令，
      * 等价于用户在对应页签点击执行按钮，输出转发到工作流日志，返回成败。
      */
-    private async executeReferencedCommand(tabId: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
+    private async executeReferencedCommand(tabId: string, commandId: string, param: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
         try {
+            if (tabId === 'git') {
+                const op = (commandId || '').replace(/^git:/, '');
+                const GIT_OPS = ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch'];
+                if (!GIT_OPS.includes(op)) {
+                    log('err', `[Ref] unknown git operation: ${commandId}`);
+                    return false;
+                }
+                const arg = (param || '').trim();
+                if ((op === 'switch-branch' || op === 'create-branch') && !arg) {
+                    log('err', `[Ref] git ${op}: branch name required (set node parameter)`);
+                    return false;
+                }
+                const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id) && p.isGitRepo);
+                if (selectedProjects.length === 0) {
+                    log('err', '[Ref] ' + t('backend.noGitProjects', this._language));
+                    return false;
+                }
+                log('dim', `[Ref] git ${op}${arg ? ' ' + arg : ''} — ${selectedProjects.length} projects`);
+                let successCount = 0;
+                for (const project of selectedProjects) {
+                    log('info', '├── ' + project.name + ' (' + (project.currentBranch || 'no branch') + ')');
+                    try {
+                        let result: GitOperationResult;
+                        switch (op) {
+                            case 'pull': result = await GitUtils.gitPull(project); break;
+                            case 'commit': result = await GitUtils.gitCommit(project, arg); break;
+                            case 'push': result = await GitUtils.gitCustomCommand(project, 'push'); break;
+                            case 'fetch': result = await GitUtils.gitFetch(project); break;
+                            case 'switch-branch': result = await GitUtils.gitSwitchBranch(project, arg); break;
+                            default: {
+                                const exists = await GitUtils.gitBranchExists(project, arg);
+                                result = exists ? await GitUtils.gitSwitchBranch(project, arg) : await GitUtils.gitCreateBranch(project, arg);
+                            }
+                        }
+                        if (result.success) {
+                            successCount++;
+                            log('ok', '│   ✓ ' + (result.output || 'Success'));
+                        } else {
+                            log('err', '│   ✗ ' + (result.error || result.message));
+                        }
+                    } catch (error) {
+                        log('err', '│   ✗ Error: ' + error);
+                    }
+                }
+                const allOk = successCount === selectedProjects.length;
+                log(allOk ? 'ok' : 'err', `[Ref] ${successCount}/${selectedProjects.length} ` + t('backend.success', this._language));
+                await this.loadProjects();
+                this.updateWebview();
+                return allOk;
+            }
+
             if (tabId === 'cmd') {
                 const command = findNodeById(this._customCommandTree, commandId);
                 if (!command || command.type !== 'command') {
@@ -4125,7 +4192,7 @@ window.addEventListener('message', event => {
             commonParameters: this._settings.commonParameters,
             envVariables: this.getEnvVariables(),
             maxParallel: this._concurrency,
-            runRef: (tab, id, log) => this.executeReferencedCommand(tab, id, log)
+            runRef: (tab, id, log, param) => this.executeReferencedCommand(tab, id, param || '', log)
         }, (event) => {
             this._view?.webview.postMessage({ command: 'workflowEvent', event });
             if (event.type === 'done') {

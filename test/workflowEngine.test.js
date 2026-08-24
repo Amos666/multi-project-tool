@@ -299,24 +299,69 @@ async function runOnce(workflow, options) {
         assert.strictEqual(states.n, 'failed');
     });
 
+    await testAsync('engine: notify http POST sends method, headers and body', async () => {
+        const http = require('http');
+        let got = null;
+        const server = http.createServer((req, res) => {
+            let body = '';
+            req.on('data', d => { body += d; });
+            req.on('end', () => { got = { method: req.method, headers: req.headers, body }; res.writeHead(201); res.end('ok'); });
+        });
+        await new Promise(r => server.listen(0, '127.0.0.1', r));
+        const port = server.address().port;
+        try {
+            const wf = {
+                id: 'w', name: 'w', updatedAt: 1,
+                nodes: [node('n', 'http://127.0.0.1:' + port + '/hook', 'notify', {
+                    notifyType: 'http', httpMethod: 'POST',
+                    httpHeaders: '{"Content-Type":"application/json","X-Token":"abc"}',
+                    httpBody: '{"msg":"${who}"}'
+                })],
+                edges: []
+            };
+            const { done, states, events } = await runOnce(wf, opts({ commonParameters: { who: 'world' } }));
+            assert.strictEqual(states.n, 'success');
+            assert.strictEqual(done.result, 'success');
+            assert.strictEqual(got.method, 'POST');
+            assert.strictEqual(got.headers['content-type'], 'application/json');
+            assert.strictEqual(got.headers['x-token'], 'abc');
+            assert.strictEqual(got.body, '{"msg":"world"}', 'body sent with ${var} substituted');
+            assert.ok(events.some(e => e.type === 'log' && /HTTP POST/.test(e.text)), 'method logged');
+            assert.ok(events.some(e => e.type === 'log' && /HTTP 201/.test(e.text)), 'status logged');
+        } finally {
+            server.close();
+        }
+    });
+
+    await testAsync('engine: notify http invalid headers JSON fails without sending', async () => {
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('n', 'http://127.0.0.1:1/hook', 'notify', { notifyType: 'http', httpHeaders: 'not-json' })],
+            edges: []
+        };
+        const { states, events } = await runOnce(wf);
+        assert.strictEqual(states.n, 'failed');
+        assert.ok(events.some(e => e.type === 'log' && e.level === 'err' && /headers/.test(e.text)), 'headers parse error logged');
+    });
+
     await testAsync('engine: ref node runs via host runRef callback', async () => {
         const calls = [];
         const o = opts({
-            runRef: (tab, id, log) => {
-                calls.push(tab + ':' + id);
+            runRef: (tab, id, log, param) => {
+                calls.push(tab + ':' + id + ':' + (param || ''));
                 log('info', 'ref output line');
                 return Promise.resolve(true);
             }
         });
         const wf = {
             id: 'w', name: 'w', updatedAt: 1,
-            nodes: [node('r', '', 'ref', { refTab: 'shortcut', refCommandId: 'c1' })],
+            nodes: [node('r', 'my-param', 'ref', { refTab: 'shortcut', refCommandId: 'c1' })],
             edges: []
         };
         const { done, states, events } = await runOnce(wf, o);
         assert.strictEqual(states.r, 'success');
         assert.strictEqual(done.result, 'success');
-        assert.deepStrictEqual(calls, ['shortcut:c1']);
+        assert.deepStrictEqual(calls, ['shortcut:c1:my-param'], 'node cmd passed to host as ref param');
         assert.ok(events.some(e => e.type === 'log' && e.text === 'ref output line'), 'host log forwarded');
     });
 

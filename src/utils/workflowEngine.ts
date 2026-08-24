@@ -18,8 +18,8 @@ export interface WorkflowEngineOptions {
     envVariables: Record<string, string>;
     /** 并行上限 */
     maxParallel: number;
-    /** ref 节点执行器：由宿主提供，按 (tab, commandId) 执行各页签已保存命令，返回成败 */
-    runRef?: (tab: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void) => Promise<boolean>;
+    /** ref 节点执行器：由宿主提供，按 (tab, commandId) 执行各页签已保存命令，返回成败；param 承载节点参数（如 git 分支名/提交信息） */
+    runRef?: (tab: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void, param?: string) => Promise<boolean>;
 }
 
 export type WorkflowEngineEvent =
@@ -204,8 +204,10 @@ export class WorkflowEngine {
                         log(node.id, 'err', `[Notify] ${node.label}: empty URL`);
                         ok = false;
                     } else {
-                        log(node.id, 'dim', `[Notify] HTTP GET ${content}`);
-                        ok = await this.httpNotify(node, content, (level, text) => log(node.id, level, text));
+                        const method = (node.httpMethod || 'GET').toUpperCase();
+                        const body = this.resolveVariables(node.httpBody || '', options.commonParameters);
+                        log(node.id, 'dim', `[Notify] HTTP ${method} ${content}`);
+                        ok = await this.httpNotify(node, content, body, (level, text) => log(node.id, level, text));
                     }
                 } else if (notifyType === 'cmd') {
                     if (!content) {
@@ -245,7 +247,8 @@ export class WorkflowEngine {
                             log(node.id, 'err', `[Ref] ${node.label}: no command referenced`);
                             return false;
                         }
-                        return options.runRef(node.refTab, node.refCommandId, (level, text) => log(node.id, level, text));
+                        return options.runRef(node.refTab, node.refCommandId, (level, text) => log(node.id, level, text),
+                            this.resolveVariables(node.cmd || '', options.commonParameters));
                     };
                     let ok = await attempt();
                     if (!ok && node.failPolicy === 'retry1' && !this._stopFlag) {
@@ -527,8 +530,8 @@ export class WorkflowEngine {
         });
     }
 
-    /** 发送真实 HTTP GET 请求（webhook），按状态码判定成败，超时按节点超时 */
-    private httpNotify(node: WfNode, url: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
+    /** 发送真实 HTTP 请求（webhook），支持方法/请求头/请求体，按状态码判定成败，超时按节点超时 */
+    private httpNotify(node: WfNode, url: string, body: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
         return new Promise(resolve => {
             let target: URL;
             try {
@@ -539,8 +542,23 @@ export class WorkflowEngine {
                 resolve(false);
                 return;
             }
+            const method = (node.httpMethod || 'GET').toUpperCase();
+            const headers: Record<string, string> = {};
+            if (node.httpHeaders && node.httpHeaders.trim()) {
+                try {
+                    const parsed = JSON.parse(node.httpHeaders);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { throw new Error('headers must be a JSON object'); }
+                    for (const k of Object.keys(parsed)) { headers[k] = String((parsed as Record<string, any>)[k]); }
+                } catch (e: any) {
+                    log('err', `[Notify] invalid headers JSON: ${e.message}`);
+                    resolve(false);
+                    return;
+                }
+            }
+            const payload = body || '';
+            if (payload) { headers['Content-Length'] = String(Buffer.byteLength(payload)); }
             const mod = target.protocol === 'https:' ? https : http;
-            const req = mod.request(target, { method: 'GET', timeout: Math.max(1, node.timeout || 30) * 1000 }, res => {
+            const req = mod.request(target, { method, timeout: Math.max(1, node.timeout || 30) * 1000, headers }, res => {
                 const code = res.statusCode || 0;
                 res.resume();
                 if (code >= 200 && code < 400) {
@@ -559,6 +577,7 @@ export class WorkflowEngine {
                 log('err', `[Notify] HTTP error: ${err.message}`);
                 resolve(false);
             });
+            if (payload) { req.write(payload); }
             req.end();
         });
     }

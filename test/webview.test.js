@@ -122,14 +122,20 @@ test('HTML: checklist panel (input/priority/progress)', () => {
 
 test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => {
     for (const id of ['wfSvg', 'wfPalette', 'wfFlowList', 'wfTemplateList', 'wfHistoryList',
-        'wfName', 'wfEnv', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
+        'wfName', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
+        'wfPHttpMethod', 'wfPHttpHeaders', 'wfPHttpBody',
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
+    assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
+    assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
     assert.ok(html.includes('onclick="wfRun()"'), 'run button');
     assert.ok(html.includes('onclick="wfStop()"'), 'stop button');
     assert.ok(html.includes("wfEditProp('notifyType',this.value)"), 'notify type selector wired');
     assert.ok(html.includes('wb.wf.notifyTypeHttp'), 'http notify option i18n key');
+    assert.ok(html.includes("wfEditProp('httpMethod',this.value)") && html.includes("wfEditProp('httpHeaders',this.value)") && html.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
+    assert.ok(html.includes('value="POST"') && html.includes('value="DELETE"'), 'http method choices');
+    assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(html), 'flow toolbar uses SVG icons, not emoji');
 });
 
 test('JS: notify node property label switches by notifyType', () => {
@@ -155,6 +161,18 @@ test('HTML+JS: ref node (reference saved commands from other tabs)', () => {
     assert.ok(translations.en['wb.wf.refTab'] && translations.zh['wb.wf.refCmd'], 'property i18n');
 });
 
+test('HTML+JS: ref node supports git tab operations', () => {
+    assert.ok(html.includes('value="git"'), 'source tab selector offers git');
+    assert.ok(js.includes('WF_GIT_OPS'), 'fixed git operation list in webview');
+    for (const op of ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch']) {
+        assert.ok(js.includes("'" + op + "'"), 'git op listed: ' + op);
+        assert.ok(translations.en['wb.wf.gitOp.' + op] && translations.zh['wb.wf.gitOp.' + op], 'git op i18n: ' + op);
+    }
+    assert.ok(js.includes("if (tab === 'git')"), 'wfRefCommands returns git ops');
+    assert.ok(translations.en['wb.wf.refParam'] && translations.zh['wb.wf.refParam'], 'parameter field i18n');
+    assert.ok(js.includes('function wfSyncCmdField'), 'cmd field doubles as git ref parameter');
+});
+
 test('HTML+JS: start node (scheduled start) and confirm node (manual approval)', () => {
     assert.ok(js.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes start & confirm');
     for (const id of ['wfPSchedModeLabel', 'wfPSchedMode', 'wfPSchedValueLabel', 'wfPSchedValue']) {
@@ -173,8 +191,8 @@ test('HTML+JS: start node (scheduled start) and confirm node (manual approval)',
     }
 });
 
-test('HTML: batch panel has own shell/env selectors and live log area', () => {
-    for (const id of ['batchGroupSel', 'batchMode', 'batchShell', 'batchEnv', 'batchList', 'batchStatus', 'batchOutput']) {
+test('HTML: batch panel has own shell selector and live log area', () => {
+    for (const id of ['batchGroupSel', 'batchMode', 'batchShell', 'batchList', 'batchStatus', 'batchOutput']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing batch element: ' + id);
     }
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
@@ -182,25 +200,46 @@ test('HTML: batch panel has own shell/env selectors and live log area', () => {
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
 });
 
-test('JS: workbench behaviors wired (run/stop, prod confirm, launcher run, counters)', () => {
+test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher run, counters)', () => {
     for (const sym of ['wbAddTask', 'wbToggleTask', 'wfRun', 'wfStop', 'wfSave', 'wfDraw',
         'wfWouldCycle', 'wfLauncherRun', 'wfSetCounters', 'wfHistoryView', 'launcherOpen',
         'launcherKey', 'applyHiddenTabs', 'wbToggleTab', 'batchRun', 'batchToFlow',
         'wfWriteLine', 'batchClearLog', 'wfAppendOutput']) {
         assert.ok(js.includes(sym), 'missing workbench JS symbol: ' + sym);
     }
-    assert.ok(js.includes("window.confirm(t('wb.wf.prodConfirm'))"), 'prod environment requires confirmation');
+    assert.ok(js.includes("window.confirm(t('wb.wf.deleteTemplateConfirm'))"), 'template delete requires confirmation');
+    assert.ok(translations.en['wb.wf.deleteTemplateConfirm'] && translations.zh['wb.wf.deleteTemplateConfirm'], 'delete-confirm i18n in both languages');
+    assert.ok(!js.includes('wfEnv') && !js.includes('batchEnv') && !js.includes('prodConfirm'), 'dev/test/prod dropdowns fully removed');
     assert.ok(js.includes('wfFailed') && js.includes('wfSkipped'), 'monitor counters updated');
     assert.ok(js.includes("command: 'workflowRun'") && js.includes("command: 'workflowStop'"), 'run/stop messages');
+    assert.ok(!/command: 'workflowRun'[\s\S]{0,160}\benv:/.test(js), 'run message no longer carries env');
     assert.ok(js.includes("command: 'checklistSave'") && js.includes("command: 'workbenchTabsSave'"), 'persistence messages');
     assert.ok(js.includes('wbNow()'), 'log lines carry timestamps');
     assert.ok(/WB\.batchRunning[\s\S]{0,120}batchOutput/.test(js), 'batch run mirrors logs into batch tab');
 });
 
-test('HTML: Set tab exposes workbench tab toggles', () => {
-    for (const id of ['wbTabToggle-checklist', 'wbTabToggle-workflow', 'wbTabToggle-batch']) {
+test('JS: flow tab icons are unified SVGs, no emoji in toolbar/history/launcher', () => {
+    assert.ok(js.includes('WB_ICON_PATHS') && js.includes('function wbIcon'), 'shared SVG icon set');
+    assert.ok(js.includes('function wfHistIcon'), 'history entries use SVG status icons');
+    for (const emoji of ['✅', '⏹', '❌', '📂', '📦', '⚡', '⌨']) {
+        assert.ok(js.indexOf(emoji) < 0, 'emoji removed from workbench JS: ' + emoji);
+    }
+    assert.ok(!/[▶⏹🔗💾🗑📊📜📋]/.test(html.split('id="tab-workflow"')[1].split('id="tab-batch"')[0]), 'flow tab HTML free of emoji buttons');
+});
+
+test('HTML: Set tab exposes "Tabs Visible" toggles for all tabs', () => {
+    for (const id of ['wbTabToggle-git', 'wbTabToggle-custom', 'wbTabToggle-shortcut', 'wbTabToggle-txtcmd',
+        'wbTabToggle-checklist', 'wbTabToggle-workflow', 'wbTabToggle-batch']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing toggle: ' + id);
     }
+    assert.ok(html.includes('data-i18n="settings.tabsVisible"'), 'section renamed to Tabs Visible');
+    assert.ok(!html.includes('settings.workbenchTabs'), 'old key removed');
+    for (const id of ['tabBtn-git', 'tabBtn-custom', 'tabBtn-shortcut', 'tabBtn-txtcmd', 'tabBtn-settings']) {
+        assert.ok(html.includes('id="' + id + '"'), 'main tab button needs id for hiding: ' + id);
+    }
+    assert.ok(js.includes("['git', 'custom', 'shortcut', 'txtcmd', 'checklist', 'workflow', 'batch']"), 'hide logic covers all tabs');
+    assert.ok(js.includes("if (id === 'settings') { return; }"), 'settings tab cannot be hidden');
+    assert.ok(translations.en['settings.tabsVisible'] === 'Tabs Visible' && translations.zh['settings.tabsVisible'], 'i18n in both languages');
 });
 
 
@@ -432,6 +471,43 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         assert.ok(entry, 'run recorded');
         assert.strictEqual(entry.result, 'failed');
         assert.strictEqual(entry.nodes[0].state, 'failed');
+    });
+
+    await testAsync('host: workflow ref node to git tab runs git operations like the Git tab buttons', async () => {
+        const cp = require('child_process');
+        const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'mpt-gitref-'));
+        cp.execSync('git init -q && git config user.email t@t.local && git config user.name test && echo hi > a.txt && git add . && git commit -qm init', { cwd: repo });
+        provider._projects = [{ id: 'gp1', name: 'repo', path: repo, isGitRepo: true, currentBranch: 'master' }];
+        provider._selectedProjectIds = new Set(['gp1']);
+
+        const wf = {
+            id: 'wgit', name: 'GitRefFlow', updatedAt: 1,
+            nodes: [{ id: 'g1', label: 'create branch', tag: 'ref', x: 0, y: 0, cmd: 'flow-branch', timeout: 30, failPolicy: 'stop', refTab: 'git', refCommandId: 'git:create-branch' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const entry = JSON.parse(fs.readFileSync(wbFile, 'utf8')).history.find(h => h.workflowName === 'GitRefFlow');
+        assert.ok(entry, 'git ref run recorded');
+        assert.strictEqual(entry.result, 'success');
+        assert.strictEqual(entry.nodes[0].state, 'success');
+        const branchOut = cp.execSync('git branch --list flow-branch', { cwd: repo }).toString();
+        assert.ok(branchOut.indexOf('flow-branch') >= 0, 'branch actually created via git ref');
+
+        // branch operations require the node parameter
+        provider._projects = [{ id: 'gp1', name: 'repo', path: repo, isGitRepo: true, currentBranch: 'master' }];
+        provider._selectedProjectIds = new Set(['gp1']);
+        const wf2 = {
+            id: 'wgit2', name: 'GitRefNoParam', updatedAt: 1,
+            nodes: [{ id: 'g1', label: 'switch', tag: 'ref', x: 0, y: 0, cmd: '', timeout: 30, failPolicy: 'stop', refTab: 'git', refCommandId: 'git:switch-branch' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(wf2, 'git-bash', 'dev');
+        const entry2 = JSON.parse(fs.readFileSync(wbFile, 'utf8')).history.find(h => h.workflowName === 'GitRefNoParam');
+        assert.ok(entry2, 'no-param run recorded');
+        assert.strictEqual(entry2.result, 'failed', 'missing branch name fails the node');
+        provider._projects = [];
+        provider._selectedProjectIds = new Set();
     });
 
     await testAsync('host: legacy config migrates on provider load', async () => {

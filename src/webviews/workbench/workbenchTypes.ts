@@ -25,8 +25,14 @@ export interface WfNode {
     failPolicy: WfFailPolicy;
     /** 仅 notify 节点：文本弹窗 / 命令行 / HTTP 请求 */
     notifyType?: 'text' | 'cmd' | 'http';
-    /** 仅 ref 节点：引用其他页签（cmd/pyt/shortcut）已保存命令的 (tab, commandId) */
-    refTab?: 'cmd' | 'pyt' | 'shortcut';
+    /** 仅 notify+http：请求方法，默认 GET */
+    httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+    /** 仅 notify+http：请求头（JSON 对象字符串） */
+    httpHeaders?: string;
+    /** 仅 notify+http：请求体（支持 ${var} 变量替换） */
+    httpBody?: string;
+    /** 仅 ref 节点：引用其他页签已保存命令的 (tab, commandId)；git 为内置操作集 */
+    refTab?: 'cmd' | 'pyt' | 'shortcut' | 'git';
     refCommandId?: string;
     /** 仅 start 节点：定时启动方式。none=手动、countdown=倒计时、clock=固定时间 */
     scheduleMode?: 'none' | 'countdown' | 'clock';

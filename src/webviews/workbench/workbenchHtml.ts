@@ -18,7 +18,7 @@ export const WORKBENCH_PANELS = `
             <div class="wb-panel">
                 <div class="wb-scroll">
                     <div class="wb-section-title">
-                        <span>📋 <span data-i18n="wb.cl.title">Today's Checklist</span> <span id="clDate"></span></span>
+                        <span><span data-i18n="wb.cl.title">Today's Checklist</span> <span id="clDate"></span></span>
                         <span class="wf-btn" onclick="wbClearDone()" data-i18n="wb.cl.clearDone">Clear Done</span>
                     </div>
                     <div id="clList"></div>
@@ -26,11 +26,11 @@ export const WORKBENCH_PANELS = `
                 <div class="wb-add-row">
                     <input type="text" id="clInput" data-i18n-placeholder="wb.cl.placeholder" placeholder="Add task, press Enter" onkeydown="if(event.key==='Enter')wbAddTask()">
                     <select id="clPrio">
-                        <option value="urgent">🔴</option>
-                        <option value="normal" selected>🟡</option>
-                        <option value="low">🟢</option>
+                        <option value="urgent" data-i18n="wb.cl.prio.urgent">Urgent</option>
+                        <option value="normal" selected data-i18n="wb.cl.prio.normal">Normal</option>
+                        <option value="low" data-i18n="wb.cl.prio.low">Low</option>
                     </select>
-                    <button class="wf-btn primary" onclick="wbAddTask()">＋</button>
+                    <button class="wf-btn primary" onclick="wbAddTask()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
                 </div>
                 <div class="wb-progress-wrap">
                     <div class="wb-progress-text"><span data-i18n="wb.cl.progress">Progress</span>: <span id="clProgText">0%</span></div>
@@ -47,12 +47,12 @@ export const WORKBENCH_PANELS = `
                         <div id="wfPalette"></div>
                         <div class="wb-section-title" style="padding:6px 8px 2px">
                             <span data-i18n="wb.wf.workflows">Workflows</span>
-                            <span class="wf-btn" style="padding:1px 6px" onclick="wfNew()">＋</span>
+                            <span class="wf-btn" style="padding:1px 6px" onclick="wfNew()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></span>
                         </div>
                         <div id="wfFlowList"></div>
                         <div class="wb-section-title" style="padding:6px 8px 2px">
                             <span data-i18n="wb.wf.templates">Templates</span>
-                            <span class="wf-btn" style="padding:1px 6px" onclick="wfSaveAsTemplate()" title="Save current as template">💾</span>
+                            <span class="wf-btn" style="padding:1px 6px" onclick="wfSaveAsTemplate()" title="Save current as template"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></span>
                         </div>
                         <div id="wfTemplateList"></div>
                         <div class="wb-section-title" style="padding:6px 8px 2px" data-i18n="wb.wf.history">History</div>
@@ -60,17 +60,12 @@ export const WORKBENCH_PANELS = `
                     </div>
                     <div class="wf-canvas-wrap" id="wfCanvasWrap">
                         <div class="wf-toolbar">
-                            <button class="wf-btn primary" id="wfRunBtn" onclick="wfRun()" data-i18n-title="wb.wf.run" title="Run">▶</button>
-                            <button class="wf-btn" onclick="wfStop()" data-i18n-title="wb.wf.stop" title="Stop">⏹</button>
-                            <button class="wf-btn" id="wfLinkBtn" onclick="wfToggleLink()" data-i18n-title="wb.wf.link" title="Link mode">🔗</button>
-                            <button class="wf-btn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save">💾</button>
-                            <button class="wf-btn danger" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas">🗑</button>
+                            <button class="wf-btn primary" id="wfRunBtn" onclick="wfRun()" data-i18n-title="wb.wf.run" title="Run"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5v9l7.5-4.5z"/></svg></button>
+                            <button class="wf-btn" onclick="wfStop()" data-i18n-title="wb.wf.stop" title="Stop"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/></svg></button>
+                            <button class="wf-btn" id="wfLinkBtn" onclick="wfToggleLink()" data-i18n-title="wb.wf.link" title="Link mode"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 9.8l3.6-3.6"/><path d="M7.4 5.4l1.3-1.3a2.4 2.4 0 0 1 3.4 3.4l-1.3 1.3"/><path d="M8.6 10.6l-1.3 1.3a2.4 2.4 0 0 1-3.4-3.4l1.3-1.3"/></svg></button>
+                            <button class="wf-btn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></button>
+                            <button class="wf-btn danger" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.3 4.5V3h3.4v1.5"/><path d="M4.5 4.5l.8 8.5h5.4l.8-8.5"/><path d="M6.8 7v3.5M9.2 7v3.5"/></svg></button>
                             <input type="text" id="wfName" value="workflow" style="width:96px;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:11px;padding:3px 6px;outline:none;">
-                            <select id="wfEnv" data-i18n-title="wb.wf.env" title="Environment">
-                                <option value="dev">dev</option>
-                                <option value="test">test</option>
-                                <option value="prod">prod ⚠</option>
-                            </select>
                             <select id="wfShell" title="Shell">
                                 <option value="git-bash">Git Bash</option>
                                 <option value="cmd">CMD</option>
@@ -97,11 +92,24 @@ export const WORKBENCH_PANELS = `
                                 <option value="cmd" data-i18n="wb.wf.notifyTypeCmd">Command</option>
                                 <option value="http" data-i18n="wb.wf.notifyTypeHttp">HTTP request</option>
                             </select>
+                            <label id="wfPHttpMethodLabel" data-i18n="wb.wf.httpMethod" style="display:none">Method</label>
+                            <select id="wfPHttpMethod" style="display:none" onchange="wfEditProp('httpMethod',this.value)">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="DELETE">DELETE</option>
+                                <option value="PATCH">PATCH</option>
+                            </select>
+                            <label id="wfPHttpHeadersLabel" data-i18n="wb.wf.httpHeaders" style="display:none">Headers (JSON)</label>
+                            <textarea id="wfPHttpHeaders" rows="3" style="display:none" oninput="wfEditProp('httpHeaders',this.value)" placeholder='{"Content-Type": "application/json"}'></textarea>
+                            <label id="wfPHttpBodyLabel" data-i18n="wb.wf.httpBody" style="display:none">Payload</label>
+                            <textarea id="wfPHttpBody" rows="4" style="display:none" oninput="wfEditProp('httpBody',this.value)"></textarea>
                             <label id="wfPRefTabLabel" data-i18n="wb.wf.refTab" style="display:none">Source Tab</label>
                             <select id="wfPRefTab" style="display:none" onchange="wfRefTabChange(this.value)">
                                 <option value="cmd" data-i18n="tab.custom">JSON Commands</option>
                                 <option value="pyt" data-i18n="tab.txtcmd">Python Txt</option>
                                 <option value="shortcut" data-i18n="tab.shortcut">ShortCut Cmd</option>
+                                <option value="git" data-i18n="tab.git">Git</option>
                             </select>
                             <label id="wfPRefCmdLabel" data-i18n="wb.wf.refCmd" style="display:none">Referenced Command</label>
                             <select id="wfPRefCmd" style="display:none" onchange="wfEditProp('refCommandId',this.value)"></select>
@@ -186,27 +194,20 @@ export const WORKBENCH_PANELS = `
                             <option value="wsl">WSL</option>
                         </select>
                     </label>
-                    <label><span data-i18n="wb.batch.env">Env</span>
-                        <select id="batchEnv" title="Environment">
-                            <option value="dev">dev</option>
-                            <option value="test">test</option>
-                            <option value="prod">prod ⚠</option>
-                        </select>
-                    </label>
                     <input type="text" id="batchGroupName" data-i18n-placeholder="wb.batch.namePh" placeholder="Group name" style="width:110px">
                     <button class="wf-btn" onclick="batchRenameGroup()" data-i18n="wb.batch.rename">Rename</button>
-                    <button class="wf-btn" onclick="batchAddGroup()">＋ <span data-i18n="wb.batch.group">Group</span></button>
+                    <button class="wf-btn" onclick="batchAddGroup()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.group">Group</span></button>
                     <button class="wf-btn danger" onclick="batchDeleteGroup()" data-i18n="cmd.delete">Delete</button>
                 </div>
                 <ul id="batchList" class="batch-list"></ul>
                 <div class="batch-actions">
-                    <button class="wf-btn" onclick="batchAddCmd()">＋ <span data-i18n="wb.batch.cmd">Command</span></button>
-                    <button class="wf-btn primary" onclick="batchRun()">▶ <span data-i18n="wb.batch.run">Run All</span></button>
+                    <button class="wf-btn" onclick="batchAddCmd()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.cmd">Command</span></button>
+                    <button class="wf-btn primary" onclick="batchRun()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5v9l7.5-4.5z"/></svg> <span data-i18n="wb.batch.run">Run All</span></button>
                     <button class="wf-btn" onclick="wfStop()" data-i18n="wb.wf.stop">Stop</button>
-                    <button class="wf-btn" onclick="batchToFlow()">📊 <span data-i18n="wb.batch.toFlow">To Flowchart</span></button>
+                    <button class="wf-btn" onclick="batchToFlow()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="6" width="4" height="4" rx="1"/><rect x="10.5" y="2" width="4" height="4" rx="1"/><rect x="10.5" y="10" width="4" height="4" rx="1"/><path d="M5.5 8h2.5M8 8V4h2.5M8 8v4h2.5"/></svg> <span data-i18n="wb.batch.toFlow">To Flowchart</span></button>
                 </div>
                 <div class="batch-log-bar">
-                    <span>📜 <span data-i18n="wb.batch.log">Execution Log</span></span>
+                    <span><span data-i18n="wb.batch.log">Execution Log</span></span>
                     <span class="wf-btn" style="padding:1px 6px" onclick="batchClearLog()" data-i18n="log.clear">Clear</span>
                     <span style="margin-left:auto;font-size:11px;color:var(--brand-text-muted)" id="batchStatus"></span>
                 </div>

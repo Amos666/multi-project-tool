@@ -62,6 +62,7 @@ export const WORKBENCH_CSS = `
     padding: 3px 8px; font-size: 11px; border-radius: var(--radius-sm); cursor: pointer;
     background-color: var(--brand-surface-raised); color: var(--brand-text-secondary);
     border: 1px solid var(--brand-border); transition: all 0.15s ease; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 4px;
 }
 .wf-btn:hover { background-color: var(--brand-surface-hover); color: var(--brand-text); }
 .wf-btn.primary { background-color: var(--brand-primary-subtle); color: var(--brand-primary); border-color: var(--brand-primary); }
@@ -69,6 +70,8 @@ export const WORKBENCH_CSS = `
 .wf-btn.danger:hover { color: var(--state-error); border-color: var(--state-error); }
 .wf-btn.toggled { background-color: var(--brand-primary); color: var(--brand-text-inverse); border-color: var(--brand-primary); }
 .wf-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.wf-btn svg { display: block; width: 13px; height: 13px; }
+.wb-icon { vertical-align: -2px; flex: none; }
 .wf-toolbar select {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
@@ -91,12 +94,13 @@ export const WORKBENCH_CSS = `
 }
 .wf-props h4 { font-size: 12px; color: var(--brand-text); margin: 0 0 8px; }
 .wf-props label { display: block; font-size: 10px; color: var(--brand-text-muted); margin: 8px 0 3px; }
-.wf-props input, .wf-props select {
+.wf-props input, .wf-props select, .wf-props textarea {
     width: 100%; background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
     padding: 4px 6px; font-size: 12px; outline: none;
 }
-.wf-props input:focus, .wf-props select:focus { border-color: var(--brand-primary); }
+.wf-props input:focus, .wf-props select:focus, .wf-props textarea:focus { border-color: var(--brand-primary); }
+.wf-props textarea { resize: vertical; font-family: var(--mono-font, monospace); font-size: 11px; }
 .wf-props .wf-deps { font-size: 10px; color: var(--brand-text-muted); margin-top: 10px; word-break: break-all; }
 .wf-del-btn {
     margin-top: 12px; width: 100%; padding: 5px; font-size: 11px; cursor: pointer;
