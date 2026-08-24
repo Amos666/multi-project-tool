@@ -104,6 +104,106 @@ test('HTML: delete-category confirmation modal exists', () => {
     assert.ok(html.includes('closeDeleteCategoryModal()'), 'close handler');
 });
 
+// ---------- workbench tabs (checklist / workflow / batch) ----------
+test('HTML: workbench tab buttons + panels + launcher overlay', () => {
+    for (const id of ['tabBtn-checklist', 'tabBtn-workflow', 'tabBtn-batch',
+        'tab-checklist', 'tab-workflow', 'tab-batch', 'launcherMask', 'launcherInput']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing element: ' + id);
+    }
+});
+
+test('HTML: checklist panel (input/priority/progress)', () => {
+    for (const id of ['clInput', 'clPrio', 'clList', 'clProgText', 'clProgBar']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing checklist element: ' + id);
+    }
+    assert.ok(html.includes('wbAddTask()'), 'add handler');
+    assert.ok(html.includes('wbClearDone()'), 'clear-done handler');
+});
+
+test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => {
+    for (const id of ['wfSvg', 'wfPalette', 'wfFlowList', 'wfTemplateList', 'wfHistoryList',
+        'wfName', 'wfEnv', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
+        'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing workflow element: ' + id);
+    }
+    assert.ok(html.includes('onclick="wfRun()"'), 'run button');
+    assert.ok(html.includes('onclick="wfStop()"'), 'stop button');
+    assert.ok(html.includes("wfEditProp('notifyType',this.value)"), 'notify type selector wired');
+    assert.ok(html.includes('wb.wf.notifyTypeHttp'), 'http notify option i18n key');
+});
+
+test('JS: notify node property label switches by notifyType', () => {
+    assert.ok(js.includes('wfCmdLabelKey'), 'label key helper exists');
+    assert.ok(js.includes("wbEl('wfPNotifyType').value = n.notifyType || 'text'"), 'selector synced on select');
+    assert.ok(js.includes("notifyType: tag === 'notify' ? 'text' : undefined"), 'new notify nodes default to text');
+});
+
+test('HTML+JS: ref node (reference saved commands from other tabs)', () => {
+    for (const id of ['wfPRefTabLabel', 'wfPRefTab', 'wfPRefCmdLabel', 'wfPRefCmd']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing ref property element: ' + id);
+    }
+    assert.ok(html.includes('wfRefTabChange(this.value)'), 'tab selector wired');
+    assert.ok(html.includes("wfEditProp('refCommandId',this.value)"), 'command selector wired');
+    assert.ok(js.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes ref');
+    assert.ok(js.includes('ref: '), 'tag color defined');
+    assert.ok(js.includes("refTab: tag === 'ref' ? 'cmd' : undefined"), 'new ref node defaults');
+    assert.ok(js.includes('function wfRefCommands'), 'command flattener with category paths');
+    assert.ok(js.includes('shortcutCommandTree'), 'reads shortcut tree');
+    assert.ok(js.includes('pythonTxtCommandTree'), 'reads pyt tree');
+    assert.ok(js.includes('customCommandTree'), 'reads cmd tree');
+    assert.ok(translations.en['wb.node.ref'] && translations.zh['wb.node.ref'], 'node label i18n');
+    assert.ok(translations.en['wb.wf.refTab'] && translations.zh['wb.wf.refCmd'], 'property i18n');
+});
+
+test('HTML+JS: start node (scheduled start) and confirm node (manual approval)', () => {
+    assert.ok(js.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes start & confirm');
+    for (const id of ['wfPSchedModeLabel', 'wfPSchedMode', 'wfPSchedValueLabel', 'wfPSchedValue']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing schedule element: ' + id);
+    }
+    assert.ok(html.includes('value="countdown"') && html.includes('value="clock"') && html.includes('value="none"'), 'schedule modes offered');
+    assert.ok(html.includes('id="wfConfirmBar"') && html.includes('id="wfConfirmText"'), 'confirm bar in monitor');
+    assert.ok(html.includes('onclick="wfConfirm(true)"') && html.includes('onclick="wfConfirm(false)"'), 'approve/cancel buttons');
+    assert.ok(js.includes("command: 'workflowConfirm'"), 'confirm answer sent to host');
+    assert.ok(js.includes("ev.type === 'confirm'"), 'webview handles confirm event');
+    assert.ok(js.includes("scheduleMode: tag === 'start' ? 'none' : undefined"), 'start node defaults');
+    assert.ok(js.includes('function wfStartDesc'), 'schedule shown on canvas node');
+    assert.ok(js.includes('function wfSchedModeChange'), 'value input adapts to mode');
+    for (const k of ['wb.node.start', 'wb.node.confirm', 'wb.wf.schedMode', 'wb.wf.schedCountdown', 'wb.wf.schedClock', 'wb.wf.confirmApprove', 'wb.wf.confirmCancel']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+});
+
+test('HTML: batch panel has own shell/env selectors and live log area', () => {
+    for (const id of ['batchGroupSel', 'batchMode', 'batchShell', 'batchEnv', 'batchList', 'batchStatus', 'batchOutput']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing batch element: ' + id);
+    }
+    assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
+    assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
+    assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
+});
+
+test('JS: workbench behaviors wired (run/stop, prod confirm, launcher run, counters)', () => {
+    for (const sym of ['wbAddTask', 'wbToggleTask', 'wfRun', 'wfStop', 'wfSave', 'wfDraw',
+        'wfWouldCycle', 'wfLauncherRun', 'wfSetCounters', 'wfHistoryView', 'launcherOpen',
+        'launcherKey', 'applyHiddenTabs', 'wbToggleTab', 'batchRun', 'batchToFlow',
+        'wfWriteLine', 'batchClearLog', 'wfAppendOutput']) {
+        assert.ok(js.includes(sym), 'missing workbench JS symbol: ' + sym);
+    }
+    assert.ok(js.includes("window.confirm(t('wb.wf.prodConfirm'))"), 'prod environment requires confirmation');
+    assert.ok(js.includes('wfFailed') && js.includes('wfSkipped'), 'monitor counters updated');
+    assert.ok(js.includes("command: 'workflowRun'") && js.includes("command: 'workflowStop'"), 'run/stop messages');
+    assert.ok(js.includes("command: 'checklistSave'") && js.includes("command: 'workbenchTabsSave'"), 'persistence messages');
+    assert.ok(js.includes('wbNow()'), 'log lines carry timestamps');
+    assert.ok(/WB\.batchRunning[\s\S]{0,120}batchOutput/.test(js), 'batch run mirrors logs into batch tab');
+});
+
+test('HTML: Set tab exposes workbench tab toggles', () => {
+    for (const id of ['wbTabToggle-checklist', 'wbTabToggle-workflow', 'wbTabToggle-batch']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing toggle: ' + id);
+    }
+});
+
+
 // ---------- webview JS behavior ----------
 test('JS: shared tree rendering + icons for both tabs', () => {
     for (const sym of [
@@ -270,6 +370,68 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         const expFn = js.split('function exportTxtCmdLogs').slice(1)[0].split('function clearTxtCmdLogs')[0];
         assert.ok(expFn.includes("command: 'notifyInfo'"), 'empty export notifies instead of silent return');
         assert.ok(translations.en['log.nothingToExport'] && translations.zh['log.nothingToExport'], 'i18n key in both languages');
+    });
+
+    await testAsync('host: workbench checklist persists and workflow run records history', async () => {
+        const { WorkbenchStore } = require('../out/utils/workbenchStore');
+        const store = WorkbenchStore.getInstance();
+        provider.handleWorkbenchChange(() => store.saveChecklist([
+            { id: 't1', text: 'buy milk', priority: 'urgent', done: false, createdAt: 1 }
+        ]));
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        assert.strictEqual(onDisk.checklist.length, 1);
+        assert.strictEqual(onDisk.checklist[0].text, 'buy milk');
+
+        const wf = {
+            id: 'wfx', name: 'HostFlow', updatedAt: 1,
+            nodes: [{ id: 'a', label: 'echo', tag: 'cmd', x: 0, y: 0, cmd: 'echo host-run', timeout: 10, failPolicy: 'stop' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        const after = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        assert.strictEqual(after.history.length, 1, 'history recorded');
+        assert.strictEqual(after.history[0].workflowName, 'HostFlow');
+        assert.strictEqual(after.history[0].result, 'success');
+        assert.strictEqual(after.history[0].nodes[0].state, 'success');
+    });
+
+    await testAsync('host: workflow ref node executes saved shortcut command like a button click', async () => {
+        await provider.handleSaveCommandTree('shortcut', [
+            { id: 'sc-root', type: 'category', name: 'Ops', collapsed: false, children: [
+                { id: 'sc1', type: 'command', name: 'WriteMarker', content: 'touch ref-marker.txt', shell: 'git-bash' }
+            ] }
+        ]);
+        const marker = path.join(dir, 'ref-marker.txt');
+        try { fs.unlinkSync(marker); } catch (e) { }
+        const wf = {
+            id: 'wref', name: 'RefFlow', updatedAt: 1,
+            nodes: [{ id: 'r1', label: 'run saved', tag: 'ref', x: 0, y: 0, cmd: '', timeout: 10, failPolicy: 'stop', refTab: 'shortcut', refCommandId: 'sc1' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        assert.ok(fs.existsSync(marker), 'referenced command actually ran at workspace root');
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        const entry = onDisk.history.find(h => h.workflowName === 'RefFlow');
+        assert.ok(entry, 'ref run recorded in history');
+        assert.strictEqual(entry.result, 'success');
+        assert.strictEqual(entry.nodes[0].state, 'success');
+    });
+
+    await testAsync('host: workflow ref node to missing command fails the run', async () => {
+        const wf = {
+            id: 'wref2', name: 'RefFlowMissing', updatedAt: 1,
+            nodes: [{ id: 'r1', label: 'bad ref', tag: 'ref', x: 0, y: 0, cmd: '', timeout: 10, failPolicy: 'stop', refTab: 'shortcut', refCommandId: 'no-such-id' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        const entry = onDisk.history.find(h => h.workflowName === 'RefFlowMissing');
+        assert.ok(entry, 'run recorded');
+        assert.strictEqual(entry.result, 'failed');
+        assert.strictEqual(entry.nodes[0].state, 'failed');
     });
 
     await testAsync('host: legacy config migrates on provider load', async () => {

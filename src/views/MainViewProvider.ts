@@ -8,6 +8,12 @@ import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore'
 import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
+import { WorkbenchStore } from '../utils/workbenchStore';
+import { WorkflowEngine } from '../utils/workflowEngine';
+import { Workflow, RunHistoryEntry } from '../webviews/workbench/workbenchTypes';
+import { WORKBENCH_CSS } from '../webviews/workbench/workbenchCss';
+import { WORKBENCH_TAB_BUTTONS, WORKBENCH_PANELS } from '../webviews/workbench/workbenchHtml';
+import { WORKBENCH_JS } from '../webviews/workbench/workbenchJs';
 
 interface LogEntry {
     timestamp: string;
@@ -52,6 +58,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _shortcutCommandTree: CommandTreeNode[] = [];
     private _projectScanner: ProjectScanner;
     private _language: Language = 'en';
+    private _workflowEngine: WorkflowEngine = new WorkflowEngine();
 
     constructor(private readonly _extensionUri: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
@@ -178,6 +185,17 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     case 'logHeightChange': this.handleLogHeightChange(message.height); break;
                     case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
                     case 'setLanguage': this.handleSetLanguage(message.language); break;
+                    // ===== Workbench 新增命令（独立前缀，不影响既有协议） =====
+                    case 'checklistSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveChecklist(message.tasks || [])); break;
+                    case 'workflowSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().upsertWorkflow(message.workflow)); break;
+                    case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
+                    case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [])); break;
+                    case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteCustomTemplate(message.id)); break;
+                    case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatchGroups(message.groups || [])); break;
+                    case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
+                    case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env); break;
+                    case 'workflowStop': this._workflowEngine.stop(); break;
+                    case 'workflowConfirm': this._workflowEngine.respondConfirm(!!message.approved); break;
                 }
             }
         );
@@ -1297,7 +1315,7 @@ body {
     display: flex; justify-content: flex-end; gap: 8px;
     padding: 12px 16px;
     border-top: 1px solid var(--brand-border-subtle);
-}`;
+}` + WORKBENCH_CSS;
     }
 
     private getHtmlBody(): string {
@@ -1317,7 +1335,7 @@ body {
         </div>
         <div class="tab" onclick="switchTab('settings')">
             <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3 8H1M15 8h-2M3.5 3.5L5 5M11 11l1.5 1.5M3.5 12.5L5 11M11 5l1.5-1.5"/></svg><span data-i18n="tab.settings">Set</span>
-        </div>
+        </div>${WORKBENCH_TAB_BUTTONS}
     </div>
 
     <div class="tab-content">
@@ -1526,6 +1544,22 @@ body {
                 </div>
 
                 <div class="settings-section">
+                    <h3>🧩 <span data-i18n="settings.workbenchTabs">Workbench Tabs</span></h3>
+                    <div class="settings-row">
+                        <label data-i18n="tab.checklist">ToDo</label>
+                        <div class="toggle-switch" id="wbTabToggle-checklist" onclick="wbToggleTab('checklist')"></div>
+                    </div>
+                    <div class="settings-row">
+                        <label data-i18n="tab.workflow">Flow</label>
+                        <div class="toggle-switch" id="wbTabToggle-workflow" onclick="wbToggleTab('workflow')"></div>
+                    </div>
+                    <div class="settings-row">
+                        <label data-i18n="tab.batch">Batch</label>
+                        <div class="toggle-switch" id="wbTabToggle-batch" onclick="wbToggleTab('batch')"></div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
                     <h3>📋 <span data-i18n="settings.globalParams">Global Parameters</span></h3>
                     <div class="subtitle" data-i18n="settings.globalParamsDesc">Define global parameters, referenced via ${'${paramName}'}</div>
                     <textarea class="json-editor" id="commonParams" placeholder='{"deployBucket": "my-bucket"}'></textarea>
@@ -1637,7 +1671,7 @@ body {
                     </div>
                 </div>
             </div>
-        </div>
+        </div>${WORKBENCH_PANELS}
     </div>
 
     <div id="commitModal" class="modal-overlay" style="display: none;">
@@ -1723,7 +1757,7 @@ function switchTab(tabId) {
     currentTab = tabId;
     const tabs = document.querySelectorAll('.tab');
     const panels = document.querySelectorAll('.tab-panel');
-    const tabNames = ['git', 'custom', 'shortcut', 'txtcmd', 'settings'];
+    const tabNames = ['git', 'custom', 'shortcut', 'txtcmd', 'settings', 'checklist', 'workflow', 'batch'];
     tabs.forEach((t, i) => {
         if (tabNames[i] === tabId) {
             t.classList.add('active');
@@ -3081,7 +3115,7 @@ window.addEventListener('message', event => {
             showCreateBranchConfirm(message.branch, message.projectCount);
             break;
     }
-});`;
+});` + WORKBENCH_JS;
     }
 
     private handleInit(): void {
@@ -3486,6 +3520,107 @@ window.addEventListener('message', event => {
             }
         } catch (error) {
             this.addLog('✗ Error: ' + error, 'error');
+        }
+    }
+
+    /**
+     * Flow ref 节点执行器：按 (tab, commandId) 执行各页签已保存命令，
+     * 等价于用户在对应页签点击执行按钮，输出转发到工作流日志，返回成败。
+     */
+    private async executeReferencedCommand(tabId: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
+        try {
+            if (tabId === 'cmd') {
+                const command = findNodeById(this._customCommandTree, commandId);
+                if (!command || command.type !== 'command') {
+                    log('err', `[Ref] command not found in JSON tab: ${commandId}`);
+                    return false;
+                }
+                const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id));
+                if (selectedProjects.length === 0) {
+                    log('err', '[Ref] ' + t('backend.noProjects', this._language));
+                    return false;
+                }
+                const runShell = command.shell && VALID_SHELLS.includes(command.shell) ? command.shell : this._currentShell;
+                log('dim', `[Ref] [${this.getShellLabel(runShell)}] ${command.name} — ${selectedProjects.length} projects`);
+                const commandLines = (command.content || '').split('\n').filter(c => c.trim());
+                let successCount = 0;
+                for (const project of selectedProjects) {
+                    log('info', '├── ' + project.name);
+                    try {
+                        const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
+                        const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+                        const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
+                            if (line.trim()) { log('info', '│   ' + line); }
+                        }, runShell);
+                        if (result.success) {
+                            successCount++;
+                            log('ok', '│   ✓ Completed');
+                        } else {
+                            log('err', '│   ✗ ' + (result.error || result.output));
+                        }
+                    } catch (error) {
+                        log('err', '│   ✗ Error: ' + error);
+                    }
+                }
+                const allOk = successCount === selectedProjects.length;
+                log(allOk ? 'ok' : 'err', `[Ref] ${successCount}/${selectedProjects.length} ` + t('backend.success', this._language));
+                return allOk;
+            }
+
+            if (tabId === 'shortcut') {
+                const command = findNodeById(this._shortcutCommandTree, commandId);
+                if (!command || command.type !== 'command') {
+                    log('err', `[Ref] command not found in ShortCut tab: ${commandId}`);
+                    return false;
+                }
+                const folders = vscode.workspace.workspaceFolders;
+                if (!folders || folders.length === 0) {
+                    log('err', '[Ref] ' + t('backend.noWorkspace', this._language));
+                    return false;
+                }
+                const cwd = folders[0].uri.fsPath;
+                const runShell = command.shell && VALID_SHELLS.includes(command.shell) ? command.shell : this._shortcutShell;
+                log('dim', `[Ref] [${this.getShellLabel(runShell)}] ${command.name} — ${cwd}`);
+                const commandLines = (command.content || '').split('\n').filter(c => c.trim());
+                const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
+                const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+                const result = await this.executeShellCommand(cwd, tracedCommand, (line: string) => {
+                    if (line.trim()) { log('info', line); }
+                }, runShell);
+                if (result.success) {
+                    log('ok', `[Ref] ✓ ${command.name} ` + t('backend.completed', this._language));
+                } else {
+                    log('err', `[Ref] ✗ ` + (result.error || result.output));
+                }
+                return result.success;
+            }
+
+            if (tabId === 'pyt') {
+                const command = findNodeById(this._pythonTxtCommandTree, commandId);
+                if (!command || command.type !== 'command') {
+                    log('err', `[Ref] command not found in Python tab: ${commandId}`);
+                    return false;
+                }
+                // Flow 中无编辑器选区上下文，作为独立 Python 脚本执行（stdin 为空）
+                log('dim', `[Ref] python script: ${command.name}`);
+                const script = this.resolveCommandVariables(command.content || '');
+                const result = await this.executePythonTransform('', script);
+                if (result.output.trim()) {
+                    result.output.trim().split(/\r?\n/).slice(0, 50).forEach(line => log('info', line));
+                }
+                if (result.success) {
+                    log('ok', `[Ref] ✓ ${command.name} ` + t('backend.completed', this._language));
+                } else {
+                    log('err', `[Ref] ✗ ` + (result.error || result.output));
+                }
+                return result.success;
+            }
+
+            log('err', `[Ref] unknown tab: ${tabId}`);
+            return false;
+        } catch (error: any) {
+            log('err', '[Ref] error: ' + (error && error.message ? error.message : String(error)));
+            return false;
         }
     }
 
@@ -3946,6 +4081,64 @@ window.addEventListener('message', event => {
                 shortcutShell: this._shortcutShell,
                 commandTimeout: this._commandTimeout,
                 language: this._language
+            }
+        });
+        this.postWorkbenchData();
+    }
+
+    /* ================= Workbench（新增 Tab，独立消息前缀，零侵入既有功能） ================= */
+
+    private getWorkbenchData() {
+        const store = WorkbenchStore.getInstance();
+        const data = store.load();
+        return { ...data, templates: store.allTemplates() };
+    }
+
+    private postWorkbenchData(): void {
+        this._view?.webview.postMessage({ command: 'workbenchData', data: this.getWorkbenchData() });
+    }
+
+    private handleWorkbenchChange(mutate: () => void): void {
+        try {
+            mutate();
+        } catch (error) {
+            console.error('Workbench change failed:', error);
+        }
+        this.postWorkbenchData();
+    }
+
+    private async handleWorkflowRun(workflow: Workflow, shell: string, env: string): Promise<void> {
+        const engine = this._workflowEngine;
+        if (engine.isRunning) { return; }
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            vscode.window.showInformationMessage(t('backend.noWorkspace', this._language));
+            return;
+        }
+        if (!workflow || !Array.isArray(workflow.nodes) || workflow.nodes.length === 0) { return; }
+        const validShells = ['git-bash', 'cmd', 'powershell', 'wsl'];
+        const runShell = validShells.includes(shell) ? shell : this._currentShell;
+        await engine.run(workflow, {
+            cwd: folders[0].uri.fsPath,
+            shell: runShell,
+            env: env || 'dev',
+            commonParameters: this._settings.commonParameters,
+            envVariables: this.getEnvVariables(),
+            maxParallel: this._concurrency,
+            runRef: (tab, id, log) => this.executeReferencedCommand(tab, id, log)
+        }, (event) => {
+            this._view?.webview.postMessage({ command: 'workflowEvent', event });
+            if (event.type === 'done') {
+                const entry: RunHistoryEntry = {
+                    id: 'run-' + Date.now().toString(36),
+                    workflowName: workflow.name || 'workflow',
+                    result: event.result,
+                    duration: event.duration,
+                    time: Date.now(),
+                    nodes: event.nodes
+                };
+                WorkbenchStore.getInstance().addHistory(entry);
+                this.postWorkbenchData();
             }
         });
     }

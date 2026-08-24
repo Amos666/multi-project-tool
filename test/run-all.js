@@ -7,6 +7,8 @@ const suites = [
     'configStore.test.js',
     'pythonStore.test.js',
     'shortcutStore.test.js',
+    'workbenchStore.test.js',
+    'workflowEngine.test.js',
     'webview.test.js'
 ];
 
