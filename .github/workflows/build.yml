@@ -1,9 +1,10 @@
 name: Build & Package
 
 on:
+  # 仅分支 push 触发：tag 由本工作流自动管理（每次提交刷新到当前 commit），
+  # 若同时监听 tag push 会重复构建甚至无限循环（工作流自身会 push tag）
   push:
     branches: [main, master]
-    tags: ['v*']
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -40,31 +41,33 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Detected version: ${VERSION}, target tag: ${TAG}"
 
-      # 每次提交都把 tag 移动到当前 commit：
-      # - tag 不存在 → 创建
-      # - tag 已存在（版本没变）→ 强制刷新到最新 commit
-      # 说明：不使用 git push 移动 tag。内置 GITHUB_TOKEN 没有 workflows
-      # 权限，当 tag 移动会引入 .github/workflows 变更时 git push 会被
-      # 远端拒绝（exit 128）。改用 REST API 更新 ref，只需 contents:write
-      # 权限，且目标 commit 已存在于远端，不受该守卫限制。
-      - name: Create or refresh tag at current commit
+      # 每次提交都把 tag 刷新到当前 commit：
+      # - 远端 tag 已存在 → 先删除远端 tag，再在当前 commit 上重新 push
+      # - tag 不存在 → 直接 push
+      # 说明：内置 GITHUB_TOKEN 通过 git push 创建/更新 tag 时可能被远端
+      # 拒绝（exit 128，缺少 workflows 权限的守卫），失败时回退到 REST API
+      # 操作 ref，只需 contents:write 权限。
+      - name: Delete remote tag if exists, then push tag
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
-          # 用 HEAD 而非 github.sha：annotated tag 触发时后者是 tag 对象 SHA
           SHA="$(git rev-parse HEAD)"
           REPO="${{ github.repository }}"
-          if gh api "repos/${REPO}/git/ref/tags/${TAG}" > /dev/null 2>&1; then
-            echo "Tag ${TAG} exists, moving it to ${SHA} via API..."
-            gh api -X PATCH "repos/${REPO}/git/refs/tags/${TAG}" \
-              -f sha="${SHA}" -F force=true > /dev/null
-          else
-            echo "Tag ${TAG} not found, creating at ${SHA} via API..."
+          # 远端 tag 已存在 → 先删除（git 失败时回退 API）
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}$"; then
+            echo "Remote tag ${TAG} exists, deleting it first..."
+            git push origin ":refs/tags/${TAG}" \
+              || gh api -X DELETE "repos/${REPO}/git/refs/tags/${TAG}"
+          fi
+          # 在当前 commit 上创建带注解的 tag 并推送（git 失败时回退 API 创建 ref）
+          git tag -a "${TAG}" -m "Auto release ${TAG} @ ${SHA}"
+          git push origin "refs/tags/${TAG}" || {
+            echo "git push rejected, creating tag ref via API instead..."
             gh api -X POST "repos/${REPO}/git/refs" \
               -f ref="refs/tags/${TAG}" -f sha="${SHA}" > /dev/null
-          fi
+          }
 
       - name: Install dependencies
         run: npm ci
