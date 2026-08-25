@@ -55,21 +55,27 @@ jobs:
           TAG="${{ steps.ver.outputs.tag }}"
           SHA="$(git rev-parse HEAD)"
           REPO="${{ github.repository }}"
+          # git tag -a 需要提交者身份；runner 默认未配置，会报
+          # "Please tell me who you are" 并以 exit 128 中止
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 删除本地同名 tag：checkout 的 fetch-depth:0 会拉取远端 tag，
           # 不删会导致 git tag -a 报 "already exists"（exit 128）
           git tag -d "${TAG}" 2>/dev/null || true
           # 远端 tag 已存在 → 先删除远端 tag（git 失败时回退 API）
           if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}$"; then
             echo "Remote tag ${TAG} exists, deleting it first..."
-            if ! git push origin ":refs/tags/${TAG}"; then
-              echo "git delete rejected, using API instead..."
+            if ! DELETE_OUT=$(git push origin ":refs/tags/${TAG}" 2>&1); then
+              echo "::error::git delete tag failed: ${DELETE_OUT//$'\n'/%0A}"
+              echo "Deleting tag via API instead..."
               gh api -X DELETE "repos/${REPO}/git/refs/tags/${TAG}"
             fi
           fi
           # 在当前 commit 上创建带注解的 tag 并推送（git 失败时回退 API 创建 ref）
           git tag -a "${TAG}" -m "Auto release ${TAG} @ ${SHA}"
-          if ! git push origin "refs/tags/${TAG}"; then
-            echo "git push rejected, creating tag ref via API instead..."
+          if ! PUSH_OUT=$(git push origin "refs/tags/${TAG}" 2>&1); then
+            echo "::error::git push tag failed: ${PUSH_OUT//$'\n'/%0A}"
+            echo "Creating tag ref via API instead..."
             gh api -X POST "repos/${REPO}/git/refs" \
               -f ref="refs/tags/${TAG}" -f sha="${SHA}" > /dev/null
           fi
