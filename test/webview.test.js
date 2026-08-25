@@ -411,6 +411,14 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         assert.ok(translations.en['log.nothingToExport'] && translations.zh['log.nothingToExport'], 'i18n key in both languages');
     });
 
+    await testAsync('webview JS: pyt resizer is exclusively owned; pointer-events never stuck', async () => {
+        assert.ok(js.includes("if (resizer.id === 'txtCmdLogResizer') return;"), 'generic resizer skips the pyt resizer');
+        assert.ok(!js.includes('_oldPE'), 'no save/restore of pointer-events in pyt resizer');
+        assert.ok(!js.includes('_oldPointerEvents'), 'no save/restore of pointer-events in generic resizer');
+        const pytBlock = js.split('function initTxtCmdLogResizer').slice(1).join('') || js.split('(function initTxtCmdLogResizer').slice(1).join('');
+        assert.ok(pytBlock.includes("h.style.pointerEvents = '';"), 'pyt mouseup unconditionally restores pointer-events');
+    });
+
     await testAsync('host: workbench checklist persists and workflow run records history', async () => {
         const { WorkbenchStore } = require('../out/utils/workbenchStore');
         const store = WorkbenchStore.getInstance();

@@ -2339,6 +2339,10 @@ function toggleLog() {
     function onMouseDown(e) {
         const resizer = e.target.closest('.log-resizer');
         if (!resizer) return;
+        // Python 日志面板由 initTxtCmdLogResizer 独占处理，否则两个 document 级
+        // handler 叠加会把 log-header 的 pointer-events 永久置为 none，
+        // 导致 Export/Clear 按钮拖拽一次后失效
+        if (resizer.id === 'txtCmdLogResizer') return;
         e.preventDefault();
         e.stopPropagation();
         isResizing = true;
@@ -2350,9 +2354,10 @@ function toggleLog() {
         resizer.classList.add('active');
         document.body.style.cursor = 'ns-resize';
         document.body.style.userSelect = 'none';
-        // Disable pointer events on log-header to prevent click after drag
+        // Disable pointer events on log-header to prevent click after drag.
+        // onMouseUp unconditionally restores it, so the Export/Clear buttons
+        // can never stay permanently disabled.
         document.querySelectorAll('.log-header').forEach(h => {
-            h.dataset._oldPointerEvents = h.style.pointerEvents;
             h.style.pointerEvents = 'none';
         });
     }
@@ -2384,8 +2389,7 @@ function toggleLog() {
         document.body.style.userSelect = '';
         // Restore pointer events on log-header
         document.querySelectorAll('.log-header').forEach(h => {
-            h.style.pointerEvents = h.dataset._oldPointerEvents || '';
-            delete h.dataset._oldPointerEvents;
+            h.style.pointerEvents = '';
         });
         // Sync all log containers to the same final height
         if (finalHeight) {
@@ -3034,7 +3038,7 @@ function renderTxtCmdLogs() {
         document.body.style.cursor = 'ns-resize';
         document.body.style.userSelect = 'none';
         const headers = document.querySelectorAll('#txtCmdLogContainer .log-header');
-        headers.forEach(h => { h.dataset._oldPE = h.style.pointerEvents; h.style.pointerEvents = 'none'; });
+        headers.forEach(h => { h.style.pointerEvents = 'none'; });
     }
 
     function onMouseMove(e) {
@@ -3056,7 +3060,7 @@ function renderTxtCmdLogs() {
         const resizer = document.getElementById('txtCmdLogResizer');
         if (resizer) resizer.classList.remove('active');
         const headers = document.querySelectorAll('#txtCmdLogContainer .log-header');
-        headers.forEach(h => { h.style.pointerEvents = h.dataset._oldPE || ''; delete h.dataset._oldPE; });
+        headers.forEach(h => { h.style.pointerEvents = ''; });
     }
 
     document.addEventListener('mousedown', onMouseDown);
