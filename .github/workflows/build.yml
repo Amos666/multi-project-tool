@@ -2,27 +2,59 @@ name: Build & Package
 
 on:
   push:
+    branches: [main, master]
     tags: ['v*']
   pull_request:
     branches: [main, master]
   workflow_dispatch:
 
 permissions:
-  contents: write   # release job 需要 upload asset 权限
+  contents: write   # tag 推送 + release 上传需要写权限
 
 jobs:
   build:
-    name: Compile & Package VSIX
+    name: Retag, Compile & Package VSIX
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - name: Checkout
+      - name: Checkout (full history for tag ops)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+
+      # 读取 package.json 版本号，生成目标 tag（v<version>）
+      - name: Read version from package.json
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: ${VERSION}, target tag: ${TAG}"
+
+      # 每次提交都把 tag 移动到当前 commit：
+      # - tag 不存在 → 创建
+      # - tag 已存在（版本没变）→ 强制刷新到最新 commit
+      # 说明：不采用"先删远程再建"的方式，因为删除 tag 会让已关联的
+      # Release 暂时变为 Draft；force push 移动 tag 效果等价且更安全。
+      - name: Create or refresh tag at current commit
+        if: github.event_name != 'pull_request'
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          # 删除本地同名 tag（若存在），确保指向当前 commit
+          git tag -d "$TAG" 2>/dev/null || true
+          # 在当前 commit 上创建 tag（带注解，含 commit 信息）
+          git tag -a "$TAG" -m "Auto release ${TAG} @ ${GITHUB_SHA}"
+          # force push：tag 不存在则创建，已存在则刷新到当前 commit
+          git push -f origin "refs/tags/${TAG}"
 
       - name: Install dependencies
         run: npm ci
@@ -33,15 +65,7 @@ jobs:
       - name: Package VSIX
         run: |
           npx @vscode/vsce --version
-          npx @vscode/vsce package --no-git-tag-version --no-update-package-json --allow-star-activation -o multi-project-tool-${{ github.ref_name }}.vsix
-        # 在 push 到分支时 ref_name 是分支名，可能含 '/'；用 SHA 兜底命名
-        id: pkg
-        continue-on-error: true
-
-      - name: Fallback package name (branch with slash)
-        if: steps.pkg.outcome != 'success'
-        run: |
-          npx @vscode/vsce package --no-git-tag-version --no-update-package-json --allow-star-activation -o multi-project-tool-${{ github.sha }}.vsix
+          npx @vscode/vsce package --no-git-tag-version --no-update-package-json --allow-star-activation -o multi-project-tool-${{ steps.ver.outputs.version }}.vsix
 
       - name: Verify VSIX contents
         run: |
@@ -61,8 +85,8 @@ jobs:
     name: Publish to GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    # 仅在推送 v* tag 时执行
-    if: startsWith(github.ref, 'refs/tags/v')
+    # PR 不发 Release；push 分支 / push tag / 手动触发都发布
+    if: github.event_name != 'pull_request'
     steps:
       - name: Download VSIX artifact
         uses: actions/download-artifact@v4
@@ -73,10 +97,13 @@ jobs:
       - name: List downloaded assets
         run: ls -la ./assets
 
+      # tag_name 显式指定：tag 已在 build job 中创建/刷新到当前 commit
+      # 同名 Release 已存在时会更新描述，同名 asset 会被覆盖 → 每次提交刷新安装包
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.build.outputs.tag }}
           files: ./assets/*.vsix
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.build.outputs.tag, '-') }}
