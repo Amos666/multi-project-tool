@@ -90,6 +90,17 @@ export const WORKBENCH_CSS = `
     font-size: 11px; padding: 2px 4px; outline: none;
 }
 .wf-hint { margin-left: auto; font-size: 10px; color: var(--brand-text-muted); }
+/* 面板模式徽标（执行详情 / 只读回放 / 失败暂停） */
+.wf-mode-badge {
+    flex: none; padding: 1px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+    background-color: var(--brand-surface-raised); color: var(--brand-primary);
+    border: 1px solid var(--brand-border);
+}
+.wf-mode-badge.run { color: var(--brand-primary); }
+.wf-mode-badge.err { color: var(--state-error); border-color: var(--state-error); }
+/* 只读模式下节点面板锁定 */
+#wfPalette.locked { opacity: 0.45; pointer-events: none; }
 .wf-svg-wrap {
     flex: 1; position: relative; overflow: hidden; min-height: 0;
     background-color: var(--brand-background);
@@ -173,13 +184,19 @@ export const WORKBENCH_CSS = `
     border-bottom: 1px solid var(--brand-border-subtle); flex: none;
 }
 .wf-monitor-head .wf-summary { margin-left: auto; }
-.wf-confirm-bar {
-    display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex: none;
-    background: rgba(224, 175, 104, 0.12); border-bottom: 1px solid #e0af68;
-    font-size: 12px; color: var(--brand-text); animation: wfConfirmPulse 1.2s ease-in-out infinite alternate;
+/* 节点上方浮动操作条：人工确认 / 失败续跑（Resume/Cancel）统一放置 */
+.wf-node-actions {
+    position: absolute; z-index: 5; display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; border-radius: var(--radius-md); white-space: nowrap;
+    background-color: var(--brand-surface-raised); border: 1px solid #e0af68;
+    box-shadow: var(--shadow-md); font-size: 11px; color: var(--brand-text);
+    animation: wfConfirmPulse 1.2s ease-in-out infinite alternate;
 }
-.wf-confirm-bar .wf-confirm-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-@keyframes wfConfirmPulse { from { background: rgba(224, 175, 104, 0.08); } to { background: rgba(224, 175, 104, 0.2); } }
+.wf-node-actions .wf-node-actions-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; max-width: 320px;
+}
+.wf-node-actions .wf-btn { padding: 2px 7px; }
+@keyframes wfConfirmPulse { from { border-color: rgba(224, 175, 104, 0.5); } to { border-color: #e0af68; } }
 .wf-monitor-body { flex: 1; display: flex; min-height: 0; }
 .wf-run-table-wrap { width: 46%; overflow-y: auto; border-right: 1px solid var(--brand-border-subtle); }
 .wf-run-table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -275,4 +292,38 @@ export const WORKBENCH_CSS = `
     background-color: var(--brand-surface); border-radius: 3px; padding: 1px 7px;
 }
 .launcher .empty { padding: 16px; color: var(--brand-text-muted); text-align: center; font-size: 12px; }
+
+/* ================= Confirm modal（Webview 内确认弹窗，替代被阻塞的 window.confirm） ================= */
+.modal-overlay {
+    position: fixed; inset: 0; background-color: rgba(0, 0, 0, 0.45);
+    z-index: 120; display: flex; align-items: center; justify-content: center;
+}
+.modal-dialog {
+    width: min(400px, 90%); background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--brand-border-subtle);
+}
+.modal-title { font-size: 12px; font-weight: 600; color: var(--brand-text); }
+.modal-close {
+    background: transparent; border: none; color: var(--brand-text-muted);
+    font-size: 15px; cursor: pointer; line-height: 1; padding: 2px 4px;
+}
+.modal-close:hover { color: var(--brand-text); }
+.modal-body { padding: 14px; color: var(--brand-text); }
+.modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 10px 14px; border-top: 1px solid var(--brand-border-subtle);
+}
+.modal-footer .btn {
+    font-size: 11px; padding: 4px 14px; border-radius: var(--radius-sm);
+    cursor: pointer; border: 1px solid var(--brand-border); background: transparent;
+    color: var(--brand-text);
+}
+.modal-footer .btn-secondary:hover { background-color: var(--brand-surface); }
+.modal-footer .btn-danger { color: var(--state-error); border-color: var(--state-error); }
+.modal-footer .btn-danger:hover { background-color: rgba(243, 139, 168, 0.12); }
 `;

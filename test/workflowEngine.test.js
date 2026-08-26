@@ -94,6 +94,44 @@ async function runOnce(workflow, options) {
         assert.ok(events.some(e => e.type === 'log' && /retry/.test(e.text)), 'retry logged');
     });
 
+    await testAsync('engine: resumeStates skips succeeded nodes and reruns failed ones', async () => {
+        const o = opts();
+        const file = path.join(o.cwd, 'exec-count.txt');
+        // a: 每次执行都追加一行（用于计数）；b: 首次失败，恢复后成功
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('a', 'echo x >> exec-count.txt', 'cmd', { failPolicy: 'stop' }),
+                node('b', 'if [ -f go ]; then exit 0; else exit 1; fi', 'cmd', { failPolicy: 'stop' }),
+                node('c', 'echo done >> exec-count.txt', 'cmd', { failPolicy: 'stop' })
+            ],
+            edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }]
+        };
+        // 第一次运行：a 成功，b 失败（stop → c skipped）
+        const first = await runOnce(wf, o);
+        assert.strictEqual(first.done.result, 'failed');
+        assert.strictEqual(first.states.a, 'success');
+        assert.strictEqual(first.states.b, 'failed');
+        assert.strictEqual(first.states.c, 'skipped');
+        // 恢复条件：让 b 第二次成功
+        fs.writeFileSync(path.join(o.cwd, 'go'), '');
+        // 第二次运行（resume）：a 已成功被跳过（不重复执行），b/c 重新执行
+        const engine = new WorkflowEngine();
+        const events = [];
+        await engine.run(wf, o, e => events.push(e), { a: { state: 'success', dur: 5 } });
+        const done = events.find(e => e.type === 'done');
+        const states2 = {};
+        events.filter(e => e.type === 'nodeState').forEach(e => { states2[e.nodeId] = e.state; });
+        assert.strictEqual(done.result, 'success');
+        assert.strictEqual(states2.b, 'success');
+        assert.strictEqual(states2.c, 'success');
+        assert.ok(events.some(e => e.type === 'log' && /Resume.*a.*skip/.test(e.text)), 'resume skip logged');
+        assert.ok(!events.some(e => e.type === 'nodeState' && e.nodeId === 'a' && e.state === 'running'), 'succeeded node not re-executed');
+        // a 只执行了一次（第一次运行；c 的输出写入另一文件避免干扰计数）
+        const count = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).filter(l => l.trim() === 'x').length;
+        assert.strictEqual(count, 1, 'node a executed exactly once across run + resume');
+    });
+
     await testAsync('engine: timeout kills long-running node', async () => {
         const wf = { id: 'w', name: 'w', updatedAt: 1, nodes: [node('a', 'sleep 5', 'cmd', { timeout: 1 })], edges: [] };
         const { done, states, events } = await runOnce(wf);
@@ -183,6 +221,28 @@ async function runOnce(workflow, options) {
         assert.strictEqual(done.result, 'success');
         for (const id of ['fk', 'p1', 'p2', 'jn']) { assert.strictEqual(states[id], 'success', id); }
         assert.ok(fs.existsSync(path.join(o.cwd, 'p1.txt')) && fs.existsSync(path.join(o.cwd, 'p2.txt')));
+    });
+
+    await testAsync('engine: fork branches overlap in time (truly concurrent, not serialized)', async () => {
+        const o = opts();
+        // 两个分支各睡 1.2s：并发总耗时 ≈1.2s；串行则 ≥2.4s
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('fk', '', 'fork'),
+                node('s1', 'sleep 1.2 && echo s1-done > s1.flag', 'cmd', { timeout: 30 }),
+                node('s2', 'sleep 1.2 && echo s2-done > s2.flag', 'cmd', { timeout: 30 }),
+                node('jn', '', 'join')
+            ],
+            edges: [
+                { from: 'fk', to: 's1' }, { from: 'fk', to: 's2' },
+                { from: 's1', to: 'jn' }, { from: 's2', to: 'jn' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(done.result, 'success');
+        for (const id of ['fk', 's1', 's2', 'jn']) { assert.strictEqual(states[id], 'success', id); }
+        assert.ok(done.duration < 2400, `fork branches should overlap (took ${done.duration}ms)`);
     });
 
     await testAsync('engine: WB_ENV injected from env option', async () => {

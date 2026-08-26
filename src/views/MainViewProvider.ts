@@ -9,8 +9,26 @@ import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
 import { WorkbenchStore } from '../utils/workbenchStore';
-import { WorkflowEngine } from '../utils/workflowEngine';
-import { Workflow, RunHistoryEntry } from '../webviews/workbench/workbenchTypes';
+import { WorkflowEngine, WorkflowEngineEvent } from '../utils/workflowEngine';
+import { Workflow, RunHistoryEntry, RunResult, HistoryNodeResult, WfLogEntry } from '../webviews/workbench/workbenchTypes';
+
+/** 进行中的运行实例：跟踪状态/日志，支撑"正在运行"分组与失败续跑 */
+interface ActiveRun {
+    id: string;
+    workflow: Workflow;
+    name: string;
+    shell: string;
+    env: string;
+    startedAt: number;
+    /** 累计时长（含多次 resume） */
+    totalDuration: number;
+    phase: 'running' | 'failed-paused';
+    /** nodeId → 最新节点状态 */
+    states: Record<string, { state: string; dur: number }>;
+    logs: WfLogEntry[];
+    /** 待人工确认的节点（面板"暂停"隐藏操作条后，重开详情时据此恢复确认按钮） */
+    pendingConfirm?: { nodeId: string; text: string } | null;
+}
 import { WORKBENCH_CSS } from '../webviews/workbench/workbenchCss';
 import { WORKBENCH_TAB_BUTTONS, WORKBENCH_PANELS } from '../webviews/workbench/workbenchHtml';
 import { WORKBENCH_JS } from '../webviews/workbench/workbenchJs';
@@ -60,6 +78,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _projectScanner: ProjectScanner;
     private _language: Language = 'en';
     private _workflowEngine: WorkflowEngine = new WorkflowEngine();
+    private _activeRun: ActiveRun | undefined;
     private _flowEditor: FlowEditorProvider;
 
     constructor(private readonly _extensionUri: vscode.Uri) {
@@ -209,15 +228,30 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'checklistSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveChecklist(message.tasks || [])); break;
             case 'workflowSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().upsertWorkflow(message.workflow)); break;
             case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
-            case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [])); break;
-            case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteCustomTemplate(message.id)); break;
+            case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [], message.id)); break;
+            case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteTemplate(message.id)); break;
             case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatchGroups(message.groups || [])); break;
             case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
             case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env, source === 'sidebar'); break;
             case 'workflowStop': this._workflowEngine.stop(); break;
-            case 'workflowConfirm': this._workflowEngine.respondConfirm(!!message.approved); break;
+            case 'workflowConfirm':
+                this._workflowEngine.respondConfirm(!!message.approved);
+                if (this._activeRun) { this._activeRun.pendingConfirm = null; }
+                break;
+            // 从失败节点恢复执行 / 取消整个流程
+            case 'workflowResume': await this.handleWorkflowResume(message); break;
+            case 'workflowCancel': this.handleWorkflowCancel(); break;
+            // 历史记录删除 / 清空
+            case 'historyDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteHistory(message.id)); break;
+            case 'historyClearAll': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().clearHistory()); break;
             // 侧边栏 Flow Tab 的中继动作：在主编辑区打开 Flow Editor 面板并执行
-            case 'flowEditorAction': this._flowEditor.show(message.action); break;
+            case 'flowEditorAction':
+                // openRun 需要携带运行实例的完整数据（画布快照 + 已收集状态/日志）
+                if (message.action && message.action.type === 'openRun' && this._activeRun) {
+                    message.action.run = this.buildRunDetail();
+                }
+                this._flowEditor.show(message.action);
+                break;
         }
     }
 
@@ -4204,6 +4238,8 @@ window.addEventListener('message', event => {
         this.postWorkbenchData();
     }
 
+    /* ============ 运行实例跟踪：正在运行分组 / 失败续跑 / 历史详情数据 ============ */
+
     private async handleWorkflowRun(workflow: Workflow, shell: string, env: string, fromSidebar: boolean = false): Promise<void> {
         const engine = this._workflowEngine;
         if (engine.isRunning) { return; }
@@ -4215,33 +4251,168 @@ window.addEventListener('message', event => {
         if (!workflow || !Array.isArray(workflow.nodes) || workflow.nodes.length === 0) { return; }
         const validShells = ['git-bash', 'cmd', 'powershell', 'wsl'];
         const runShell = validShells.includes(shell) ? shell : this._currentShell;
+        const runEnv = env || 'dev';
         // 侧边栏（Batch 等）发起的运行：通知面板载入工作流并初始化监控
         if (fromSidebar) {
             this._flowEditor.postMessage({ command: 'workflowRunStarted', workflow });
         }
-        await engine.run(workflow, {
-            cwd: folders[0].uri.fsPath,
+        // 上一次运行仍处于失败暂停且用户直接发起新运行：旧实例以 failed 归档到历史
+        const prev = this._activeRun;
+        if (prev && prev.phase === 'failed-paused') {
+            const prevNodes: HistoryNodeResult[] = Object.entries(prev.states).map(([id, s]) => ({
+                id,
+                label: prev.workflow.nodes.find(n => n.id === id)?.label || id,
+                state: s.state as any,
+                dur: s.dur
+            }));
+            this.finalizeRun(prev, 'failed', prevNodes);
+        }
+        // 创建运行实例（workflow 深拷贝快照，避免面板后续编辑影响执行）
+        this._activeRun = {
+            id: 'run-' + Date.now().toString(36),
+            workflow: JSON.parse(JSON.stringify(workflow)),
+            name: workflow.name || 'workflow',
             shell: runShell,
-            env: env || 'dev',
+            env: runEnv,
+            startedAt: Date.now(),
+            totalDuration: 0,
+            phase: 'running',
+            states: {},
+            logs: []
+        };
+        this.postRunState();
+        await this._workflowEngine.run(workflow, this.buildRunOptions(folders[0].uri.fsPath, runShell, runEnv), (event) => this.onRunEvent(this._activeRun!, event));
+    }
+
+    private buildRunOptions(cwd: string, shell: string, env: string): any {
+        return {
+            cwd,
+            shell,
+            env,
             commonParameters: this._settings.commonParameters,
             envVariables: this.getEnvVariables(),
-            maxParallel: this._concurrency,
-            runRef: (tab, id, log, param) => this.executeReferencedCommand(tab, id, param || '', log)
-        }, (event) => {
-            this._view?.webview.postMessage({ command: 'workflowEvent', event });
-            this._flowEditor.postMessage({ command: 'workflowEvent', event });
-            if (event.type === 'done') {
-                const entry: RunHistoryEntry = {
-                    id: 'run-' + Date.now().toString(36),
-                    workflowName: workflow.name || 'workflow',
-                    result: event.result,
-                    duration: event.duration,
-                    time: Date.now(),
-                    nodes: event.nodes
-                };
-                WorkbenchStore.getInstance().addHistory(entry);
-                this.postWorkbenchData();
+            // 工作流 Fork/Join 的并行度由画布设计决定，不受批量执行的 Concurrency 设置约束
+            maxParallel: 32,
+            runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log)
+        };
+    }
+
+    /** 引擎事件统一处理：收集到运行实例，并按结果路由（失败暂停 / 终局写历史） */
+    private onRunEvent(inst: ActiveRun, event: WorkflowEngineEvent): void {
+        if (event.type === 'nodeState') {
+            inst.states[event.nodeId] = { state: event.state, dur: event.dur || 0 };
+        } else if (event.type === 'log') {
+            inst.logs.push({ nodeId: event.nodeId, level: event.level, text: event.text });
+            if (inst.logs.length > 800) { inst.logs.splice(0, inst.logs.length - 800); }
+        } else if (event.type === 'confirm') {
+            // 记录待确认节点：面板暂停隐藏操作条后，重开详情时恢复
+            inst.pendingConfirm = { nodeId: event.nodeId, text: event.text };
+        } else if (event.type === 'done') {
+            inst.totalDuration += event.duration;
+            // 面板侧展示的时长统一为累计时长（含多次 resume）
+            (event as any).duration = inst.totalDuration;
+            if (event.result === 'failed') {
+                // 失败 → 暂停态：保留在"正在运行"分组，等待用户 Resume 或 Cancel
+                inst.phase = 'failed-paused';
+                this._flowEditor.postMessage({ command: 'runPhase', phase: 'failed-paused' });
+                this.postRunState();
+            } else {
+                // 成功 / 被停止 → 终局：写入 History 并移出"正在运行"
+                this.finalizeRun(inst, event.result, event.nodes);
             }
-        });
+        }
+        this.forwardRunEvent(event);
+    }
+
+    private forwardRunEvent(event: WorkflowEngineEvent): void {
+        this._view?.webview.postMessage({ command: 'workflowEvent', event });
+        this._flowEditor.postMessage({ command: 'workflowEvent', event });
+    }
+
+    /** 终局：写入历史（含工作流快照与日志，用于只读详情回放），清除运行实例 */
+    private finalizeRun(inst: ActiveRun, result: RunResult, nodes: HistoryNodeResult[]): void {
+        const entry: RunHistoryEntry = {
+            id: inst.id,
+            workflowName: inst.name,
+            result,
+            duration: inst.totalDuration,
+            time: Date.now(),
+            nodes,
+            workflow: inst.workflow,
+            logs: inst.logs.slice(-400)
+        };
+        WorkbenchStore.getInstance().addHistory(entry);
+        this._activeRun = undefined;
+        this.postWorkbenchData();
+        this.postRunState();
+        this._flowEditor.postMessage({ command: 'runPhase', phase: 'ended' });
+    }
+
+    /** 从失败节点恢复执行：已成功节点跳过，其余重新调度；失败暂停期间面板修改的节点命令一并生效 */
+    private async handleWorkflowResume(message?: any): Promise<void> {
+        const engine = this._workflowEngine;
+        const inst = this._activeRun;
+        if (!inst || inst.phase !== 'failed-paused' || engine.isRunning) { return; }
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) { return; }
+        // 以面板回传的最新节点数据更新快照（按 id 匹配；仅运行失败的节点会重新执行）
+        if (message && Array.isArray(message.nodes)) {
+            inst.workflow.nodes = inst.workflow.nodes.map(n => {
+                const upd = message.nodes.find((x: any) => x && x.id === n.id);
+                return upd ? Object.assign({}, n, upd) : n;
+            });
+        }
+        inst.phase = 'running';
+        inst.pendingConfirm = null;
+        inst.logs.push({ nodeId: '', level: 'hdr', text: '━━ Resume from failed step ━━' });
+        this.postRunState();
+        this._flowEditor.postMessage({ command: 'runPhase', phase: 'running', durationMs: inst.totalDuration });
+        const resumeStates = { ...inst.states };
+        await engine.run(inst.workflow, this.buildRunOptions(folders[0].uri.fsPath, inst.shell, inst.env), (event) => this.onRunEvent(inst, event), resumeStates);
+    }
+
+    /** 用户取消：运行中 → 引擎停止（done stopped 终局）；失败暂停 → 直接以 failed 终局 */
+    private handleWorkflowCancel(): void {
+        const inst = this._activeRun;
+        if (!inst) { return; }
+        if (this._workflowEngine.isRunning) {
+            this._workflowEngine.stop();
+            return;
+        }
+        if (inst.phase === 'failed-paused') {
+            const nodes: HistoryNodeResult[] = Object.entries(inst.states).map(([id, s]) => ({
+                id,
+                label: inst.workflow.nodes.find(n => n.id === id)?.label || id,
+                state: s.state as any,
+                dur: s.dur
+            }));
+            this.finalizeRun(inst, 'failed', nodes);
+            // 面板/侧边栏同步显示终局结果
+            const fakeDone: WorkflowEngineEvent = { type: 'done', result: 'failed', duration: inst.totalDuration, nodes };
+            this.forwardRunEvent(fakeDone);
+        }
+    }
+
+    /** 面板执行详情视图所需的完整数据（画布快照 + 已收集状态/日志） */
+    private buildRunDetail(): any {
+        const inst = this._activeRun!;
+        return {
+            id: inst.id,
+            name: inst.name,
+            phase: inst.phase,
+            startedAt: inst.startedAt,
+            durationMs: inst.totalDuration,
+            workflow: inst.workflow,
+            states: inst.states,
+            logs: inst.logs,
+            pendingConfirm: inst.pendingConfirm || null
+        };
+    }
+
+    /** 推送运行状态给侧边栏（渲染"正在运行"分组） */
+    private postRunState(): void {
+        const inst = this._activeRun;
+        const run = inst ? { id: inst.id, name: inst.name, phase: inst.phase, startedAt: inst.startedAt } : null;
+        this._view?.webview.postMessage({ command: 'runState', run });
     }
 }

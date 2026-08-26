@@ -9,7 +9,13 @@ var WB = { data: { workflows: [], templates: [], history: [] } };
 var WF = {
     nodes: [], edges: [], states: {}, selected: null, linkMode: false, linkFrom: null,
     running: false, idSeq: 1, currentId: null, logs: [], logFilter: '', durTimer: null,
-    drag: null, counts: { failed: 0, skipped: 0 }
+    drag: null, counts: { failed: 0, skipped: 0 },
+    /* 面板三模式：edit=编辑 / run=执行详情（可 Resume/Cancel）/ history=历史只读回放 */
+    mode: 'edit', runPhase: '', runDuration: 0, editSnapshot: null,
+    /* 当前编辑的是模板（保存时更新模板而非工作流） */
+    templateId: null,
+    /* 节点上方操作条状态：{ id, kind: 'confirm'|'failed' } */
+    actionsNode: null
 };
 var WF_W = 118, WF_H = 44, WF_VB_W = 1000, WF_VB_H = 460;
 var WF_TAG_COLOR = { start: '#48bfe3', cmd: '#7aa2f7', condition: '#e0af68', fork: '#9ece6a', join: '#2ac3de', notify: '#f7768e', confirm: '#ff9e64', ref: '#bb9af7' };
@@ -61,6 +67,7 @@ window.addEventListener('message', function (event) {
     }
     else if (m.command === 'workflowEvent') { wfOnEvent(m.event); }
     else if (m.command === 'workflowRunStarted') { wfOnRunStarted(m.workflow); }
+    else if (m.command === 'runPhase') { wfOnRunPhase(m.phase, m.durationMs); }
     else if (m.command === 'flowEditorAction') { wfApplyAction(m.action); }
 });
 function setTree(tabId, tree) {
@@ -73,6 +80,88 @@ function applyTrees(trees) {
     setTree('cmd', trees.cmd);
     setTree('pyt', trees.pyt);
     setTree('shortcut', trees.shortcut);
+}
+
+/* ==================== 面板模式管理：edit / run（执行详情）/ history（只读回放） ==================== */
+/* 暂存编辑现场（进入 run/history 模式前调用；已有暂存则不覆盖） */
+function wfSnapshotEdit() {
+    if (WF.editSnapshot) { return; }
+    WF.editSnapshot = {
+        currentId: WF.currentId, name: wbEl('wfName').value,
+        nodes: WF.nodes, edges: WF.edges, selected: WF.selected,
+        templateId: WF.templateId
+    };
+}
+/* 恢复编辑现场并回到 edit 模式 */
+function wfRestoreEdit() {
+    var s = WF.editSnapshot;
+    WF.editSnapshot = null;
+    WF.mode = 'edit';
+    WF.runPhase = '';
+    if (s) {
+        WF.currentId = s.currentId;
+        WF.templateId = s.templateId || null;
+        WF.nodes = s.nodes;
+        WF.edges = s.edges;
+        WF.selected = s.selected;
+        wbEl('wfName').value = s.name;
+    } else {
+        WF.templateId = null;
+    }
+    WF.states = {}; WF.selected = null;
+    WF.linkMode = false; WF.linkFrom = null;
+    wbEl('wfPropsForm').style.display = 'none';
+    wbEl('wfPropsEmpty').style.display = '';
+    wfDraw();
+    wfSyncModeUI();
+}
+function wfBackToEdit() {
+    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    wfRestoreEdit();
+}
+/* 只读属性面板：禁用/恢复所有输入控件（删除节点按钮仅编辑模式显示） */
+function wfSetPropsDisabled(dis) {
+    var form = wbEl('wfPropsForm');
+    if (form) {
+        form.querySelectorAll('input,select,textarea').forEach(function (el) { el.disabled = dis; });
+    }
+    var del = wbEl('wfDelBtn');
+    if (del) { del.style.display = (dis || WF.mode !== 'edit') ? 'none' : ''; }
+}
+/* 按当前模式刷新工具栏/徽标/面板可用性 */
+function wfSyncModeUI() {
+    var edit = WF.mode === 'edit';
+    ['wfRunBtn', 'wfLinkBtn', 'wfSaveBtn', 'wfClearBtn'].forEach(function (id) {
+        var el = wbEl(id); if (el) { el.style.display = edit ? '' : 'none'; }
+    });
+    var shell = wbEl('wfShell'); if (shell) { shell.style.display = edit ? '' : 'none'; }
+    var name = wbEl('wfName'); if (name) { name.readOnly = !edit; }
+    var stop = wbEl('wfStopBtn');
+    var back = wbEl('wfBackBtn');
+    if (stop) { stop.style.display = (WF.mode === 'run' && WF.runPhase === 'running') ? '' : 'none'; }
+    /* Resume/Cancel 按钮移至画布节点上方操作条，由 wfShowNodeActions/wfHideNodeActions 管理 */
+    if (back) { back.style.display = edit ? 'none' : ''; }
+    var badge = wbEl('wfModeBadge');
+    if (badge) {
+        badge.style.display = edit ? 'none' : '';
+        if (!edit) {
+            if (WF.mode === 'history') { badge.textContent = t('wb.wf.viewMode'); badge.className = 'wf-mode-badge'; }
+            else if (WF.runPhase === 'failed-paused') { badge.textContent = t('wb.wf.failedPaused'); badge.className = 'wf-mode-badge err'; }
+            else if (WF.runPhase === 'ended') { badge.textContent = t('wb.wf.runEnded'); badge.className = 'wf-mode-badge'; }
+            else { badge.textContent = t('wb.wf.runMode'); badge.className = 'wf-mode-badge run'; }
+        }
+    }
+    var palette = wbEl('wfPalette');
+    if (palette) { palette.classList.toggle('locked', !edit); }
+    /* 失败暂停：允许修改未成功节点的命令（Resume 时生效）；其余只读 */
+    var editable = edit || (WF.mode === 'run' && WF.runPhase === 'failed-paused');
+    wfSetPropsDisabled(!editable);
+    var hint = wbEl('wfHint');
+    if (hint) {
+        hint.textContent = edit ? t('wb.wf.hint')
+            : (WF.mode === 'history' ? t('wb.wf.historyDetail')
+                : (WF.runPhase === 'failed-paused' ? t('wb.wf.failedPausedHint') : t('wb.wf.runMode')));
+    }
 }
 
 /* ==================== 侧边栏动作分发 ==================== */
@@ -89,6 +178,7 @@ function wfApplyAction(action) {
     else if (action.type === 'batchToFlow') {
         if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
         WF.currentId = null;
+        WF.templateId = null;
         WF.nodes = action.nodes || [];
         WF.edges = action.edges || [];
         WF.states = {}; WF.selected = null;
@@ -96,8 +186,156 @@ function wfApplyAction(action) {
         wfDraw();
         wbToast(t('wb.batch.flowGenerated'), 'ok');
     }
+    else if (action.type === 'openRun') { wfShowRunDetail(action.run); }
     else if (action.type === 'showHistory') { wfShowHistory(action.idx); }
-    else if (action.type === 'saveAsTemplate') { wfSaveAsTemplate(); }
+}
+
+/* ==================== 节点上方浮动操作条：人工确认 / 失败续跑 ==================== */
+/* 显示操作条：kind='confirm'（等待人工确认的节点）或 'failed'（失败暂停，可 Resume/Cancel） */
+function wfShowNodeActions(nodeId, kind) {
+    var bar = wbEl('wfNodeActions');
+    if (!bar || !wfNodeById(nodeId)) { return; }
+    bar.style.display = '';
+    wbEl('wfNodeActionsText').style.display = kind === 'confirm' ? '' : 'none';
+    wbEl('wfConfirmOkBtn').style.display = kind === 'confirm' ? '' : 'none';
+    wbEl('wfConfirmNoBtn').style.display = kind === 'confirm' ? '' : 'none';
+    wbEl('wfPauseBtn').style.display = kind === 'confirm' ? '' : 'none';
+    wbEl('wfResumeBtn').style.display = kind === 'failed' ? '' : 'none';
+    wbEl('wfCancelBtn').style.display = kind === 'failed' ? '' : 'none';
+    WF.actionsNode = { id: nodeId, kind: kind };
+    wfPositionNodeActions(nodeId);
+}
+function wfHideNodeActions() {
+    var bar = wbEl('wfNodeActions');
+    if (bar) { bar.style.display = 'none'; }
+    WF.actionsNode = null;
+}
+/* 将 viewBox 坐标映射为画布容器内的像素坐标，操作条水平居中于节点、置于节点上方（太靠上则放下方） */
+function wfPositionNodeActions(nodeId) {
+    var bar = wbEl('wfNodeActions');
+    var wrap = wbEl('wfSvgWrap');
+    var svg = wfSvg();
+    var n = wfNodeById(nodeId);
+    if (!bar || !wrap || !svg || !n || bar.style.display === 'none') { return; }
+    var srect = svg.getBoundingClientRect();
+    var wrect = wrap.getBoundingClientRect();
+    var scale = Math.min(srect.width / WF_VB_W, srect.height / WF_VB_H);
+    var ox = (srect.width - WF_VB_W * scale) / 2;
+    var oy = (srect.height - WF_VB_H * scale) / 2;
+    var nodeCx = srect.left - wrect.left + ox + (n.x + WF_W / 2) * scale;
+    var nodeTop = srect.top - wrect.top + oy + n.y * scale;
+    var barW = bar.offsetWidth || 220;
+    var barH = bar.offsetHeight || 28;
+    var left = nodeCx - barW / 2;
+    if (left < 2) { left = 2; }
+    if (left + barW > wrect.width - 2) { left = Math.max(2, wrect.width - barW - 2); }
+    var top = nodeTop - barH - 8;
+    if (top < 2) { top = nodeTop + WF_H * scale + 8; }
+    bar.style.left = left + 'px';
+    bar.style.top = top + 'px';
+}
+/* 失败暂停：操作条定位到第一个失败节点上方 */
+function wfShowFailedActions() {
+    var failedId = null;
+    for (var i = 0; i < WF.nodes.length; i++) {
+        if (WF.states[WF.nodes[i].id] === 'failed') { failedId = WF.nodes[i].id; break; }
+    }
+    if (failedId) { wfShowNodeActions(failedId, 'failed'); }
+}
+/* 恢复待确认操作条（暂停后重开详情时使用）：显示确认文案 + 继续/取消/暂停按钮 */
+function wfShowConfirmActions(pc) {
+    if (!pc || !pc.nodeId || !wfNodeById(pc.nodeId)) { return; }
+    wbEl('wfNodeActionsText').textContent = t('wb.wf.confirmAsk') + (pc.text ? ': ' + pc.text : '');
+    wfShowNodeActions(pc.nodeId, 'confirm');
+}
+/* 暂停人工确认：仅隐藏操作条，流程仍留在"正在运行"分组；稍后点击运行项可恢复按钮 */
+function wfPause() {
+    wfHideNodeActions();
+    wbToast(t('wb.wf.pausedHint'));
+}
+window.addEventListener('resize', function () {
+    if (WF.actionsNode) { wfPositionNodeActions(WF.actionsNode.id); }
+});
+
+/* ==================== 运行详情（"正在运行"分组点击打开） ==================== */
+function wfShowRunDetail(run) {
+    if (!run || !run.workflow || !Array.isArray(run.workflow.nodes)) { return; }
+    if (WF.running && WF.mode === 'run') { return; } // 已在监控当前运行
+    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    if (WF.mode === 'edit') { wfSnapshotEdit(); }
+    WF.mode = 'run';
+    WF.runPhase = run.phase || 'running';
+    WF.runDuration = run.durationMs || 0;
+    WF.currentId = null;
+    WF.templateId = null;
+    WF.nodes = run.workflow.nodes;
+    WF.edges = run.workflow.edges || [];
+    WF.selected = null;
+    wbEl('wfName').value = run.name || 'workflow';
+    wfPrepareRun();
+    /* 回放已收集的节点状态与监控表 */
+    var startedLabel = new Date(run.startedAt || Date.now()).toTimeString().slice(0, 8);
+    var states = run.states || {};
+    Object.keys(states).forEach(function (id) {
+        var s = states[id];
+        WF.states[id] = s.state;
+        if (s.state === 'failed') { WF.counts.failed++; }
+        else if (s.state === 'skipped') { WF.counts.skipped++; }
+        var node = wfNodeById(id);
+        wfAddLogFilterOption(id, node ? node.label : id);
+        if (node) {
+            var st = s.state === 'success' ? '✓ ' + t('wb.wf.stSuccess') : s.state === 'failed' ? '✗ ' + t('wb.wf.stFailed') : '↓ ' + t('wb.wf.stSkipped');
+            var tr = document.createElement('tr');
+            tr.id = 'wfrow-' + id;
+            tr.innerHTML = '<td>' + startedLabel + '</td><td>' + wbEsc(node.label) + '</td><td>' + st + '</td>' +
+                '<td class="wf-dur">' + ((s.dur || 0) / 1000).toFixed(1) + 's</td><td></td>';
+            wbEl('wfRunTbody').appendChild(tr);
+        }
+    });
+    wfSetCounters();
+    /* 回放已收集的日志 */
+    (run.logs || []).forEach(function (l) {
+        WF.logs.push(l);
+        wfAppendOutput(l.level, l.text, false);
+    });
+    if (WF.runPhase === 'running') {
+        wfSetRunningUI(true);
+        /* 暂停后重开：待确认节点的操作条（继续/取消/暂停）恢复显示 */
+        wfShowConfirmActions(run.pendingConfirm);
+    } else {
+        wfSetRunningUI(false);
+        wbEl('wfState').textContent = t('wb.wf.failedPaused');
+        wbEl('wfDur').textContent = (WF.runDuration / 1000).toFixed(1) + 's';
+        /* 回放后定位失败节点：操作条置于其上方供 Resume/Cancel */
+        wfShowFailedActions();
+    }
+    wfDraw();
+    wfSyncModeUI();
+}
+/* 宿主推送的运行阶段变化 */
+function wfOnRunPhase(phase, durationMs) {
+    if (phase === 'running') {
+        if (WF.mode === 'run' && !WF.running) {
+            if (durationMs) { WF.runDuration = durationMs; }
+            wfSetRunningUI(true); // 恢复执行：保留已回放的监控内容
+        }
+        wfHideNodeActions();
+    }
+    WF.runPhase = phase === 'running' ? 'running' : phase;
+    if (phase === 'failed-paused' && WF.mode === 'run') { wfShowFailedActions(); }
+    if (phase === 'ended') { wfHideNodeActions(); }
+    wfSyncModeUI();
+}
+/* 从失败节点恢复执行：携带面板上修改后的节点数据（失败节点按新命令重跑） */
+function wfResume() {
+    if (WF.mode !== 'run' || WF.runPhase !== 'failed-paused' || WF.running) { return; }
+    vscode.postMessage({ command: 'workflowResume', nodes: WF.nodes });
+    wbToast(t('wb.wf.resumed'));
+}
+/* 取消整个流程（运行中停止 / 失败暂停直接终局） */
+function wfCancelRun() {
+    if (WF.mode !== 'run') { return; }
+    vscode.postMessage({ command: 'workflowCancel' });
 }
 
 /* ==================== 画布渲染 ==================== */
@@ -178,6 +416,8 @@ function wfDraw() {
             '<text x="' + (n.x + WF_W - 16) + '" y="' + (n.y + 16) + '" font-size="11" fill="' + badgeColor + '">' + badge + '</text></g>';
     });
     svg.innerHTML = s;
+    /* 重绘后保持节点操作条贴在目标节点上方（失败暂停时常驻） */
+    if (WF.actionsNode) { wfPositionNodeActions(WF.actionsNode.id); }
 }
 
 /* ==================== 画布交互 ==================== */
@@ -193,7 +433,7 @@ function wfInitCanvasEvents() {
     if (!svg || svg.dataset.wired) { return; }
     svg.dataset.wired = '1';
     svg.addEventListener('mousedown', function (e) {
-        if (WF.running) { return; }
+        if (WF.running || WF.mode !== 'edit') { return; }
         var g = e.target.closest('.wf-node');
         if (!g) { return; }
         var n = wfNodeById(g.dataset.id);
@@ -215,7 +455,7 @@ function wfInitCanvasEvents() {
     window.addEventListener('mouseup', function () { WF.drag = null; });
     svg.addEventListener('click', function (e) {
         var edgeHit = e.target.closest('.wf-edge-hit');
-        if (edgeHit && !WF.running) {
+        if (edgeHit && !WF.running && WF.mode === 'edit') {
             WF.edges.splice(Number(edgeHit.dataset.edge), 1);
             wfDraw();
             wbToast(t('wb.wf.edgeDeleted'), 'ok');
@@ -224,7 +464,7 @@ function wfInitCanvasEvents() {
         var g = e.target.closest('.wf-node');
         if (!g) { return; }
         var id = g.dataset.id;
-        if (WF.linkMode && !WF.running) { wfLinkClick(id); return; }
+        if (WF.linkMode && !WF.running && WF.mode === 'edit') { wfLinkClick(id); return; }
         wfSelectNode(id);
     });
 }
@@ -383,7 +623,7 @@ function wfStartDesc(n) {
     return '';
 }
 function wfConfirm(approved) {
-    wbEl('wfConfirmBar').style.display = 'none';
+    wfHideNodeActions();
     vscode.postMessage({ command: 'workflowConfirm', approved: approved });
 }
 function wfSelectNode(id) {
@@ -440,17 +680,28 @@ function wfSelectNode(id) {
     wfDraw();
 }
 function wfSetEdgeCond(idx, val) {
+    if (WF.mode !== 'edit') { return; }
     if (WF.edges[idx]) { WF.edges[idx].condition = val; wfDraw(); }
 }
 function wfEditProp(key, val) {
     var n = wfNodeById(WF.selected);
     if (!n) { return; }
-    n[key] = val;
-    if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
-    wfDraw();
+    if (WF.mode === 'edit') {
+        n[key] = val;
+        if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
+        wfDraw();
+        return;
+    }
+    /* 失败暂停：允许修改未成功节点的命令/参数，Resume 时随快照一起生效 */
+    if (WF.mode === 'run' && WF.runPhase === 'failed-paused') {
+        if (WF.states[n.id] === 'success') { wbToast(t('wb.wf.cannotEditDoneNode'), 'err'); return; }
+        n[key] = val;
+        if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
+        wfDraw();
+    }
 }
 function wfDeleteSelected() {
-    if (!WF.selected || WF.running) { return; }
+    if (!WF.selected || WF.running || WF.mode !== 'edit') { return; }
     WF.nodes = WF.nodes.filter(function (n) { return n.id !== WF.selected; });
     WF.edges = WF.edges.filter(function (e) { return e.from !== WF.selected && e.to !== WF.selected; });
     WF.selected = null;
@@ -460,7 +711,7 @@ function wfDeleteSelected() {
     wbToast(t('wb.wf.nodeDeleted'), 'ok');
 }
 function wfAddNode(tag) {
-    if (WF.running) { return; }
+    if (WF.running || WF.mode !== 'edit') { return; }
     var id = wbId('n');
     WF.nodes.push({
         id: id, label: t('wb.node.' + tag), tag: tag,
@@ -482,18 +733,31 @@ function wfCurrentWorkflowObj() {
         nodes: WF.nodes, edges: WF.edges, updatedAt: Date.now()
     };
 }
+/* 非编辑模式下载入工作流/模板：先恢复编辑现场 */
+function wfExitReadOnly() {
+    if (WF.mode !== 'edit' && !WF.running) { wfRestoreEdit(); }
+}
 function wfSave() {
+    if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     if (!WF.nodes.length && !WF.edges.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
-    var obj = wfCurrentWorkflowObj();
-    WF.currentId = obj.id;
-    vscode.postMessage({ command: 'workflowSave', workflow: obj });
+    if (WF.templateId) {
+        /* 当前编辑的是模板（含内置模板被修改）：保存回模板，同 id 覆盖 */
+        var tplName = (wbEl('wfName').value || 'template').trim() || 'template';
+        vscode.postMessage({ command: 'templateSave', id: WF.templateId, name: tplName, nodes: WF.nodes, edges: WF.edges });
+    } else {
+        var obj = wfCurrentWorkflowObj();
+        WF.currentId = obj.id;
+        vscode.postMessage({ command: 'workflowSave', workflow: obj });
+    }
     wbToast(t('wb.wf.saved'), 'ok');
 }
 function wfSelectFlow(id) {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    wfExitReadOnly();
     var wf = (WB.data.workflows || []).find(function (w) { return w.id === id; });
     if (!wf) { return; }
     WF.currentId = wf.id;
+    WF.templateId = null;
     WF.nodes = JSON.parse(JSON.stringify(wf.nodes || []));
     WF.edges = JSON.parse(JSON.stringify(wf.edges || []));
     WF.states = {}; WF.selected = null;
@@ -504,7 +768,9 @@ function wfSelectFlow(id) {
 }
 function wfNew() {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    wfExitReadOnly();
     WF.currentId = null;
+    WF.templateId = null;
     WF.nodes = []; WF.edges = []; WF.states = {}; WF.selected = null;
     wbEl('wfName').value = 'workflow-' + new Date().toISOString().slice(5, 16).replace(/[-:]/g, '');
     wbEl('wfPropsForm').style.display = 'none';
@@ -512,47 +778,55 @@ function wfNew() {
     wfDraw();
 }
 function wfClear() {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    if (WF.running || WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     WF.nodes = []; WF.edges = []; WF.states = {}; WF.selected = null;
     wbEl('wfPropsForm').style.display = 'none';
     wbEl('wfPropsEmpty').style.display = '';
     wfDraw();
     wbToast(t('wb.wf.cleared'));
 }
-function wfCloneNodesEdges(tpl) {
-    var idMap = {};
-    var nodes = (tpl.nodes || []).map(function (n) {
-        var nid = wbId('n');
-        idMap[n.id] = nid;
-        return Object.assign({}, n, { id: nid });
-    });
-    var edges = (tpl.edges || []).filter(function (e) { return idMap[e.from] && idMap[e.to]; })
-        .map(function (e) { return { from: idMap[e.from], to: idMap[e.to], condition: e.condition }; });
-    return { nodes: nodes, edges: edges };
-}
+/* 模板并入 Workflows 列表后，点击模板即原地编辑：保留节点 id，保存时按 templateId 更新模板 */
 function wfLoadTemplate(id) {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    wfExitReadOnly();
     var tpl = (WB.data.templates || []).find(function (x) { return x.id === id; });
     if (!tpl) { return; }
-    var cloned = wfCloneNodesEdges(tpl);
     WF.currentId = null;
-    WF.nodes = cloned.nodes;
-    WF.edges = cloned.edges;
+    WF.templateId = tpl.id;
+    WF.nodes = JSON.parse(JSON.stringify(tpl.nodes || []));
+    WF.edges = JSON.parse(JSON.stringify(tpl.edges || []));
     WF.states = {}; WF.selected = null;
     var label = tpl.builtin ? t(tpl.name) : tpl.name;
     wbEl('wfName').value = label;
+    wbEl('wfPropsForm').style.display = 'none';
+    wbEl('wfPropsEmpty').style.display = '';
     wfDraw();
     wbToast(t('wb.wf.templateLoaded'), 'ok');
 }
-function wfSaveAsTemplate() {
-    if (!WF.nodes.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
-    var name = window.prompt(t('wb.wf.templateName'), 'template');
-    if (!name) { return; }
-    vscode.postMessage({ command: 'templateSave', name: name, nodes: WF.nodes, edges: WF.edges });
-}
+/* 历史详情：复用 Flow Editor 只读回放（画布节点状态 + 监控表 + 日志），不允许修改 */
 function wfShowHistory(idx) {
     var h = (WB.data.history || [])[idx];
     if (!h) { return; }
+    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    if (WF.mode === 'edit') { wfSnapshotEdit(); }
+    WF.mode = 'history';
+    WF.runPhase = '';
+    WF.currentId = null;
+    WF.selected = null;
+    /* 画布：优先使用历史记录中的工作流快照；旧记录无快照时退化为平铺节点列表 */
+    if (h.workflow && Array.isArray(h.workflow.nodes)) {
+        WF.nodes = JSON.parse(JSON.stringify(h.workflow.nodes));
+        WF.edges = JSON.parse(JSON.stringify(h.workflow.edges || []));
+    } else {
+        WF.nodes = (h.nodes || []).map(function (n, i) {
+            return { id: n.id, label: n.label, tag: 'cmd', x: 40 + (i % 4) * 170, y: 50 + Math.floor(i / 4) * 90, cmd: '', timeout: 300, failPolicy: 'stop' };
+        });
+        WF.edges = [];
+    }
+    WF.states = {};
+    (h.nodes || []).forEach(function (n) { WF.states[n.id] = n.state; });
+    wbEl('wfName').value = h.workflowName || 'workflow';
+    /* 监控表 */
     var time = new Date(h.time).toTimeString().slice(0, 8);
     var tbody = wbEl('wfRunTbody');
     tbody.innerHTML = (h.nodes || []).map(function (n) {
@@ -566,8 +840,26 @@ function wfShowHistory(idx) {
         (h.nodes || []).filter(function (n) { return n.state === 'failed'; }).length,
         (h.nodes || []).filter(function (n) { return n.state === 'skipped'; }).length
     );
+    /* 日志回放 */
+    WF.logs = [];
+    WF.logFilter = '';
+    var sel = wbEl('wfLogFilter');
+    sel.innerHTML = '<option value="">' + wbEsc(t('wb.wf.allNodes')) + '</option>';
     var out = wbEl('wfOutput');
-    out.innerHTML = '<div class="dim">' + wbEsc(t('wb.wf.historyDetail')) + '</div>';
+    out.innerHTML = '';
+    if (h.logs && h.logs.length) {
+        (h.nodes || []).forEach(function (n) { wfAddLogFilterOption(n.id, n.label); });
+        h.logs.forEach(function (l) {
+            WF.logs.push(l);
+            wfAppendOutput(l.level, l.text, false);
+        });
+    } else {
+        out.innerHTML = '<div class="dim">' + wbEsc(t('wb.wf.historyDetail')) + '</div>';
+    }
+    wfHideNodeActions();
+    wfSetRunningUI(false);
+    wfDraw();
+    wfSyncModeUI();
 }
 function wfHistoryView(nodeId) {
     if (wfNodeById(nodeId)) { wfSelectNode(nodeId); } else { wbToast(t('wb.wf.historyDetail')); }
@@ -586,7 +878,8 @@ function wfSetRunningUI(running) {
     wbEl('wfCanvasWrap').classList.toggle('running-lock', running);
     wbEl('wfRunBtn').disabled = running;
     if (running) {
-        var t0 = Date.now();
+        /* 时长计时以累计时长为基数（resume 场景显示总时长） */
+        var t0 = Date.now() - (WF.runDuration || 0);
         WF.durTimer = setInterval(function () {
             wbEl('wfDur').textContent = ((Date.now() - t0) / 1000).toFixed(1) + 's';
         }, 250);
@@ -598,23 +891,36 @@ function wfSetRunningUI(running) {
 }
 function wfRun() {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     if (!WF.nodes.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
+    /* 编辑 → 执行详情模式：暂存编辑现场 */
+    wfSnapshotEdit();
+    WF.mode = 'run';
+    WF.runPhase = 'running';
+    WF.runDuration = 0;
     wfPrepareRun();
+    wfSyncModeUI();
     vscode.postMessage({
         command: 'workflowRun',
         workflow: wfCurrentWorkflowObj(),
         shell: wbEl('wfShell').value
     });
 }
-/* 侧边栏（Batch 等）发起的运行：载入工作流并初始化监控 */
+/* 侧边栏（Batch 等）发起的运行：载入工作流并切换到执行详情模式 */
 function wfOnRunStarted(workflow) {
     if (!workflow || !Array.isArray(workflow.nodes)) { return; }
+    if (WF.mode === 'edit') { wfSnapshotEdit(); }
+    WF.mode = 'run';
+    WF.runPhase = 'running';
+    WF.runDuration = 0;
     WF.currentId = null;
+    WF.templateId = null;
     WF.nodes = workflow.nodes;
     WF.edges = workflow.edges || [];
     WF.selected = null;
     wbEl('wfName').value = workflow.name || 'workflow';
     wfPrepareRun();
+    wfSyncModeUI();
 }
 function wfPrepareRun() {
     WF.states = {};
@@ -623,7 +929,7 @@ function wfPrepareRun() {
     wfSetCounters(0, 0);
     wbEl('wfRunTbody').innerHTML = '';
     wbEl('wfOutput').innerHTML = '';
-    wbEl('wfConfirmBar').style.display = 'none';
+    wfHideNodeActions();
     var sel = wbEl('wfLogFilter');
     sel.innerHTML = '<option value="">' + wbEsc(t('wb.wf.allNodes')) + '</option>';
     wfSetRunningUI(true);
@@ -662,16 +968,23 @@ function wfOnEvent(ev) {
             wfAppendOutput(ev.level, ev.text);
         }
     } else if (ev.type === 'confirm') {
-        wbEl('wfConfirmText').textContent = t('wb.wf.confirmAsk') + ': ' + ev.text;
-        wbEl('wfConfirmBar').style.display = '';
+        /* 人工确认：操作条置于待确认节点上方 */
+        wbEl('wfNodeActionsText').textContent = t('wb.wf.confirmAsk') + (ev.text ? ': ' + ev.text : '');
+        wfShowNodeActions(ev.nodeId, 'confirm');
     } else if (ev.type === 'done') {
-        wbEl('wfConfirmBar').style.display = 'none';
+        wfHideNodeActions();
         wfSetRunningUI(false);
         var key = ev.result === 'success' ? 'wb.wf.doneSuccess' : ev.result === 'stopped' ? 'wb.wf.doneStopped' : 'wb.wf.doneFailed';
         wbEl('wfState').textContent = ev.result === 'success' ? t('wb.wf.stSuccess') : ev.result === 'stopped' ? t('wb.wf.stStopped') : t('wb.wf.stFailed');
         wbEl('wfDur').textContent = (ev.duration / 1000).toFixed(1) + 's';
         wfAppendOutput(ev.result === 'success' ? 'ok' : 'err', t(key) + ' · ' + (ev.duration / 1000).toFixed(1) + 's');
         wbToast(t(key), ev.result === 'success' ? 'ok' : 'err');
+        /* 执行详情模式：failed → 失败暂停（可 Resume/Cancel）；success/stopped → 终局（可返回编辑） */
+        if (WF.mode === 'run') {
+            WF.runDuration = ev.duration;
+            if (WF.runPhase !== 'failed-paused') { WF.runPhase = 'ended'; }
+            wfSyncModeUI();
+        }
     }
 }
 function wfAppendOutput(level, text, stamp) {
@@ -702,6 +1015,23 @@ function wfApplyLogFilter() {
 function wfClearOutput() {
     wbEl('wfOutput').innerHTML = '';
     WF.logs = [];
+}
+/* 导出监控日志：收集结构化日志（回退到输出区 DOM），由宿主打开新编辑器并全选 */
+function wfExportLog() {
+    var lines = [];
+    if (WF.logs && WF.logs.length) {
+        WF.logs.forEach(function (l) { lines.push(l.text); });
+    } else {
+        var out = wbEl('wfOutput');
+        if (out) {
+            Array.prototype.forEach.call(out.children, function (el) {
+                if (el.textContent) { lines.push(el.textContent); }
+            });
+        }
+    }
+    var content = lines.join('\\n');
+    if (!content.trim()) { wbToast(t('wb.wf.noLogs'), 'err'); return; }
+    vscode.postMessage({ command: 'exportLog', content: content, tabId: 'workflow' });
 }
 
 /* ==================== monitor splitter（画布/监控上下拖拽调高） ==================== */

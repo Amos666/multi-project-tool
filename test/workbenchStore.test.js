@@ -79,7 +79,7 @@ test('workflow upsert/update/delete round-trip', () => {
     assert.deepStrictEqual(onDisk.workflows, []);
 });
 
-test('custom templates save/delete; builtins not removable', () => {
+test('custom templates save/update/delete; builtin delete hides it', () => {
     const dir = makeWorkspace();
     const Store = loadStore(dir);
     const store = Store.getInstance();
@@ -87,10 +87,25 @@ test('custom templates save/delete; builtins not removable', () => {
     assert.ok(tpl.id.indexOf('tpl-') === 0);
     assert.strictEqual(store.allTemplates().length, 4, '3 builtins + 1 custom');
 
-    store.deleteCustomTemplate('builtin-maven');
-    assert.strictEqual(store.allTemplates().length, 4, 'builtin cannot be deleted via custom delete');
-    store.deleteCustomTemplate(tpl.id);
-    assert.strictEqual(store.allTemplates().length, 3);
+    /* 同 id 保存 = 原地更新模板 */
+    const updated = store.saveCustomTemplate('My Tpl v2', [{ id: 'x', label: 'X2', tag: 'cmd', x: 0, y: 0, cmd: 'echo y', timeout: 60, failPolicy: 'skip' }], [], tpl.id);
+    assert.strictEqual(updated.id, tpl.id, 'same id updated in place');
+    assert.strictEqual(store.allTemplates().length, 4);
+    assert.strictEqual(store.allTemplates().find(t => t.id === tpl.id).name, 'My Tpl v2');
+
+    /* 删除内置模板 = 隐藏（列表中不再出现） */
+    store.deleteTemplate('builtin-maven');
+    assert.strictEqual(store.allTemplates().length, 3, 'builtin hidden from list');
+    /* 删除自定义模板 = 彻底移除 */
+    store.deleteTemplate(tpl.id);
+    assert.strictEqual(store.allTemplates().length, 2);
+
+    /* 内置模板 id 存为自定义覆盖项（编辑内置模板后保存） */
+    const over = store.saveCustomTemplate('My Maven', [], [], 'builtin-maven');
+    assert.strictEqual(over.id, 'builtin-maven');
+    const visible = store.allTemplates().map(t => t.id);
+    assert.ok(visible.indexOf('builtin-maven') >= 0, 'overridden builtin visible again');
+    assert.strictEqual(store.allTemplates().find(t => t.id === 'builtin-maven').name, 'My Maven');
 });
 
 test('history: newest first and capped at 30', () => {

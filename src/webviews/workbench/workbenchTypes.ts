@@ -74,6 +74,12 @@ export interface HistoryNodeResult {
     dur: number;
 }
 
+export interface WfLogEntry {
+    nodeId: string;
+    level: 'info' | 'ok' | 'err' | 'dim' | 'hdr';
+    text: string;
+}
+
 export interface RunHistoryEntry {
     id: string;
     workflowName: string;
@@ -82,6 +88,10 @@ export interface RunHistoryEntry {
     duration: number;
     time: number;
     nodes: HistoryNodeResult[];
+    /** 工作流快照（画布结构），用于历史详情只读回放；旧记录可能缺失 */
+    workflow?: Workflow;
+    /** 执行日志（截断保存），用于历史详情回放；旧记录可能缺失 */
+    logs?: WfLogEntry[];
 }
 
 export interface BatchGroup {
@@ -92,6 +102,8 @@ export interface BatchGroup {
 }
 
 export interface WorkbenchData {
+    /** 用户删除的内置模板 id（内置模板代码内置，删除即隐藏） */
+    hiddenTemplates?: string[];
     checklist: ChecklistTask[];
     workflows: Workflow[];
     templates: WfTemplate[];

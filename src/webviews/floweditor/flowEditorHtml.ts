@@ -10,11 +10,13 @@ export const FLOW_EDITOR_BODY = `
         </div>
         <div class="wf-canvas-wrap" id="wfCanvasWrap">
             <div class="wf-toolbar">
+                <button class="wf-btn" id="wfBackBtn" style="display:none" onclick="wfBackToEdit()" data-i18n-title="wb.wf.backToEdit" title="Back to editor"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5"/></svg><span data-i18n="wb.wf.backToEdit">Back</span></button>
+                <span class="wf-mode-badge" id="wfModeBadge" style="display:none"></span>
                 <button class="wf-btn primary" id="wfRunBtn" onclick="wfRun()" data-i18n-title="wb.wf.run" title="Run"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5v9l7.5-4.5z"/></svg></button>
-                <button class="wf-btn" onclick="wfStop()" data-i18n-title="wb.wf.stop" title="Stop"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/></svg></button>
+                <button class="wf-btn" id="wfStopBtn" onclick="wfStop()" data-i18n-title="wb.wf.stop" title="Stop"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/></svg></button>
                 <button class="wf-btn" id="wfLinkBtn" onclick="wfToggleLink()" data-i18n-title="wb.wf.link" title="Link mode"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 9.8l3.6-3.6"/><path d="M7.4 5.4l1.3-1.3a2.4 2.4 0 0 1 3.4 3.4l-1.3 1.3"/><path d="M8.6 10.6l-1.3 1.3a2.4 2.4 0 0 1-3.4-3.4l1.3-1.3"/></svg></button>
-                <button class="wf-btn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></button>
-                <button class="wf-btn danger" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.3 4.5V3h3.4v1.5"/><path d="M4.5 4.5l.8 8.5h5.4l.8-8.5"/><path d="M6.8 7v3.5M9.2 7v3.5"/></svg></button>
+                <button class="wf-btn" id="wfSaveBtn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></button>
+                <button class="wf-btn danger" id="wfClearBtn" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.3 4.5V3h3.4v1.5"/><path d="M4.5 4.5l.8 8.5h5.4l.8-8.5"/><path d="M6.8 7v3.5M9.2 7v3.5"/></svg></button>
                 <input type="text" id="wfName" value="workflow" style="width:150px;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:11px;padding:3px 6px;outline:none;">
                 <select id="wfShell" title="Shell">
                     <option value="git-bash">Git Bash</option>
@@ -26,6 +28,15 @@ export const FLOW_EDITOR_BODY = `
             </div>
             <div class="wf-svg-wrap" id="wfSvgWrap">
                 <svg id="wfSvg" class="wf-svg" viewBox="0 0 1000 460" preserveAspectRatio="xMidYMid meet"></svg>
+                <!-- 节点上方浮动操作条：人工确认（继续/取消/暂停）与失败续跑（Resume/Cancel）统一放置于此 -->
+                <div class="wf-node-actions" id="wfNodeActions" style="display:none">
+                    <span class="wf-node-actions-text" id="wfNodeActionsText"></span>
+                    <button class="wf-btn primary" id="wfConfirmOkBtn" style="display:none" onclick="wfConfirm(true)" data-i18n="wb.wf.confirmApprove">Continue</button>
+                    <button class="wf-btn danger" id="wfConfirmNoBtn" style="display:none" onclick="wfConfirm(false)" data-i18n="wb.wf.confirmCancel">Cancel workflow</button>
+                    <button class="wf-btn" id="wfPauseBtn" style="display:none" onclick="wfPause()" data-i18n-title="wb.wf.pause" title="Pause"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 3.5v9"/><path d="M10 3.5v9"/></svg><span data-i18n="wb.wf.pause">Pause</span></button>
+                    <button class="wf-btn primary" id="wfResumeBtn" style="display:none" onclick="wfResume()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5v9l7.5-4.5z"/></svg><span data-i18n="wb.wf.resume">Resume</span></button>
+                    <button class="wf-btn danger" id="wfCancelBtn" style="display:none" onclick="wfCancelRun()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/></svg><span data-i18n="wb.wf.cancelRun">Cancel</span></button>
+                </div>
             </div>
         </div>
         <div class="wf-props">
@@ -81,7 +92,7 @@ export const FLOW_EDITOR_BODY = `
                 </select>
                 <div id="wfPOutEdges"></div>
                 <div class="wf-deps"><span data-i18n="wb.wf.deps">Dependencies</span>: <span id="wfPDeps">--</span></div>
-                <button class="wf-del-btn" onclick="wfDeleteSelected()" data-i18n="wb.wf.deleteNode">Delete Node</button>
+                <button class="wf-del-btn" id="wfDelBtn" onclick="wfDeleteSelected()" data-i18n="wb.wf.deleteNode">Delete Node</button>
             </div>
         </div>
     </div>
@@ -90,12 +101,6 @@ export const FLOW_EDITOR_BODY = `
         <div class="wf-monitor-head">
             <span data-i18n="wb.wf.monitor">Execution Monitor</span>
             <span class="wf-summary"><span data-i18n="wb.wf.state">State</span>: <span id="wfState">-</span> | <span data-i18n="wb.wf.dur">Duration</span>: <span id="wfDur">--</span> | <span data-i18n="wb.wf.failed">Failed</span>: <span id="wfFailed">0</span> | <span data-i18n="wb.wf.skipped">Skipped</span>: <span id="wfSkipped">0</span></span>
-        </div>
-        <div id="wfConfirmBar" class="wf-confirm-bar" style="display:none">
-            <span class="wf-confirm-icon">✋</span>
-            <span id="wfConfirmText" class="wf-confirm-text"></span>
-            <button class="wf-btn primary" onclick="wfConfirm(true)" data-i18n="wb.wf.confirmApprove">Continue</button>
-            <button class="wf-btn danger" onclick="wfConfirm(false)" data-i18n="wb.wf.confirmCancel">Cancel workflow</button>
         </div>
         <div class="wf-monitor-body">
             <div class="wf-run-table-wrap">
@@ -116,7 +121,8 @@ export const FLOW_EDITOR_BODY = `
                     <select id="wfLogFilter" onchange="wfApplyLogFilter()">
                         <option value="" data-i18n="wb.wf.allNodes">All nodes</option>
                     </select>
-                    <span class="wf-btn" style="margin-left:auto;padding:1px 6px" onclick="wfClearOutput()" data-i18n="log.clear">Clear</span>
+                    <span class="wf-btn" style="margin-left:auto;padding:1px 6px" onclick="wfExportLog()" data-i18n-title="wb.wf.exportLog" title="Export log"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;vertical-align:-2px"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M2.5 12.5h11"/></svg> <span data-i18n="wb.wf.exportLog">Export</span></span>
+                    <span class="wf-btn" style="padding:1px 6px" onclick="wfClearOutput()" data-i18n="log.clear">Clear</span>
                 </div>
                 <div class="wf-output" id="wfOutput"></div>
             </div>

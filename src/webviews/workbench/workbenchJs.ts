@@ -3,7 +3,7 @@
 
 export const WORKBENCH_JS = `
 /* ==================== Workbench: state ==================== */
-var WB = { data: { checklist: [], workflows: [], templates: [], history: [], batchGroups: [], hiddenTabs: [] }, batchIdx: 0 };
+var WB = { data: { checklist: [], workflows: [], templates: [], history: [], batchGroups: [], hiddenTabs: [] }, batchIdx: 0, run: null };
 /* 画布/属性/监控已迁移至主编辑区 Flow Editor 面板；侧边栏仅保留运行锁与批量节点映射 */
 var WF = { running: false, batchNodeIds: [] };
 
@@ -54,6 +54,7 @@ window.addEventListener('message', function (event) {
     if (!m || !m.command) { return; }
     if (m.command === 'workbenchData') { wbOnData(m.data); }
     else if (m.command === 'workflowEvent') { wfOnEvent(m.event); }
+    else if (m.command === 'runState') { WB.run = m.run; renderRunningList(); }
 });
 
 function wbOnData(data) {
@@ -61,11 +62,28 @@ function wbOnData(data) {
     WB.data = data;
     renderChecklist();
     renderFlowList();
-    renderTemplateList();
+    renderRunningList();
     renderHistoryList();
     renderBatchGroups();
     applyHiddenTabs();
     applyTabToggles();
+}
+
+/* ==================== 通用确认弹窗（webview 中 window.confirm 被禁用） ==================== */
+var wbConfirmCb = null;
+function wbConfirm(msg, cb) {
+    wbEl('wbConfirmText').textContent = msg;
+    wbConfirmCb = cb;
+    wbEl('wbConfirmModal').style.display = 'flex';
+}
+function wbConfirmOk() {
+    var cb = wbConfirmCb;
+    wbConfirmClose();
+    if (cb) { cb(); }
+}
+function wbConfirmClose() {
+    wbConfirmCb = null;
+    wbEl('wbConfirmModal').style.display = 'none';
 }
 
 /* ==================== Checklist ==================== */
@@ -138,39 +156,58 @@ function renderFlowList() {
     var box = wbEl('wfFlowList');
     if (!box) { return; }
     var flows = WB.data.workflows || [];
-    if (!flows.length) {
+    var tpls = WB.data.templates || [];
+    if (!flows.length && !tpls.length) {
         box.innerHTML = '<div class="wf-list-item dim">' + wbEsc(t('wb.wf.noFlows')) + '</div>';
         return;
     }
-    box.innerHTML = flows.map(function (wf) {
+    var html = flows.map(function (wf) {
         return '<div class="wf-list-item" onclick="wfSelectFlow(\\'' + wf.id + '\\')" title="' + wbEsc(wf.name) + '">' +
             '<span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(wf.name) + '</span>' +
             '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteFlow(\\'' + wf.id + '\\')">✕</span></div>';
     }).join('');
+    /* 模板并入 Workflows 分组（带模板图标），可点击编辑、可删除 */
+    html += tpls.map(function (tpl) {
+        var label = tpl.builtin ? t(tpl.name) : tpl.name;
+        return '<div class="wf-list-item" onclick="wfLoadTemplate(\\'' + tpl.id + '\\')" title="' + wbEsc(label) + '">' +
+            wbIcon('template') + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(label) + '</span>' +
+            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteTemplate(\\'' + tpl.id + '\\')">✕</span></div>';
+    }).join('');
+    box.innerHTML = html;
 }
 function wfSelectFlow(id) { wfRelay({ type: 'openFlow', id: id }); }
 function wfDeleteFlow(id) {
-    vscode.postMessage({ command: 'workflowDelete', id: id });
+    var wf = (WB.data.workflows || []).find(function (w) { return w.id === id; });
+    wbConfirm(t('wb.wf.deleteFlowConfirm') + (wf ? ' "' + wf.name + '"' : ''), function () {
+        vscode.postMessage({ command: 'workflowDelete', id: id });
+    });
 }
 function wfNew() { wfRelay({ type: 'new' }); }
-function wfSaveAsTemplate() { wfRelay({ type: 'saveAsTemplate' }); }
-function renderTemplateList() {
-    var box = wbEl('wfTemplateList');
-    if (!box) { return; }
-    var tpls = WB.data.templates || [];
-    box.innerHTML = tpls.map(function (tpl) {
-        var label = tpl.builtin ? t(tpl.name) : tpl.name;
-        return '<div class="wf-list-item" onclick="wfLoadTemplate(\\'' + tpl.id + '\\')" title="' + wbEsc(label) + '">' +
-            '<span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(label) + '</span>' +
-            (tpl.builtin ? '' : '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteTemplate(\\'' + tpl.id + '\\')">✕</span>') +
-            '</div>';
-    }).join('');
-}
 function wfLoadTemplate(id) { wfRelay({ type: 'loadTemplate', id: id }); }
 function wfDeleteTemplate(id) {
-    if (!window.confirm(t('wb.wf.deleteTemplateConfirm'))) { return; }
-    vscode.postMessage({ command: 'templateDelete', id: id });
+    wbConfirm(t('wb.wf.deleteTemplateConfirm'), function () {
+        vscode.postMessage({ command: 'templateDelete', id: id });
+    });
 }
+/* ---- 正在运行分组：点击打开 Flow Editor 执行详情 ---- */
+function renderRunningList() {
+    var box = wbEl('wfRunningList');
+    if (!box) { return; }
+    var r = WB.run;
+    if (!r) {
+        box.innerHTML = '<div class="wf-list-item dim">' + wbEsc(t('wb.wf.noRunning')) + '</div>';
+        return;
+    }
+    var failedPaused = r.phase === 'failed-paused';
+    var icon = failedPaused
+        ? '<svg class="wb-icon" style="stroke:var(--state-error)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="8" cy="8" r="6.2"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/></svg>'
+        : '<svg class="wb-icon" style="stroke:var(--brand-primary)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M8 2a6 6 0 1 0 6 6"/><path d="M8 4.5A3.5 3.5 0 1 0 11.5 8"/></svg>';
+    var phaseLabel = failedPaused ? t('wb.wf.failedPaused') : t('wb.wf.stRunning');
+    box.innerHTML = '<div class="wf-list-item" onclick="wfOpenRun()" title="' + wbEsc(r.name) + '">' +
+        icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(r.name) + ' · ' + wbEsc(phaseLabel) + '</span></div>';
+}
+function wfOpenRun() { wfRelay({ type: 'openRun' }); }
+/* ---- 历史记录：双击只读查看详情 / 单项删除 / 全部清空 ---- */
 function renderHistoryList() {
     var box = wbEl('wfHistoryList');
     if (!box) { return; }
@@ -182,11 +219,22 @@ function renderHistoryList() {
     box.innerHTML = hist.map(function (h, i) {
         var icon = wfHistIcon(h.result);
         var time = new Date(h.time).toTimeString().slice(0, 8);
-        return '<div class="wf-list-item" onclick="wfShowHistory(' + i + ')" title="' + wbEsc(h.workflowName) + '">' +
-            icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(h.workflowName) + ' · ' + (h.duration / 1000).toFixed(1) + 's · ' + time + '</span></div>';
+        return '<div class="wf-list-item" ondblclick="wfShowHistory(' + i + ')" title="' + wbEsc(h.workflowName) + '">' +
+            icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(h.workflowName) + ' · ' + (h.duration / 1000).toFixed(1) + 's · ' + time + '</span>' +
+            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteHistory(\\'' + h.id + '\\')">✕</span></div>';
     }).join('');
 }
 function wfShowHistory(idx) { wfRelay({ type: 'showHistory', idx: idx }); }
+function wfDeleteHistory(id) {
+    wbConfirm(t('wb.wf.deleteHistoryConfirm'), function () {
+        vscode.postMessage({ command: 'historyDelete', id: id });
+    });
+}
+function wfClearHistory() {
+    wbConfirm(t('wb.wf.clearHistoryConfirm'), function () {
+        vscode.postMessage({ command: 'historyClearAll' });
+    });
+}
 
 /* ==================== Workflow: run / monitor ==================== */
 /* 画布执行监控在主编辑区 Flow Editor 面板；侧边栏仅跟踪批量运行状态与输出 */

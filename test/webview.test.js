@@ -25,6 +25,8 @@ const js = provider.getJavaScript();
 // Flow 编辑器（主编辑区 WebviewPanel）：画布/属性/执行监控
 const flowHtml = FLOW_EDITOR_BODY;
 const flowJs = FLOW_EDITOR_JS;
+// 宿主源码缓存（源码级断言用）
+const mvpSrcCache = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'MainViewProvider.ts'), 'utf8');
 
 // ---------- webview JS syntax ----------
 test('webview JavaScript parses without syntax errors', () => {
@@ -130,10 +132,12 @@ test('HTML: checklist panel (input/priority/progress)', () => {
 });
 
 test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => {
-    // 侧边栏 Flow Tab：列表 + 打开主编辑区入口
-    for (const id of ['wfFlowList', 'wfTemplateList', 'wfHistoryList']) {
+    // 侧边栏 Flow Tab：列表 + 打开主编辑区入口（模板已并入 Workflows 列表）
+    for (const id of ['wfFlowList', 'wfHistoryList']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing workflow list element: ' + id);
     }
+    assert.ok(!html.includes('id="wfTemplateList"'), 'templates merged into workflows list');
+    assert.ok(html.includes('id="wbConfirmModal"'), 'confirm modal for deletions');
     assert.ok(html.includes('wfOpenEditor()'), 'open flow editor button');
     // 主编辑区 Flow Editor 面板：画布 / 属性 / 执行监控
     for (const id of ['wfSvg', 'wfPalette',
@@ -194,7 +198,7 @@ test('HTML+JS: start node (scheduled start) and confirm node (manual approval)',
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing schedule element: ' + id);
     }
     assert.ok(flowHtml.includes('value="countdown"') && flowHtml.includes('value="clock"') && flowHtml.includes('value="none"'), 'schedule modes offered');
-    assert.ok(flowHtml.includes('id="wfConfirmBar"') && flowHtml.includes('id="wfConfirmText"'), 'confirm bar in monitor');
+    assert.ok(flowHtml.includes('id="wfNodeActions"') && flowHtml.includes('id="wfNodeActionsText"'), 'node actions bar above node');
     assert.ok(flowHtml.includes('onclick="wfConfirm(true)"') && flowHtml.includes('onclick="wfConfirm(false)"'), 'approve/cancel buttons');
     assert.ok(flowJs.includes("command: 'workflowConfirm'"), 'confirm answer sent to host');
     assert.ok(flowJs.includes("ev.type === 'confirm'"), 'webview handles confirm event');
@@ -227,7 +231,7 @@ test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher
         'wfHistoryView', 'wfAppendOutput', 'wfApplyAction', 'wfOnRunStarted']) {
         assert.ok(flowJs.includes(sym), 'missing flow editor JS symbol: ' + sym);
     }
-    assert.ok(js.includes("window.confirm(t('wb.wf.deleteTemplateConfirm'))"), 'template delete requires confirmation');
+    assert.ok(js.includes("wbConfirm(t('wb.wf.deleteTemplateConfirm')"), 'template delete requires confirmation modal');
     assert.ok(translations.en['wb.wf.deleteTemplateConfirm'] && translations.zh['wb.wf.deleteTemplateConfirm'], 'delete-confirm i18n in both languages');
     assert.ok(!js.includes('wfEnv') && !js.includes('batchEnv') && !js.includes('prodConfirm'), 'dev/test/prod dropdowns fully removed');
     assert.ok(flowJs.includes('wfFailed') && flowJs.includes('wfSkipped'), 'monitor counters updated');
@@ -237,6 +241,98 @@ test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher
     assert.ok(js.includes("command: 'flowEditorAction'"), 'sidebar relays actions to flow editor panel');
     assert.ok(js.includes('wbNow()'), 'log lines carry timestamps');
     assert.ok(/WB\.batchRunning[\s\S]{0,200}batchAppendOutput/.test(js), 'batch run mirrors logs into batch tab');
+});
+
+test('JS: log export button + template in-place editing + node actions bar', () => {
+    // 监控日志导出：按钮 + webview 收集日志发 exportLog，宿主打开新编辑器并全选
+    assert.ok(flowHtml.includes('onclick="wfExportLog()"'), 'export log button in output bar');
+    assert.ok(flowJs.includes('function wfExportLog'), 'export log implementation');
+    assert.ok(flowJs.includes("command: 'exportLog'"), 'export log message to host');
+    const mvpSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'MainViewProvider.ts'), 'utf8');
+    assert.ok(mvpSrc.includes('case \'exportLog\'') && mvpSrc.includes('handleExportLog'), 'host handles exportLog');
+    assert.ok(mvpSrc.includes('openTextDocument'), 'host opens new text document for exported log');
+    for (const k of ['wb.wf.exportLog', 'wb.wf.noLogs']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+    // 模板原地编辑：点击模板保留 templateId，保存时按 id 更新模板
+    assert.ok(flowJs.includes('WF.templateId = tpl.id'), 'loading template tracks templateId');
+    assert.ok(flowJs.includes("command: 'templateSave', id: WF.templateId"), 'save routes to template update');
+    assert.ok(flowJs.includes('templateId: WF.templateId'), 'edit snapshot keeps templateId');
+    // 节点上方操作条：确认/续跑按钮动态定位
+    for (const sym of ['wfShowNodeActions', 'wfHideNodeActions', 'wfPositionNodeActions', 'wfShowFailedActions']) {
+        assert.ok(flowJs.includes(sym), 'missing node actions symbol: ' + sym);
+    }
+    assert.ok(flowJs.includes("wfShowNodeActions(ev.nodeId, 'confirm')"), 'confirm event shows node actions');
+});
+
+test('JS+host: failed-paused keeps actions bar, allows editing failed node cmd before resume', () => {
+    // 面板：失败暂停时可修改未成功节点命令；Resume 携带修改后的节点数据
+    assert.ok(flowJs.includes("WF.runPhase === 'failed-paused' ? t('wb.wf.failedPausedHint')"), 'hint explains edit-then-resume');
+    assert.ok(flowJs.includes("WF.states[n.id] === 'success') { wbToast(t('wb.wf.cannotEditDoneNode'"), 'succeeded nodes stay read-only');
+    assert.ok(flowJs.includes("command: 'workflowResume', nodes: WF.nodes"), 'resume carries edited nodes');
+    assert.ok(flowJs.includes("WF.actionsNode) { wfPositionNodeActions(WF.actionsNode.id); }"), 'actions bar repositioned after redraw');
+    // 宿主：Resume 用面板回传的节点更新快照；工作流 Fork 并行不受批量 Concurrency 限制
+    assert.ok(mvpSrcCache.includes('handleWorkflowResume(message') && mvpSrcCache.includes('message.nodes.find'), 'host resume patches workflow nodes');
+    assert.ok(mvpSrcCache.includes('maxParallel: 32'), 'workflow fork parallelism not capped by batch concurrency');
+    for (const k of ['wb.wf.failedPausedHint', 'wb.wf.cannotEditDoneNode']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+});
+
+test('JS+host: confirm node pause button, reopen restores actions; export log right-aligned', () => {
+    // 人工确认操作条含暂停按钮：暂停仅隐藏操作条，流程留在 RUNNING 列表
+    assert.ok(flowHtml.includes('id="wfPauseBtn"') && flowHtml.includes('wfPause()'), 'pause button in node actions bar');
+    assert.ok(flowJs.includes('function wfPause') && flowJs.includes("t('wb.wf.pausedHint')"), 'pause hides bar with hint toast');
+    // 重开运行详情恢复确认操作条（两条路径：已在监控 / 全新载入）
+    assert.ok(flowJs.includes('function wfShowConfirmActions') && flowJs.includes('run.pendingConfirm'), 'reopen restores confirm actions from pendingConfirm');
+    // 宿主记录/清除 pendingConfirm 并随详情下发
+    assert.ok(mvpSrcCache.includes('inst.pendingConfirm = { nodeId: event.nodeId'), 'host records pending confirm');
+    assert.ok(mvpSrcCache.includes('this._activeRun.pendingConfirm = null'), 'host clears pending confirm on respond');
+    assert.ok(mvpSrcCache.includes('pendingConfirm: inst.pendingConfirm || null'), 'run detail carries pendingConfirm');
+    // Export 右对齐并与 Clear 相邻：Export 带 margin-left:auto，Clear 不再带
+    const expIdx = flowHtml.indexOf('onclick="wfExportLog()"');
+    const clrIdx = flowHtml.indexOf('onclick="wfClearOutput()"');
+    assert.ok(expIdx >= 0 && clrIdx > expIdx, 'export before clear in DOM');
+    assert.ok(flowHtml.slice(expIdx - 120, expIdx).includes('margin-left:auto'), 'export right-aligned');
+    assert.ok(!flowHtml.slice(clrIdx - 120, clrIdx).includes('margin-left:auto'), 'clear follows export without auto margin');
+    for (const k of ['wb.wf.pause', 'wb.wf.pausedHint']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+});
+
+test('HTML+JS: running group, history delete/clear-all, run detail readonly mode', () => {
+    // 侧边栏：正在运行分组 + 历史 Clear All / 单项删除 / 双击查看
+    assert.ok(html.includes('id="wfRunningList"'), 'running group list element');
+    assert.ok(html.includes('data-i18n="wb.wf.running"'), 'running group title');
+    assert.ok(html.includes('wfClearHistory()'), 'history clear-all button');
+    for (const id of ['wfBackBtn', 'wfModeBadge', 'wfStopBtn', 'wfResumeBtn', 'wfCancelBtn', 'wfDelBtn']) {
+        assert.ok(flowHtml.includes('id="' + id + '"'), 'missing flow editor element: ' + id);
+    }
+    assert.ok(flowHtml.includes('wfResume()') && flowHtml.includes('wfCancelRun()') && flowHtml.includes('wfBackToEdit()'), 'resume/cancel/back handlers wired');
+    // 侧边栏 JS：运行状态渲染 + 历史删除/清空
+    for (const sym of ['renderRunningList', 'wfOpenRun', 'wfDeleteHistory', 'wfClearHistory']) {
+        assert.ok(js.includes(sym), 'missing sidebar JS symbol: ' + sym);
+    }
+    assert.ok(js.includes("m.command === 'runState'") && js.includes('renderRunningList()'), 'sidebar renders run state pushes');
+    assert.ok(js.includes("command: 'historyDelete'") && js.includes("command: 'historyClearAll'"), 'history persistence messages');
+    assert.ok(js.includes('ondblclick="wfShowHistory('), 'history entries open detail on double click');
+    // 面板 JS：三模式管理 + 运行详情 + 只读
+    for (const sym of ['wfSyncModeUI', 'wfSnapshotEdit', 'wfRestoreEdit', 'wfShowRunDetail', 'wfOnRunPhase', 'wfResume', 'wfCancelRun', 'wfSetPropsDisabled']) {
+        assert.ok(flowJs.includes(sym), 'missing flow editor mode symbol: ' + sym);
+    }
+    assert.ok(flowJs.includes("command: 'workflowResume'") && flowJs.includes("command: 'workflowCancel'"), 'resume/cancel messages to host');
+    assert.ok(flowJs.includes("action.type === 'openRun'"), 'openRun action handled');
+    assert.ok(flowJs.includes("WF.mode = 'history'") && flowJs.includes("WF.mode = 'run'"), 'panel mode switching');
+    // 宿主侧：运行实例跟踪（源码检查）
+    const mvp = mvpSrcCache;
+    for (const sym of ['_activeRun', 'handleWorkflowResume', 'handleWorkflowCancel', 'buildRunDetail', 'postRunState', 'failed-paused', 'deleteHistory', 'clearHistory']) {
+        assert.ok(mvp.includes(sym), 'MainViewProvider missing: ' + sym);
+    }
+    assert.ok(mvp.includes("case 'historyDelete':") && mvp.includes("case 'historyClearAll':"), 'host routes history messages');
+    // i18n 双语
+    for (const k of ['wb.wf.running', 'wb.wf.noRunning', 'wb.wf.failedPaused', 'wb.wf.runMode', 'wb.wf.viewMode', 'wb.wf.resume', 'wb.wf.cancelRun', 'wb.wf.backToEdit', 'wb.wf.clearHistory', 'wb.wf.deleteHistoryConfirm', 'wb.wf.clearHistoryConfirm', 'wb.wf.readonlyLock']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
 });
 
 test('JS: flow tab icons are unified SVGs, no emoji in toolbar/history/launcher', () => {
@@ -496,12 +592,16 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
             edges: []
         };
         await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        // 新行为：failed 先进入失败暂停态（不写历史），用户取消后归档
+        provider.handleWorkflowCancel();
         const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
         const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
         const entry = onDisk.history.find(h => h.workflowName === 'RefFlowMissing');
         assert.ok(entry, 'run recorded');
         assert.strictEqual(entry.result, 'failed');
         assert.strictEqual(entry.nodes[0].state, 'failed');
+        // 失败运行的实例已清除（移出"正在运行"分组）
+        assert.strictEqual(provider._activeRun, undefined, 'active run cleared after cancel');
     });
 
     await testAsync('host: workflow ref node to git tab runs git operations like the Git tab buttons', async () => {
@@ -534,6 +634,8 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
             edges: []
         };
         await provider.handleWorkflowRun(wf2, 'git-bash', 'dev');
+        // 新行为：failed 先进入失败暂停态（不写历史），用户取消后归档
+        provider.handleWorkflowCancel();
         const entry2 = JSON.parse(fs.readFileSync(wbFile, 'utf8')).history.find(h => h.workflowName === 'GitRefNoParam');
         assert.ok(entry2, 'no-param run recorded');
         assert.strictEqual(entry2.result, 'failed', 'missing branch name fails the node');

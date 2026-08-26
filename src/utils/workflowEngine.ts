@@ -67,13 +67,25 @@ export class WorkflowEngine {
         try {
             if (process.platform !== 'win32' && child.pid) {
                 process.kill(-child.pid, 'SIGTERM');
+            } else if (process.platform === 'win32' && child.pid) {
+                // Windows 下 child.kill() 只终止 shell 本身，孙进程（如 sleep）可能存活并占住 stdio 管道，
+                // 导致 close 事件迟迟不触发。taskkill /T /F 尽力杀整树，再主动销毁本端管道让 close 立即触发。
+                try { cp.spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }); } catch { /* ignore */ }
+                try { child.kill(); } catch { /* ignore */ }
+                try { child.stdout?.destroy(); } catch { /* ignore */ }
+                try { child.stderr?.destroy(); } catch { /* ignore */ }
             } else {
                 child.kill();
             }
         } catch { /* ignore */ }
     }
 
-    public async run(workflow: Workflow, options: WorkflowEngineOptions, emit: (e: WorkflowEngineEvent) => void): Promise<void> {
+    /**
+     * 执行工作流。resumeStates 用于"从失败节点恢复执行"：
+     * 传入上次运行中已 success 的节点状态，这些节点直接视为完成（条件节点除外——需重新执行以重新判定分支），
+     * 其余节点（失败/跳过/未执行）重新参与调度。
+     */
+    public async run(workflow: Workflow, options: WorkflowEngineOptions, emit: (e: WorkflowEngineEvent) => void, resumeStates?: Record<string, { state: string; dur: number }>): Promise<void> {
         if (this._running) { return; }
         this._running = true;
         this._stopFlag = false;
@@ -85,6 +97,19 @@ export class WorkflowEngine {
         const durs: Record<string, number> = {};
         const edgeActivated: boolean[] = edges.map(() => false);
         nodes.forEach(n => { states[n.id] = 'pending'; });
+
+        // 恢复执行：已成功节点直接完成，不重新执行
+        const resumedDone = new Set<string>();
+        if (resumeStates) {
+            nodes.forEach(n => {
+                const r = resumeStates[n.id];
+                if (r && r.state === 'success' && n.tag !== 'condition') {
+                    states[n.id] = 'success';
+                    durs[n.id] = r.dur || 0;
+                    resumedDone.add(n.id);
+                }
+            });
+        }
 
         const inMap: Record<string, string[]> = {};
         const inEdges: Record<string, number[]> = {};
@@ -336,6 +361,12 @@ export class WorkflowEngine {
             if (!node) { continue; }
             promises[id] = (async () => {
                 await Promise.all(inMap[id].map(up => promises[up]));
+                if (resumedDone.has(id)) {
+                    // 恢复执行时已完成：激活出边并跳过重跑
+                    log(id, 'dim', `[Resume] ${node.label} already succeeded → skip`);
+                    activateOutEdges(node);
+                    return;
+                }
                 if (this._stopFlag || this._abort) {
                     setNodeState(id, 'skipped', 0);
                     return;

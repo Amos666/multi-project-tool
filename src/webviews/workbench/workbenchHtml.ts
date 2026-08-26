@@ -52,12 +52,12 @@ export const WORKBENCH_PANELS = `
                         <span class="wf-btn" style="padding:1px 6px" onclick="wfNew()" data-i18n-title="wb.wf.newFlow" title="New workflow"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></span>
                     </div>
                     <div id="wfFlowList"></div>
+                    <div class="wb-section-title" style="padding:6px 8px 2px" data-i18n="wb.wf.running">Running</div>
+                    <div id="wfRunningList"></div>
                     <div class="wb-section-title" style="padding:6px 8px 2px">
-                        <span data-i18n="wb.wf.templates">Templates</span>
-                        <span class="wf-btn" style="padding:1px 6px" onclick="wfSaveAsTemplate()" data-i18n-title="wb.wf.saveTpl" title="Save current as template"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></span>
+                        <span data-i18n="wb.wf.history">History</span>
+                        <span class="wf-btn" style="padding:1px 6px" onclick="wfClearHistory()" data-i18n-title="wb.wf.clearHistory" title="Clear All" data-i18n="wb.wf.clearHistory">Clear All</span>
                     </div>
-                    <div id="wfTemplateList"></div>
-                    <div class="wb-section-title" style="padding:6px 8px 2px" data-i18n="wb.wf.history">History</div>
                     <div id="wfHistoryList"></div>
                 </div>
             </div>
@@ -106,6 +106,21 @@ export const WORKBENCH_PANELS = `
             </div>
         </div>
 
+        <div id="wbConfirmModal" class="modal-overlay" style="display:none">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <span class="modal-title" data-i18n="wb.confirm.title">Confirm</span>
+                    <button class="modal-close" onclick="wbConfirmClose()">×</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:12px;margin-bottom:6px" id="wbConfirmText"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="wbConfirmClose()" data-i18n="cmd.cancel">Cancel</button>
+                    <button class="btn btn-danger" onclick="wbConfirmOk()" data-i18n="cmd.delete">Delete</button>
+                </div>
+            </div>
+        </div>
         <div id="launcherMask" class="launcher-mask" style="display:none" onmousedown="if(event.target===this)launcherClose()">
             <div class="launcher">
                 <input type="text" id="launcherInput" data-i18n-placeholder="wb.launcher.placeholder" placeholder="Search... (↑↓ select, Enter run, Esc close)" oninput="launcherRender()" onkeydown="launcherKey(event)" autocomplete="off">

@@ -76,7 +76,8 @@ function defaults(): WorkbenchData {
         templates: [],
         history: [],
         batchGroups: defaultBatchGroups(),
-        hiddenTabs: []
+        hiddenTabs: [],
+        hiddenTemplates: []
     };
 }
 
@@ -126,7 +127,8 @@ export class WorkbenchStore {
                 templates: Array.isArray(parsed.templates) ? parsed.templates : d.templates,
                 history: Array.isArray(parsed.history) ? parsed.history : d.history,
                 batchGroups: Array.isArray(parsed.batchGroups) && parsed.batchGroups.length ? parsed.batchGroups : d.batchGroups,
-                hiddenTabs: Array.isArray(parsed.hiddenTabs) ? parsed.hiddenTabs : []
+                hiddenTabs: Array.isArray(parsed.hiddenTabs) ? parsed.hiddenTabs : [],
+                hiddenTemplates: Array.isArray(parsed.hiddenTemplates) ? parsed.hiddenTemplates : []
             };
             return this._cache;
         } catch (error) {
@@ -151,9 +153,13 @@ export class WorkbenchStore {
         }
     }
 
-    /** 内置模板 + 自定义模板 */
+    /** 内置模板 + 自定义模板（自定义覆盖同 id 内置；被删除的内置模板隐藏） */
     public allTemplates(): WfTemplate[] {
-        return [...builtinTemplates(), ...this.load().templates];
+        const data = this.load();
+        const customIds = new Set(data.templates.map(t => t.id));
+        const hidden = new Set(data.hiddenTemplates || []);
+        const builtins = builtinTemplates().filter(t => !customIds.has(t.id) && !hidden.has(t.id));
+        return [...builtins, ...data.templates];
     }
 
     public addHistory(entry: RunHistoryEntry): void {
@@ -162,6 +168,18 @@ export class WorkbenchStore {
         if (data.history.length > HISTORY_LIMIT) {
             data.history = data.history.slice(0, HISTORY_LIMIT);
         }
+        this.save(data);
+    }
+
+    public deleteHistory(id: string): void {
+        const data = this.load();
+        data.history = data.history.filter(h => h.id !== id);
+        this.save(data);
+    }
+
+    public clearHistory(): void {
+        const data = this.load();
+        data.history = [];
         this.save(data);
     }
 
@@ -184,10 +202,19 @@ export class WorkbenchStore {
         this.save(data);
     }
 
-    public saveCustomTemplate(name: string, nodes: any[], edges: any[]): WfTemplate {
+    /** 保存/更新模板：传入 id 且已存在则原地更新；内置模板 id 会存为自定义覆盖项 */
+    public saveCustomTemplate(name: string, nodes: any[], edges: any[], id?: string): WfTemplate {
         const data = this.load();
+        const existing = id ? data.templates.find(t => t.id === id) : undefined;
+        if (existing) {
+            existing.name = name;
+            existing.nodes = JSON.parse(JSON.stringify(nodes));
+            existing.edges = JSON.parse(JSON.stringify(edges));
+            this.save(data);
+            return existing;
+        }
         const tpl: WfTemplate = {
-            id: 'tpl-' + Date.now().toString(36),
+            id: id || 'tpl-' + Date.now().toString(36),
             name,
             nodes: JSON.parse(JSON.stringify(nodes)),
             edges: JSON.parse(JSON.stringify(edges))
@@ -197,9 +224,16 @@ export class WorkbenchStore {
         return tpl;
     }
 
-    public deleteCustomTemplate(id: string): void {
+    /** 删除模板：自定义直接删除；内置模板加入隐藏列表 */
+    public deleteTemplate(id: string): void {
         const data = this.load();
-        data.templates = data.templates.filter(t => t.id !== id);
+        const isCustom = data.templates.some(t => t.id === id);
+        if (isCustom) {
+            data.templates = data.templates.filter(t => t.id !== id);
+        } else if (builtinTemplates().some(t => t.id === id)) {
+            data.hiddenTemplates = data.hiddenTemplates || [];
+            if (!data.hiddenTemplates.includes(id)) { data.hiddenTemplates.push(id); }
+        }
         this.save(data);
     }
 
