@@ -47,6 +47,18 @@ export const WORKBENCH_CSS = `
 
 /* ================= Workflow Tab ================= */
 .wf-tab { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+/* 侧边栏 Flow Tab：列表 + 打开主编辑区入口（画布在主编辑区 Flow Editor 面板中） */
+.wf-side { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+.wf-open-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    margin: 10px 10px 4px; padding: 8px 10px; font-size: 12px; cursor: pointer;
+    background-color: var(--brand-primary-subtle); color: var(--brand-primary);
+    border: 1px solid var(--brand-primary); border-radius: var(--radius-md);
+    transition: all 0.15s ease; width: calc(100% - 20px);
+}
+.wf-open-btn:hover { background-color: var(--brand-primary); color: var(--brand-text-inverse); }
+.wf-open-btn svg { width: 15px; height: 15px; flex: none; }
+.wf-side-hint { font-size: 10px; color: var(--brand-text-muted); text-align: center; padding: 0 12px 2px; }
 .wf-main { flex: 1; display: flex; min-height: 0; }
 .wf-left {
     width: 148px; flex: none; border-right: 1px solid var(--brand-border-subtle);

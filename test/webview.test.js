@@ -14,16 +14,25 @@ setWorkspace(dir);
 
 const { MainViewProvider } = require('../out/views/MainViewProvider');
 const { translations } = require('../out/utils/i18n');
+const { FLOW_EDITOR_BODY } = require('../out/webviews/floweditor/flowEditorHtml');
+const { FLOW_EDITOR_JS } = require('../out/webviews/floweditor/flowEditorJs');
 const { Uri } = require('vscode');
 
 const provider = new MainViewProvider(Uri.file(dir));
 const css = provider.getCss();
 const html = provider.getHtmlBody();
 const js = provider.getJavaScript();
+// Flow 编辑器（主编辑区 WebviewPanel）：画布/属性/执行监控
+const flowHtml = FLOW_EDITOR_BODY;
+const flowJs = FLOW_EDITOR_JS;
 
 // ---------- webview JS syntax ----------
 test('webview JavaScript parses without syntax errors', () => {
     new vm.Script(js, { filename: 'webview.js' });
+});
+
+test('flow editor panel JavaScript parses without syntax errors', () => {
+    new vm.Script(flowJs, { filename: 'flowEditor.js' });
 });
 
 // ---------- unified tree CSS ----------
@@ -121,71 +130,77 @@ test('HTML: checklist panel (input/priority/progress)', () => {
 });
 
 test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => {
-    for (const id of ['wfSvg', 'wfPalette', 'wfFlowList', 'wfTemplateList', 'wfHistoryList',
+    // 侧边栏 Flow Tab：列表 + 打开主编辑区入口
+    for (const id of ['wfFlowList', 'wfTemplateList', 'wfHistoryList']) {
+        assert.ok(html.includes('id="' + id + '"'), 'missing workflow list element: ' + id);
+    }
+    assert.ok(html.includes('wfOpenEditor()'), 'open flow editor button');
+    // 主编辑区 Flow Editor 面板：画布 / 属性 / 执行监控
+    for (const id of ['wfSvg', 'wfPalette',
         'wfName', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
         'wfPHttpMethod', 'wfPHttpHeaders', 'wfPHttpBody',
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
-        assert.ok(html.includes('id="' + id + '"'), 'missing workflow element: ' + id);
+        assert.ok(flowHtml.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
-    assert.ok(html.includes('onclick="wfRun()"'), 'run button');
-    assert.ok(html.includes('onclick="wfStop()"'), 'stop button');
-    assert.ok(html.includes("wfEditProp('notifyType',this.value)"), 'notify type selector wired');
-    assert.ok(html.includes('wb.wf.notifyTypeHttp'), 'http notify option i18n key');
-    assert.ok(html.includes("wfEditProp('httpMethod',this.value)") && html.includes("wfEditProp('httpHeaders',this.value)") && html.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
-    assert.ok(html.includes('value="POST"') && html.includes('value="DELETE"'), 'http method choices');
-    assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(html), 'flow toolbar uses SVG icons, not emoji');
+    assert.ok(flowHtml.includes('onclick="wfRun()"'), 'run button');
+    assert.ok(flowHtml.includes('onclick="wfStop()"'), 'stop button');
+    assert.ok(flowHtml.includes("wfEditProp('notifyType',this.value)"), 'notify type selector wired');
+    assert.ok(flowHtml.includes('wb.wf.notifyTypeHttp'), 'http notify option i18n key');
+    assert.ok(flowHtml.includes("wfEditProp('httpMethod',this.value)") && flowHtml.includes("wfEditProp('httpHeaders',this.value)") && flowHtml.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
+    assert.ok(flowHtml.includes('value="POST"') && flowHtml.includes('value="DELETE"'), 'http method choices');
+    assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(flowHtml), 'flow toolbar uses SVG icons, not emoji');
 });
 
 test('JS: notify node property label switches by notifyType', () => {
-    assert.ok(js.includes('wfCmdLabelKey'), 'label key helper exists');
-    assert.ok(js.includes("wbEl('wfPNotifyType').value = n.notifyType || 'text'"), 'selector synced on select');
-    assert.ok(js.includes("notifyType: tag === 'notify' ? 'text' : undefined"), 'new notify nodes default to text');
+    assert.ok(flowJs.includes('wfCmdLabelKey'), 'label key helper exists');
+    assert.ok(flowJs.includes("wbEl('wfPNotifyType').value = n.notifyType || 'text'"), 'selector synced on select');
+    assert.ok(flowJs.includes("notifyType: tag === 'notify' ? 'text' : undefined"), 'new notify nodes default to text');
 });
 
 test('HTML+JS: ref node (reference saved commands from other tabs)', () => {
     for (const id of ['wfPRefTabLabel', 'wfPRefTab', 'wfPRefCmdLabel', 'wfPRefCmd']) {
-        assert.ok(html.includes('id="' + id + '"'), 'missing ref property element: ' + id);
+        assert.ok(flowHtml.includes('id="' + id + '"'), 'missing ref property element: ' + id);
     }
-    assert.ok(html.includes('wfRefTabChange(this.value)'), 'tab selector wired');
-    assert.ok(html.includes("wfEditProp('refCommandId',this.value)"), 'command selector wired');
-    assert.ok(js.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes ref');
-    assert.ok(js.includes('ref: '), 'tag color defined');
-    assert.ok(js.includes("refTab: tag === 'ref' ? 'cmd' : undefined"), 'new ref node defaults');
-    assert.ok(js.includes('function wfRefCommands'), 'command flattener with category paths');
-    assert.ok(js.includes('shortcutCommandTree'), 'reads shortcut tree');
-    assert.ok(js.includes('pythonTxtCommandTree'), 'reads pyt tree');
-    assert.ok(js.includes('customCommandTree'), 'reads cmd tree');
+    assert.ok(flowHtml.includes('wfRefTabChange(this.value)'), 'tab selector wired');
+    assert.ok(flowHtml.includes("wfEditProp('refCommandId',this.value)"), 'command selector wired');
+    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes ref');
+    assert.ok(flowJs.includes('ref: '), 'tag color defined');
+    assert.ok(flowJs.includes("refTab: tag === 'ref' ? 'cmd' : undefined"), 'new ref node defaults');
+    assert.ok(flowJs.includes('function wfRefCommands'), 'command flattener with category paths');
+    assert.ok(flowJs.includes('shortcutCommandTree'), 'reads shortcut tree');
+    assert.ok(flowJs.includes('pythonTxtCommandTree'), 'reads pyt tree');
+    assert.ok(flowJs.includes('customCommandTree'), 'reads cmd tree');
     assert.ok(translations.en['wb.node.ref'] && translations.zh['wb.node.ref'], 'node label i18n');
     assert.ok(translations.en['wb.wf.refTab'] && translations.zh['wb.wf.refCmd'], 'property i18n');
 });
 
 test('HTML+JS: ref node supports git tab operations', () => {
-    assert.ok(html.includes('value="git"'), 'source tab selector offers git');
-    assert.ok(js.includes('WF_GIT_OPS'), 'fixed git operation list in webview');
+    assert.ok(flowHtml.includes('value="git"'), 'source tab selector offers git');
+    assert.ok(flowJs.includes('WF_GIT_OPS'), 'fixed git operation list in webview');
     for (const op of ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch']) {
-        assert.ok(js.includes("'" + op + "'"), 'git op listed: ' + op);
+        assert.ok(flowJs.includes("'" + op + "'"), 'git op listed: ' + op);
         assert.ok(translations.en['wb.wf.gitOp.' + op] && translations.zh['wb.wf.gitOp.' + op], 'git op i18n: ' + op);
     }
-    assert.ok(js.includes("if (tab === 'git')"), 'wfRefCommands returns git ops');
+    assert.ok(flowJs.includes("if (tab === 'git')"), 'wfRefCommands returns git ops');
     assert.ok(translations.en['wb.wf.refParam'] && translations.zh['wb.wf.refParam'], 'parameter field i18n');
-    assert.ok(js.includes('function wfSyncCmdField'), 'cmd field doubles as git ref parameter');
+    assert.ok(flowJs.includes('function wfSyncCmdField'), 'cmd field doubles as git ref parameter');
 });
 
 test('HTML+JS: start node (scheduled start) and confirm node (manual approval)', () => {
-    assert.ok(js.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes start & confirm');
+    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes start & confirm');
     for (const id of ['wfPSchedModeLabel', 'wfPSchedMode', 'wfPSchedValueLabel', 'wfPSchedValue']) {
-        assert.ok(html.includes('id="' + id + '"'), 'missing schedule element: ' + id);
+        assert.ok(flowHtml.includes('id="' + id + '"'), 'missing schedule element: ' + id);
     }
-    assert.ok(html.includes('value="countdown"') && html.includes('value="clock"') && html.includes('value="none"'), 'schedule modes offered');
-    assert.ok(html.includes('id="wfConfirmBar"') && html.includes('id="wfConfirmText"'), 'confirm bar in monitor');
-    assert.ok(html.includes('onclick="wfConfirm(true)"') && html.includes('onclick="wfConfirm(false)"'), 'approve/cancel buttons');
-    assert.ok(js.includes("command: 'workflowConfirm'"), 'confirm answer sent to host');
-    assert.ok(js.includes("ev.type === 'confirm'"), 'webview handles confirm event');
-    assert.ok(js.includes("scheduleMode: tag === 'start' ? 'none' : undefined"), 'start node defaults');
-    assert.ok(js.includes('function wfStartDesc'), 'schedule shown on canvas node');
-    assert.ok(js.includes('function wfSchedModeChange'), 'value input adapts to mode');
+    assert.ok(flowHtml.includes('value="countdown"') && flowHtml.includes('value="clock"') && flowHtml.includes('value="none"'), 'schedule modes offered');
+    assert.ok(flowHtml.includes('id="wfConfirmBar"') && flowHtml.includes('id="wfConfirmText"'), 'confirm bar in monitor');
+    assert.ok(flowHtml.includes('onclick="wfConfirm(true)"') && flowHtml.includes('onclick="wfConfirm(false)"'), 'approve/cancel buttons');
+    assert.ok(flowJs.includes("command: 'workflowConfirm'"), 'confirm answer sent to host');
+    assert.ok(flowJs.includes("ev.type === 'confirm'"), 'webview handles confirm event');
+    assert.ok(flowJs.includes("scheduleMode: tag === 'start' ? 'none' : undefined"), 'start node defaults');
+    assert.ok(flowJs.includes('function wfStartDesc'), 'schedule shown on canvas node');
+    assert.ok(flowJs.includes('function wfSchedModeChange'), 'value input adapts to mode');
     for (const k of ['wb.node.start', 'wb.node.confirm', 'wb.wf.schedMode', 'wb.wf.schedCountdown', 'wb.wf.schedClock', 'wb.wf.confirmApprove', 'wb.wf.confirmCancel']) {
         assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
     }
@@ -201,21 +216,27 @@ test('HTML: batch panel has own shell selector and live log area', () => {
 });
 
 test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher run, counters)', () => {
-    for (const sym of ['wbAddTask', 'wbToggleTask', 'wfRun', 'wfStop', 'wfSave', 'wfDraw',
-        'wfWouldCycle', 'wfLauncherRun', 'wfSetCounters', 'wfHistoryView', 'launcherOpen',
-        'launcherKey', 'applyHiddenTabs', 'wbToggleTab', 'batchRun', 'batchToFlow',
-        'wfWriteLine', 'batchClearLog', 'wfAppendOutput']) {
+    // 侧边栏：列表/批量/启动器
+    for (const sym of ['wbAddTask', 'wbToggleTask', 'wfStop', 'wfRelay', 'wfOpenEditor',
+        'wfLauncherRun', 'launcherOpen', 'launcherKey', 'applyHiddenTabs', 'wbToggleTab',
+        'batchRun', 'batchToFlow', 'batchAppendOutput', 'batchClearLog']) {
         assert.ok(js.includes(sym), 'missing workbench JS symbol: ' + sym);
+    }
+    // 主编辑区 Flow Editor 面板：画布/属性/监控
+    for (const sym of ['wfRun', 'wfSave', 'wfDraw', 'wfWouldCycle', 'wfSetCounters',
+        'wfHistoryView', 'wfAppendOutput', 'wfApplyAction', 'wfOnRunStarted']) {
+        assert.ok(flowJs.includes(sym), 'missing flow editor JS symbol: ' + sym);
     }
     assert.ok(js.includes("window.confirm(t('wb.wf.deleteTemplateConfirm'))"), 'template delete requires confirmation');
     assert.ok(translations.en['wb.wf.deleteTemplateConfirm'] && translations.zh['wb.wf.deleteTemplateConfirm'], 'delete-confirm i18n in both languages');
     assert.ok(!js.includes('wfEnv') && !js.includes('batchEnv') && !js.includes('prodConfirm'), 'dev/test/prod dropdowns fully removed');
-    assert.ok(js.includes('wfFailed') && js.includes('wfSkipped'), 'monitor counters updated');
+    assert.ok(flowJs.includes('wfFailed') && flowJs.includes('wfSkipped'), 'monitor counters updated');
     assert.ok(js.includes("command: 'workflowRun'") && js.includes("command: 'workflowStop'"), 'run/stop messages');
     assert.ok(!/command: 'workflowRun'[\s\S]{0,160}\benv:/.test(js), 'run message no longer carries env');
     assert.ok(js.includes("command: 'checklistSave'") && js.includes("command: 'workbenchTabsSave'"), 'persistence messages');
+    assert.ok(js.includes("command: 'flowEditorAction'"), 'sidebar relays actions to flow editor panel');
     assert.ok(js.includes('wbNow()'), 'log lines carry timestamps');
-    assert.ok(/WB\.batchRunning[\s\S]{0,120}batchOutput/.test(js), 'batch run mirrors logs into batch tab');
+    assert.ok(/WB\.batchRunning[\s\S]{0,200}batchAppendOutput/.test(js), 'batch run mirrors logs into batch tab');
 });
 
 test('JS: flow tab icons are unified SVGs, no emoji in toolbar/history/launcher', () => {
@@ -297,8 +318,10 @@ test('i18n: all tree keys exist in en and zh', () => {
 
 test('i18n: every data-i18n key used in HTML exists in both languages', () => {
     const used = new Set();
-    for (const m of html.matchAll(/data-i18n(?:-placeholder|-title)?="([^"]+)"/g)) {
-        used.add(m[1]);
+    for (const source of [html, flowHtml]) {
+        for (const m of source.matchAll(/data-i18n(?:-placeholder|-title)?="([^"]+)"/g)) {
+            used.add(m[1]);
+        }
     }
     assert.ok(used.size > 20, 'sanity: found data-i18n keys');
     for (const k of used) {

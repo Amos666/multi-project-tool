@@ -163,6 +163,10 @@ export const translations: Record<Language, Record<string, string>> = {
 
         // Workbench: workflow canvas & properties
         'wb.wf.nodes': 'Nodes',
+        'wb.wf.openEditor': 'Open Flow Editor',
+        'wb.wf.editorHint': 'The flow chart is edited in the main editor area',
+        'wb.wf.newFlow': 'New workflow',
+        'wb.wf.saveTpl': 'Save current as template',
         'wb.wf.workflows': 'Workflows',
         'wb.wf.templates': 'Templates',
         'wb.wf.history': 'History',
@@ -459,6 +463,10 @@ export const translations: Record<Language, Record<string, string>> = {
 
         // Workbench: workflow canvas & properties
         'wb.wf.nodes': '节点',
+        'wb.wf.openEditor': '打开流程编辑器',
+        'wb.wf.editorHint': '流程图在主编辑区中编辑',
+        'wb.wf.newFlow': '新建工作流',
+        'wb.wf.saveTpl': '保存当前为模板',
         'wb.wf.workflows': '工作流',
         'wb.wf.templates': '模板',
         'wb.wf.history': '执行历史',

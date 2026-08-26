@@ -14,6 +14,7 @@ import { Workflow, RunHistoryEntry } from '../webviews/workbench/workbenchTypes'
 import { WORKBENCH_CSS } from '../webviews/workbench/workbenchCss';
 import { WORKBENCH_TAB_BUTTONS, WORKBENCH_PANELS } from '../webviews/workbench/workbenchHtml';
 import { WORKBENCH_JS } from '../webviews/workbench/workbenchJs';
+import { FlowEditorProvider } from '../webviews/floweditor/FlowEditorProvider';
 
 interface LogEntry {
     timestamp: string;
@@ -59,9 +60,23 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _projectScanner: ProjectScanner;
     private _language: Language = 'en';
     private _workflowEngine: WorkflowEngine = new WorkflowEngine();
+    private _flowEditor: FlowEditorProvider;
 
     constructor(private readonly _extensionUri: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
+        this._flowEditor = new FlowEditorProvider(
+            _extensionUri,
+            () => ({
+                data: this.getWorkbenchData(),
+                trees: {
+                    cmd: this._customCommandTree,
+                    pyt: this._pythonTxtCommandTree,
+                    shortcut: this._shortcutCommandTree
+                },
+                language: this._language
+            }),
+            (message) => { this.handleWebviewMessage(message, 'panel'); }
+        );
         // 不在构造函数中等待加载完成，让UI先显示
         this.loadData();
     }
@@ -152,53 +167,58 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this.getWebviewContent();
 
         webviewView.webview.onDidReceiveMessage(
-            async (message) => {
-                switch (message.command) {
-                    case 'init': this.handleInit(); break;
-                    case 'switchTab': this.handleSwitchTab(message.tabId); break;
-                    case 'toggleProjectSelection': this.handleToggleProjectSelection(message.projectId); break;
-                    case 'selectAllProjects': this.handleSelectAllProjects(); break;
-                    case 'deselectAllProjects': this.handleDeselectAllProjects(); break;
-                    case 'gitPull': await this.handleGitPull(); break;
-                    case 'gitCommit': await this.handleGitCommit(message.message); break;
-                    case 'gitFetch': await this.handleGitFetch(); break;
-                    case 'gitBranch': await this.handleGitBranch(message.branch); break;
-                    case 'createBranch': await this.handleCreateBranch(message.branch); break;
-                    case 'getBranchList': await this.handleGetBranchList(message.projectId); break;
-                    case 'gitPush': await this.handleGitPush(); break;
-                    case 'refreshProjects': await this.handleRefreshProjects(); break;
-                    case 'setShell': await this.handleSetShell(message.shell); break;
-                    case 'setShortcutShell': await this.handleSetShortcutShell(message.shell); break;
-                    case 'runShortcutCmd': await this.handleRunShortcutCmdContent(message.cmd); break;
-                    case 'saveCommandTree': await this.handleSaveCommandTree(message.tabId, message.tree); break;
-                    case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
-                    case 'saveSettings': await this.handleSaveSettings(message.settings); break;
-                    case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
-                    case 'addEnvVariable': await this.handleAddEnvVariable(message.variable); break;
-                    case 'updateEnvVariable': await this.handleUpdateEnvVariable(message.index, message.variable); break;
-                    case 'deleteEnvVariable': await this.handleDeleteEnvVariable(message.index); break;
-                    case 'clearLogs': this.handleClearLogs(); break;
-                    case 'clearTxtCmdLogs': this._txtCmdLogs = []; break;
-                    case 'notifyInfo': vscode.window.showInformationMessage(message.message); break;
-                    case 'exportLog': await this.handleExportLog(message.content, message.tabId); break;
-                    case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
-                    case 'logHeightChange': this.handleLogHeightChange(message.height); break;
-                    case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
-                    case 'setLanguage': this.handleSetLanguage(message.language); break;
-                    // ===== Workbench 新增命令（独立前缀，不影响既有协议） =====
-                    case 'checklistSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveChecklist(message.tasks || [])); break;
-                    case 'workflowSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().upsertWorkflow(message.workflow)); break;
-                    case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
-                    case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [])); break;
-                    case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteCustomTemplate(message.id)); break;
-                    case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatchGroups(message.groups || [])); break;
-                    case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
-                    case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env); break;
-                    case 'workflowStop': this._workflowEngine.stop(); break;
-                    case 'workflowConfirm': this._workflowEngine.respondConfirm(!!message.approved); break;
-                }
-            }
+            async (message) => { await this.handleWebviewMessage(message); }
         );
+    }
+
+    /** 侧边栏 Webview 与主编辑区 Flow Editor 面板共用同一套消息处理 */
+    private async handleWebviewMessage(message: any, source: 'sidebar' | 'panel' = 'sidebar'): Promise<void> {
+        switch (message.command) {
+            case 'init': this.handleInit(); break;
+            case 'switchTab': this.handleSwitchTab(message.tabId); break;
+            case 'toggleProjectSelection': this.handleToggleProjectSelection(message.projectId); break;
+            case 'selectAllProjects': this.handleSelectAllProjects(); break;
+            case 'deselectAllProjects': this.handleDeselectAllProjects(); break;
+            case 'gitPull': await this.handleGitPull(); break;
+            case 'gitCommit': await this.handleGitCommit(message.message); break;
+            case 'gitFetch': await this.handleGitFetch(); break;
+            case 'gitBranch': await this.handleGitBranch(message.branch); break;
+            case 'createBranch': await this.handleCreateBranch(message.branch); break;
+            case 'getBranchList': await this.handleGetBranchList(message.projectId); break;
+            case 'gitPush': await this.handleGitPush(); break;
+            case 'refreshProjects': await this.handleRefreshProjects(); break;
+            case 'setShell': await this.handleSetShell(message.shell); break;
+            case 'setShortcutShell': await this.handleSetShortcutShell(message.shell); break;
+            case 'runShortcutCmd': await this.handleRunShortcutCmdContent(message.cmd); break;
+            case 'saveCommandTree': await this.handleSaveCommandTree(message.tabId, message.tree); break;
+            case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
+            case 'saveSettings': await this.handleSaveSettings(message.settings); break;
+            case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
+            case 'addEnvVariable': await this.handleAddEnvVariable(message.variable); break;
+            case 'updateEnvVariable': await this.handleUpdateEnvVariable(message.index, message.variable); break;
+            case 'deleteEnvVariable': await this.handleDeleteEnvVariable(message.index); break;
+            case 'clearLogs': this.handleClearLogs(); break;
+            case 'clearTxtCmdLogs': this._txtCmdLogs = []; break;
+            case 'notifyInfo': vscode.window.showInformationMessage(message.message); break;
+            case 'exportLog': await this.handleExportLog(message.content, message.tabId); break;
+            case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
+            case 'logHeightChange': this.handleLogHeightChange(message.height); break;
+            case 'runPythonTxtCmd': await this.handleRunPythonTxtCmd(message.cmd); break;
+            case 'setLanguage': this.handleSetLanguage(message.language); break;
+            // ===== Workbench 新增命令（独立前缀，不影响既有协议） =====
+            case 'checklistSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveChecklist(message.tasks || [])); break;
+            case 'workflowSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().upsertWorkflow(message.workflow)); break;
+            case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
+            case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [])); break;
+            case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteCustomTemplate(message.id)); break;
+            case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatchGroups(message.groups || [])); break;
+            case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
+            case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env, source === 'sidebar'); break;
+            case 'workflowStop': this._workflowEngine.stop(); break;
+            case 'workflowConfirm': this._workflowEngine.respondConfirm(!!message.approved); break;
+            // 侧边栏 Flow Tab 的中继动作：在主编辑区打开 Flow Editor 面板并执行
+            case 'flowEditorAction': this._flowEditor.show(message.action); break;
+        }
     }
 
     private getWebviewContent(): string {
@@ -4141,6 +4161,11 @@ window.addEventListener('message', event => {
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'shortcut', tree: this._shortcutCommandTree });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
         this._view?.webview.postMessage({ command: 'setLanguage', language: this._language });
+        // Flow Editor 面板同步命令树与语言（ref 节点引用、界面文案依赖）
+        this._flowEditor.postMessage({ command: 'updateCommandTree', tabId: 'cmd', tree: this._customCommandTree });
+        this._flowEditor.postMessage({ command: 'updateCommandTree', tabId: 'pyt', tree: this._pythonTxtCommandTree });
+        this._flowEditor.postMessage({ command: 'updateCommandTree', tabId: 'shortcut', tree: this._shortcutCommandTree });
+        this._flowEditor.postMessage({ command: 'setLanguage', language: this._language });
         this._view?.webview.postMessage({
             command: 'updateSettings',
             settings: {
@@ -4167,6 +4192,7 @@ window.addEventListener('message', event => {
 
     private postWorkbenchData(): void {
         this._view?.webview.postMessage({ command: 'workbenchData', data: this.getWorkbenchData() });
+        this._flowEditor.postMessage({ command: 'workbenchData', data: this.getWorkbenchData() });
     }
 
     private handleWorkbenchChange(mutate: () => void): void {
@@ -4178,7 +4204,7 @@ window.addEventListener('message', event => {
         this.postWorkbenchData();
     }
 
-    private async handleWorkflowRun(workflow: Workflow, shell: string, env: string): Promise<void> {
+    private async handleWorkflowRun(workflow: Workflow, shell: string, env: string, fromSidebar: boolean = false): Promise<void> {
         const engine = this._workflowEngine;
         if (engine.isRunning) { return; }
         const folders = vscode.workspace.workspaceFolders;
@@ -4189,6 +4215,10 @@ window.addEventListener('message', event => {
         if (!workflow || !Array.isArray(workflow.nodes) || workflow.nodes.length === 0) { return; }
         const validShells = ['git-bash', 'cmd', 'powershell', 'wsl'];
         const runShell = validShells.includes(shell) ? shell : this._currentShell;
+        // 侧边栏（Batch 等）发起的运行：通知面板载入工作流并初始化监控
+        if (fromSidebar) {
+            this._flowEditor.postMessage({ command: 'workflowRunStarted', workflow });
+        }
         await engine.run(workflow, {
             cwd: folders[0].uri.fsPath,
             shell: runShell,
@@ -4199,6 +4229,7 @@ window.addEventListener('message', event => {
             runRef: (tab, id, log, param) => this.executeReferencedCommand(tab, id, param || '', log)
         }, (event) => {
             this._view?.webview.postMessage({ command: 'workflowEvent', event });
+            this._flowEditor.postMessage({ command: 'workflowEvent', event });
             if (event.type === 'done') {
                 const entry: RunHistoryEntry = {
                     id: 'run-' + Date.now().toString(36),
