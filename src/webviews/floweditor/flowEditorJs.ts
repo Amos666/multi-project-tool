@@ -16,6 +16,8 @@ var WF = {
     templateId: null,
     /* 节点上方操作条状态：{ id, kind: 'confirm'|'failed' } */
     actionsNode: null,
+    /* 当前展示的运行实例 id（引擎事件按 runId 过滤，多运行并存时不互相污染） */
+    runId: null,
     /* 后台运行标志：宿主侧运行实例是否仍活跃（running 或 failed-paused）。
        与 WF.running 区分——后者仅表示"本面板正在监控"。切换到其他 Flow 编辑时
        WF.running 释放为 false，但 bgRunning 保持 true，运行仍保留在"正在运行"分组。 */
@@ -61,7 +63,7 @@ window.addEventListener('message', function (event) {
         renderPalette();
         wfDraw();
         /* 面板重载后恢复后台运行标志：仅 running 时引擎占用，阻止并发启动；
-           failed-paused 已空闲，允许发起新运行（宿主归档旧实例） */
+           failed-paused 已空闲，允许发起新运行（旧实例保留在"正在运行"分组供稍后续跑） */
         var ph = m.runPhase || '';
         WF.bgRunning = (ph === 'running');
     }
@@ -74,8 +76,8 @@ window.addEventListener('message', function (event) {
         wfDraw();
     }
     else if (m.command === 'workflowEvent') { wfOnEvent(m.event); }
-    else if (m.command === 'workflowRunStarted') { wfOnRunStarted(m.workflow); }
-    else if (m.command === 'runPhase') { wfOnRunPhase(m.phase, m.durationMs); }
+    else if (m.command === 'workflowRunStarted') { wfOnRunStarted(m.workflow, m.runId); }
+    else if (m.command === 'runPhase') { wfOnRunPhase(m.phase, m.durationMs, m.runId, m.engineBusy); }
     else if (m.command === 'flowEditorAction') { wfApplyAction(m.action); }
 });
 function setTree(tabId, tree) {
@@ -291,15 +293,20 @@ window.addEventListener('resize', function () {
 /* ==================== 运行详情（"正在运行"分组点击打开） ==================== */
 function wfShowRunDetail(run) {
     if (!run || !run.workflow || !Array.isArray(run.workflow.nodes)) { return; }
-    if (WF.running && WF.mode === 'run') { return; } // 已在监控当前运行
-    /* 从其他 Flow 编辑切回查看运行详情：暂存当前编辑现场，进入执行详情模式。
-       后台运行状态由宿主保留，重开详情时回放节点状态/日志。 */
+    /* 已在展示该运行：仅恢复被"暂停"隐藏的确认操作条，无需重建视图 */
+    if (WF.mode === 'run' && WF.runId && run.id === WF.runId) {
+        if (run.pendingConfirm && !WF.actionsNode) { wfShowConfirmActions(run.pendingConfirm); }
+        return;
+    }
+    /* 切换到其他运行详情（如引擎执行新任务时查看失败暂停实例）：事件按 runId 过滤互不污染，
+       原运行进度由宿主保留，可随时从"正在运行"分组切回。 */
     if (WF.mode === 'edit') { wfSnapshotEdit(); }
     WF.mode = 'run';
     WF.runPhase = run.phase || 'running';
     WF.runDuration = run.durationMs || 0;
     WF.currentId = null;
     WF.templateId = null;
+    WF.runId = run.id || null;
     WF.nodes = run.workflow.nodes;
     WF.edges = run.workflow.edges || [];
     WF.selected = null;
@@ -344,13 +351,15 @@ function wfShowRunDetail(run) {
     wfDraw();
     wfSyncModeUI();
 }
-/* 宿主推送的运行阶段变化。
-   bgRunning 仅在"引擎真正占用"（running）时为 true：用于阻止并发运行。
-   failed-paused 时引擎已空闲，允许发起新运行（宿主会归档旧实例），故 bgRunning 为 false。
+/* 宿主推送的运行阶段变化（携带 runId 与 engineBusy）。
+   engineBusy 精确反映引擎占用状态（可能存在多个失败暂停实例，取消其一不影响引擎）。
+   runId 不匹配当前展示的运行时仅更新 bgRunning，视图不切换。
    画布/UI 更新仅在执行详情模式下执行，切走后状态由宿主保留，重开详情时回放。 */
-function wfOnRunPhase(phase, durationMs) {
-    if (phase === 'running') { WF.bgRunning = true; }
-    else if (phase === 'failed-paused' || phase === 'ended') { WF.bgRunning = false; }
+function wfOnRunPhase(phase, durationMs, runId, engineBusy) {
+    if (engineBusy !== undefined) { WF.bgRunning = !!engineBusy; }
+    else { WF.bgRunning = phase === 'running'; }
+    if (runId && WF.runId && runId !== WF.runId) { return; } // 其他运行的阶段变化：不切换视图
+    if (runId) { WF.runId = runId; }
     if (WF.mode !== 'run') { return; }
     if (phase === 'running') {
         if (!WF.running) {
@@ -364,16 +373,18 @@ function wfOnRunPhase(phase, durationMs) {
     if (phase === 'ended') { wfHideNodeActions(); }
     wfSyncModeUI();
 }
-/* 从失败节点恢复执行：携带面板上修改后的节点数据（失败节点按新命令重跑） */
+/* 从失败节点恢复执行：携带面板上修改后的节点数据（失败节点按新命令重跑）。
+   runId 定位目标实例——失败暂停实例可能已被新运行换下，仍在"正在运行"分组中。 */
 function wfResume() {
     if (WF.mode !== 'run' || WF.runPhase !== 'failed-paused' || WF.running) { return; }
-    vscode.postMessage({ command: 'workflowResume', nodes: WF.nodes });
+    if (WF.bgRunning) { wbToast(t('wb.wf.engineBusy'), 'err'); return; } // 引擎被其他运行占用
+    vscode.postMessage({ command: 'workflowResume', runId: WF.runId, nodes: WF.nodes });
     wbToast(t('wb.wf.resumed'));
 }
-/* 取消整个流程（运行中停止 / 失败暂停直接终局） */
+/* 取消整个流程（运行中停止 / 失败暂停直接终局；失败暂停实例取消不依赖引擎空闲） */
 function wfCancelRun() {
     if (WF.mode !== 'run') { return; }
-    vscode.postMessage({ command: 'workflowCancel' });
+    vscode.postMessage({ command: 'workflowCancel', runId: WF.runId });
 }
 
 /* ==================== 画布渲染 ==================== */
@@ -928,8 +939,8 @@ function wfSetRunningUI(running) {
     }
 }
 function wfRun() {
-    /* 后台仍有活跃运行（running 或 failed-paused）时不允许并发启动新运行。
-       切换到其他 Flow 编辑本身不受限制——仅阻止第二个并发运行。 */
+    /* 引擎被占用（有运行正在执行，含人工确认等待）时不允许并发启动新运行；
+       失败暂停的实例不占用引擎，可发起新运行（旧实例保留在"正在运行"分组供稍后续跑）。 */
     if (WF.bgRunning) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
     if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     if (!WF.nodes.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
@@ -939,6 +950,7 @@ function wfRun() {
     WF.runPhase = 'running';
     WF.runDuration = 0;
     WF.bgRunning = true;
+    WF.runId = null; // 宿主创建实例后经 runPhase 消息回填
     wfPrepareRun();
     wfSyncModeUI();
     vscode.postMessage({
@@ -948,13 +960,14 @@ function wfRun() {
     });
 }
 /* 侧边栏（Batch 等）发起的运行：载入工作流并切换到执行详情模式 */
-function wfOnRunStarted(workflow) {
+function wfOnRunStarted(workflow, runId) {
     if (!workflow || !Array.isArray(workflow.nodes)) { return; }
     if (WF.mode === 'edit') { wfSnapshotEdit(); }
     WF.mode = 'run';
     WF.runPhase = 'running';
     WF.runDuration = 0;
     WF.bgRunning = true;
+    WF.runId = runId || null;
     WF.currentId = null;
     WF.templateId = null;
     WF.nodes = workflow.nodes;
@@ -983,6 +996,9 @@ function wfStop() {
 }
 function wfOnEvent(ev) {
     if (!ev) { return; }
+    /* 按 runId 过滤：多运行实例并存时（引擎执行新任务 + 失败暂停实例），
+       其他运行的事件不污染当前展示的运行详情视图 */
+    if (ev.runId && WF.runId && ev.runId !== WF.runId) { return; }
     /* 已切到其他 Flow 编辑时忽略后台运行事件：节点状态/日志由宿主保留，
        重开"正在运行"详情时从 run.states/run.logs 回放，避免污染当前编辑画布 */
     if (WF.mode !== 'run') { return; }
@@ -1017,18 +1033,25 @@ function wfOnEvent(ev) {
         wbEl('wfNodeActionsText').textContent = t('wb.wf.confirmAsk') + (ev.text ? ': ' + ev.text : '');
         wfShowNodeActions(ev.nodeId, 'confirm');
     } else if (ev.type === 'done') {
-        wfHideNodeActions();
         wfSetRunningUI(false);
         var key = ev.result === 'success' ? 'wb.wf.doneSuccess' : ev.result === 'stopped' ? 'wb.wf.doneStopped' : 'wb.wf.doneFailed';
         wbEl('wfState').textContent = ev.result === 'success' ? t('wb.wf.stSuccess') : ev.result === 'stopped' ? t('wb.wf.stStopped') : t('wb.wf.stFailed');
         wbEl('wfDur').textContent = (ev.duration / 1000).toFixed(1) + 's';
         wfAppendOutput(ev.result === 'success' ? 'ok' : 'err', t(key) + ' · ' + (ev.duration / 1000).toFixed(1) + 's');
         wbToast(t(key), ev.result === 'success' ? 'ok' : 'err');
-        /* 执行详情模式：failed → 失败暂停（可 Resume/Cancel）；success/stopped → 终局（可返回编辑） */
+        /* 执行详情模式：failed → 失败暂停（保留 Resume/Cancel 操作条）；success/stopped → 终局 */
         if (WF.mode === 'run') {
             WF.runDuration = ev.duration;
-            if (WF.runPhase !== 'failed-paused') { WF.runPhase = 'ended'; }
+            if (ev.result === 'failed') {
+                WF.runPhase = 'failed-paused';
+                wfShowFailedActions();
+            } else {
+                WF.runPhase = 'ended';
+                wfHideNodeActions();
+            }
             wfSyncModeUI();
+        } else {
+            wfHideNodeActions();
         }
     }
 }
