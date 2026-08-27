@@ -15,7 +15,11 @@ var WF = {
     /* 当前编辑的是模板（保存时更新模板而非工作流） */
     templateId: null,
     /* 节点上方操作条状态：{ id, kind: 'confirm'|'failed' } */
-    actionsNode: null
+    actionsNode: null,
+    /* 后台运行标志：宿主侧运行实例是否仍活跃（running 或 failed-paused）。
+       与 WF.running 区分——后者仅表示"本面板正在监控"。切换到其他 Flow 编辑时
+       WF.running 释放为 false，但 bgRunning 保持 true，运行仍保留在"正在运行"分组。 */
+    bgRunning: false
 };
 var WF_W = 118, WF_H = 44, WF_VB_W = 1000, WF_VB_H = 460;
 var WF_TAG_COLOR = { start: '#48bfe3', cmd: '#7aa2f7', condition: '#e0af68', fork: '#9ece6a', join: '#2ac3de', notify: '#f7768e', confirm: '#ff9e64', ref: '#bb9af7' };
@@ -56,6 +60,10 @@ window.addEventListener('message', function (event) {
         applyTranslations();
         renderPalette();
         wfDraw();
+        /* 面板重载后恢复后台运行标志：仅 running 时引擎占用，阻止并发启动；
+           failed-paused 已空闲，允许发起新运行（宿主归档旧实例） */
+        var ph = m.runPhase || '';
+        WF.bgRunning = (ph === 'running');
     }
     else if (m.command === 'workbenchData') { WB.data = m.data || WB.data; }
     else if (m.command === 'updateCommandTree') { setTree(m.tabId, m.tree); wfDraw(); }
@@ -116,8 +124,29 @@ function wfRestoreEdit() {
     wfSyncModeUI();
 }
 function wfBackToEdit() {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    /* 允许从执行详情返回编辑现场：释放本地监控锁，后台运行不受影响 */
+    wfLeaveRunView();
     wfRestoreEdit();
+}
+/* 离开执行详情模式：释放本地监控锁与运行表，但宿主侧运行实例继续运行（仍保留在"正在运行"分组）。
+   用于切换到其他 Flow 编辑/查看历史等场景。editSnapshot 不在此清除，供 wfBackToEdit 恢复。 */
+function wfLeaveRunView() {
+    var wasMonitoring = WF.running || WF.mode !== 'edit';
+    if (!wasMonitoring) { return; }
+    wfSetRunningUI(false);
+    WF.mode = 'edit';
+    WF.runPhase = '';
+    WF.states = {}; WF.logs = []; WF.logFilter = '';
+    wfSetCounters(0, 0);
+    var tb = wbEl('wfRunTbody'); if (tb) { tb.innerHTML = ''; }
+    var out = wbEl('wfOutput'); if (out) { out.innerHTML = ''; }
+    wfHideNodeActions();
+    var sel = wbEl('wfLogFilter'); if (sel) { sel.innerHTML = '<option value="">' + wbEsc(t('wb.wf.allNodes')) + '</option>'; }
+    var st = wbEl('wfState'); if (st) { st.textContent = ''; }
+    var du = wbEl('wfDur'); if (du) { du.textContent = ''; }
+    wfSyncModeUI();
+    /* 离开仍在运行的监控时提示用户：任务继续在后台，可在"正在运行"分组返回 */
+    if (WF.bgRunning) { wbToast(t('wb.wf.runBackground'), 'ok'); }
 }
 /* 只读属性面板：禁用/恢复所有输入控件（删除节点按钮仅编辑模式显示） */
 function wfSetPropsDisabled(dis) {
@@ -171,12 +200,14 @@ function wfApplyAction(action) {
     else if (action.type === 'openFlow') { wfSelectFlow(action.id); }
     else if (action.type === 'loadTemplate') { wfLoadTemplate(action.id); }
     else if (action.type === 'runFlow') {
-        if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+        /* 切换到目标 Flow（释放可能正在监控的运行，后台不受影响）再发起运行；
+           wfRun 会检查 bgRunning，后台仍有活跃运行时给出提示而非启动并发运行 */
         wfSelectFlow(action.id);
         wfRun();
     }
     else if (action.type === 'batchToFlow') {
-        if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+        wfLeaveRunView();
+        WF.editSnapshot = null;
         WF.currentId = null;
         WF.templateId = null;
         WF.nodes = action.nodes || [];
@@ -261,7 +292,8 @@ window.addEventListener('resize', function () {
 function wfShowRunDetail(run) {
     if (!run || !run.workflow || !Array.isArray(run.workflow.nodes)) { return; }
     if (WF.running && WF.mode === 'run') { return; } // 已在监控当前运行
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    /* 从其他 Flow 编辑切回查看运行详情：暂存当前编辑现场，进入执行详情模式。
+       后台运行状态由宿主保留，重开详情时回放节点状态/日志。 */
     if (WF.mode === 'edit') { wfSnapshotEdit(); }
     WF.mode = 'run';
     WF.runPhase = run.phase || 'running';
@@ -312,17 +344,23 @@ function wfShowRunDetail(run) {
     wfDraw();
     wfSyncModeUI();
 }
-/* 宿主推送的运行阶段变化 */
+/* 宿主推送的运行阶段变化。
+   bgRunning 仅在"引擎真正占用"（running）时为 true：用于阻止并发运行。
+   failed-paused 时引擎已空闲，允许发起新运行（宿主会归档旧实例），故 bgRunning 为 false。
+   画布/UI 更新仅在执行详情模式下执行，切走后状态由宿主保留，重开详情时回放。 */
 function wfOnRunPhase(phase, durationMs) {
+    if (phase === 'running') { WF.bgRunning = true; }
+    else if (phase === 'failed-paused' || phase === 'ended') { WF.bgRunning = false; }
+    if (WF.mode !== 'run') { return; }
     if (phase === 'running') {
-        if (WF.mode === 'run' && !WF.running) {
+        if (!WF.running) {
             if (durationMs) { WF.runDuration = durationMs; }
             wfSetRunningUI(true); // 恢复执行：保留已回放的监控内容
         }
         wfHideNodeActions();
     }
     WF.runPhase = phase === 'running' ? 'running' : phase;
-    if (phase === 'failed-paused' && WF.mode === 'run') { wfShowFailedActions(); }
+    if (phase === 'failed-paused') { wfShowFailedActions(); }
     if (phase === 'ended') { wfHideNodeActions(); }
     wfSyncModeUI();
 }
@@ -733,10 +771,6 @@ function wfCurrentWorkflowObj() {
         nodes: WF.nodes, edges: WF.edges, updatedAt: Date.now()
     };
 }
-/* 非编辑模式下载入工作流/模板：先恢复编辑现场 */
-function wfExitReadOnly() {
-    if (WF.mode !== 'edit' && !WF.running) { wfRestoreEdit(); }
-}
 function wfSave() {
     if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     if (!WF.nodes.length && !WF.edges.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
@@ -752,8 +786,9 @@ function wfSave() {
     wbToast(t('wb.wf.saved'), 'ok');
 }
 function wfSelectFlow(id) {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
-    wfExitReadOnly();
+    /* 切换到其他 Flow 编辑：释放执行详情监控（后台运行不受影响），丢弃原编辑现场快照 */
+    wfLeaveRunView();
+    WF.editSnapshot = null;
     var wf = (WB.data.workflows || []).find(function (w) { return w.id === id; });
     if (!wf) { return; }
     WF.currentId = wf.id;
@@ -767,8 +802,8 @@ function wfSelectFlow(id) {
     wfDraw();
 }
 function wfNew() {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
-    wfExitReadOnly();
+    wfLeaveRunView();
+    WF.editSnapshot = null;
     WF.currentId = null;
     WF.templateId = null;
     WF.nodes = []; WF.edges = []; WF.states = {}; WF.selected = null;
@@ -778,7 +813,8 @@ function wfNew() {
     wfDraw();
 }
 function wfClear() {
-    if (WF.running || WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
+    /* 清空画布仅在编辑模式可用；后台运行不阻止编辑其他 Flow 的画布 */
+    if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     WF.nodes = []; WF.edges = []; WF.states = {}; WF.selected = null;
     wbEl('wfPropsForm').style.display = 'none';
     wbEl('wfPropsEmpty').style.display = '';
@@ -787,8 +823,9 @@ function wfClear() {
 }
 /* 模板并入 Workflows 列表后，点击模板即原地编辑：保留节点 id，保存时按 templateId 更新模板 */
 function wfLoadTemplate(id) {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
-    wfExitReadOnly();
+    /* 双击模板就地编辑：释放执行详情监控（后台运行不受影响），丢弃原编辑现场快照 */
+    wfLeaveRunView();
+    WF.editSnapshot = null;
     var tpl = (WB.data.templates || []).find(function (x) { return x.id === id; });
     if (!tpl) { return; }
     WF.currentId = null;
@@ -807,8 +844,9 @@ function wfLoadTemplate(id) {
 function wfShowHistory(idx) {
     var h = (WB.data.history || [])[idx];
     if (!h) { return; }
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
-    if (WF.mode === 'edit') { wfSnapshotEdit(); }
+    /* 查看历史只读回放：释放执行详情监控（后台运行不受影响） */
+    wfLeaveRunView();
+    if (WF.mode === 'edit' && !WF.editSnapshot) { wfSnapshotEdit(); }
     WF.mode = 'history';
     WF.runPhase = '';
     WF.currentId = null;
@@ -890,7 +928,9 @@ function wfSetRunningUI(running) {
     }
 }
 function wfRun() {
-    if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
+    /* 后台仍有活跃运行（running 或 failed-paused）时不允许并发启动新运行。
+       切换到其他 Flow 编辑本身不受限制——仅阻止第二个并发运行。 */
+    if (WF.bgRunning) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
     if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
     if (!WF.nodes.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
     /* 编辑 → 执行详情模式：暂存编辑现场 */
@@ -898,6 +938,7 @@ function wfRun() {
     WF.mode = 'run';
     WF.runPhase = 'running';
     WF.runDuration = 0;
+    WF.bgRunning = true;
     wfPrepareRun();
     wfSyncModeUI();
     vscode.postMessage({
@@ -913,6 +954,7 @@ function wfOnRunStarted(workflow) {
     WF.mode = 'run';
     WF.runPhase = 'running';
     WF.runDuration = 0;
+    WF.bgRunning = true;
     WF.currentId = null;
     WF.templateId = null;
     WF.nodes = workflow.nodes;
@@ -941,6 +983,9 @@ function wfStop() {
 }
 function wfOnEvent(ev) {
     if (!ev) { return; }
+    /* 已切到其他 Flow 编辑时忽略后台运行事件：节点状态/日志由宿主保留，
+       重开"正在运行"详情时从 run.states/run.logs 回放，避免污染当前编辑画布 */
+    if (WF.mode !== 'run') { return; }
     if (ev.type === 'nodeState') {
         WF.states[ev.nodeId] = ev.state;
         if (ev.state === 'failed') { WF.counts.failed++; wfSetCounters(); }

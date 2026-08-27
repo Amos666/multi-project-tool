@@ -5,11 +5,13 @@ import { WORKBENCH_CSS } from '../workbench/workbenchCss';
 import { FLOW_EDITOR_BODY } from './flowEditorHtml';
 import { FLOW_EDITOR_JS } from './flowEditorJs';
 
-/** 面板初始化上下文：工作台数据 + 命令树 + 语言 */
+/** 面板初始化上下文：工作台数据 + 命令树 + 语言 + 当前运行阶段 */
 export interface FlowEditorContext {
     data: any;
     trees: { cmd: any[]; pyt: any[]; shortcut: any[] };
     language: Language;
+    /** 宿主侧活跃运行实例的阶段（running/failed-paused/ended/空）；用于面板重载后恢复 bgRunning */
+    runPhase: string;
 }
 
 /**
@@ -79,7 +81,8 @@ export class FlowEditorProvider {
                     command: 'flowEditorInit',
                     data: ctx.data,
                     trees: ctx.trees,
-                    language: ctx.language
+                    language: ctx.language,
+                    runPhase: ctx.runPhase || ''
                 });
                 if (this._pendingAction) {
                     this.postMessage({ command: 'flowEditorAction', action: this._pendingAction });

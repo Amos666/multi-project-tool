@@ -335,6 +335,43 @@ test('HTML+JS: running group, history delete/clear-all, run detail readonly mode
     }
 });
 
+test('JS: switching flows during a run releases local lock but keeps background run (bgRunning)', () => {
+    // 新增 wfLeaveRunView：释放本面板监控锁，宿主侧运行不受影响
+    assert.ok(flowJs.includes('function wfLeaveRunView'), 'wfLeaveRunView helper exists');
+    assert.ok(flowJs.includes('bgRunning: false'), 'WF.bgRunning state declared');
+    // 切换 Flow/模板/新建 不再被 WF.running 阻断，而是调用 wfLeaveRunView 释放
+    for (const fn of ['wfSelectFlow', 'wfLoadTemplate', 'wfNew', 'wfShowHistory', 'wfBackToEdit']) {
+        const body = flowJs.split('function ' + fn + '(').slice(1)[0].split('function ')[0];
+        assert.ok(!/if \(WF\.running\)[\s\S]{0,80}runningLock[\s\S]{0,40}return;/.test(body), fn + ' no longer blocks on WF.running');
+        assert.ok(body.indexOf('wfLeaveRunView') >= 0, fn + ' calls wfLeaveRunView to release run view');
+    }
+    // wfRun 改为检查 bgRunning（阻止并发运行），而非 WF.running（本面板监控）
+    const runBody = flowJs.split('function wfRun(').slice(1)[0].split('function wfOnRunStarted')[0];
+    assert.ok(runBody.includes('if (WF.bgRunning)'), 'wfRun blocks concurrent runs via bgRunning');
+    assert.ok(runBody.includes('WF.bgRunning = true'), 'wfRun marks bgRunning on start');
+    // wfOnRunPhase 始终跟踪 bgRunning（即使已切到其他 Flow 编辑），UI 更新仅在 run 模式
+    const phaseBody = flowJs.split('function wfOnRunPhase(').slice(1)[0].split('function wfResume')[0];
+    assert.ok(phaseBody.includes("if (phase === 'running') { WF.bgRunning = true; }"), 'bgRunning set only when engine actively running');
+    assert.ok(phaseBody.includes("phase === 'failed-paused' || phase === 'ended'"), 'bgRunning cleared on failed-paused (allows new run) and ended');
+    assert.ok(phaseBody.indexOf("if (WF.mode !== 'run') { return; }") >= 0, 'phase UI updates guarded to run mode');
+    // wfOnEvent 切走后忽略后台事件，避免污染当前编辑画布
+    const evBody = flowJs.split('function wfOnEvent(').slice(1)[0].split('function wfStop')[0];
+    assert.ok(evBody.indexOf("if (WF.mode !== 'run') { return; }") >= 0, 'wfOnEvent ignores events when not in run mode');
+    // 面板重载后从 flowEditorInit.runPhase 恢复 bgRunning（仅 running 占用引擎）
+    assert.ok(flowJs.includes("m.runPhase || ''"), 'flowEditorInit carries runPhase');
+    assert.ok(flowJs.includes("WF.bgRunning = (ph === 'running')"), 'init restores bgRunning only for running');
+    // i18n：后台运行提示 + runningLock 文案已更新（不再说"编辑已锁定"）
+    for (const k of ['wb.wf.runBackground', 'wb.wf.runningLock']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+    assert.ok(!translations.en['wb.wf.runningLock'].includes('editing is locked'), 'runningLock message updated: editing no longer locked');
+    assert.ok(!translations.zh['wb.wf.runningLock'].includes('编辑已锁定'), 'runningLock 文案已更新：不再锁定编辑');
+    // 宿主：finalizeRun 支持 notifyPanel 形参；归档 failed-paused 旧实例时不向面板下发 ended
+    assert.ok(mvpSrcCache.includes('notifyPanel: boolean = true'), 'finalizeRun accepts notifyPanel flag');
+    assert.ok(mvpSrcCache.includes("this.finalizeRun(prev, 'failed', prevNodes, false)"), 'archive old failed-paused without panel ended');
+    assert.ok(mvpSrcCache.includes('runPhase: this._activeRun ? this._activeRun.phase : \'\''), 'flowEditor init carries active run phase');
+});
+
 test('JS: flow tab icons are unified SVGs, no emoji in toolbar/history/launcher', () => {
     assert.ok(js.includes('WB_ICON_PATHS') && js.includes('function wbIcon'), 'shared SVG icon set');
     assert.ok(js.includes('function wfHistIcon'), 'history entries use SVG status icons');
@@ -602,6 +639,37 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         assert.strictEqual(entry.nodes[0].state, 'failed');
         // 失败运行的实例已清除（移出"正在运行"分组）
         assert.strictEqual(provider._activeRun, undefined, 'active run cleared after cancel');
+    });
+
+    await testAsync('host: new run while previous is failed-paused archives old and starts new', async () => {
+        // 1) 失败运行 → failed-paused（引擎空闲，实例保留在"正在运行"分组，不写历史）
+        const failingWf = {
+            id: 'wfail', name: 'FailFlow', updatedAt: 1,
+            nodes: [{ id: 'r1', label: 'bad ref', tag: 'ref', x: 0, y: 0, cmd: '', timeout: 10, failPolicy: 'stop', refTab: 'shortcut', refCommandId: 'no-such-id' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(failingWf, 'git-bash', 'dev');
+        assert.ok(provider._activeRun, 'failed-paused instance retained in active runs');
+        assert.strictEqual(provider._activeRun.phase, 'failed-paused', 'phase is failed-paused');
+
+        // 2) 发起新运行：旧 failed-paused 实例以 failed 归档，新运行开始并成功
+        const okWf = {
+            id: 'wok', name: 'OkFlow', updatedAt: 1,
+            nodes: [{ id: 'a', label: 'echo', tag: 'cmd', x: 0, y: 0, cmd: 'echo ok-run', timeout: 10, failPolicy: 'stop' }],
+            edges: []
+        };
+        await provider.handleWorkflowRun(okWf, 'git-bash', 'dev');
+
+        // 3) 两条历史：FailFlow(failed) 归档 + OkFlow(success)；实例已清除
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        const failEntry = onDisk.history.find(h => h.workflowName === 'FailFlow');
+        const okEntry = onDisk.history.find(h => h.workflowName === 'OkFlow');
+        assert.ok(failEntry, 'archived failed-paused run recorded in history');
+        assert.strictEqual(failEntry.result, 'failed');
+        assert.ok(okEntry, 'new run recorded in history');
+        assert.strictEqual(okEntry.result, 'success');
+        assert.strictEqual(provider._activeRun, undefined, 'active run cleared after new run completes');
     });
 
     await testAsync('host: workflow ref node to git tab runs git operations like the Git tab buttons', async () => {
