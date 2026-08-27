@@ -92,7 +92,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
                     pyt: this._pythonTxtCommandTree,
                     shortcut: this._shortcutCommandTree
                 },
-                language: this._language
+                language: this._language,
+                runPhase: this._activeRun ? this._activeRun.phase : ''
             }),
             (message) => { this.handleWebviewMessage(message, 'panel'); }
         );
@@ -4265,7 +4266,8 @@ window.addEventListener('message', event => {
                 state: s.state as any,
                 dur: s.dur
             }));
-            this.finalizeRun(prev, 'failed', prevNodes);
+            // 不向面板下发 ended：新运行即将开始，此 ended 指向旧实例会误导面板
+            this.finalizeRun(prev, 'failed', prevNodes, false);
         }
         // 创建运行实例（workflow 深拷贝快照，避免面板后续编辑影响执行）
         this._activeRun = {
@@ -4330,7 +4332,7 @@ window.addEventListener('message', event => {
     }
 
     /** 终局：写入历史（含工作流快照与日志，用于只读详情回放），清除运行实例 */
-    private finalizeRun(inst: ActiveRun, result: RunResult, nodes: HistoryNodeResult[]): void {
+    private finalizeRun(inst: ActiveRun, result: RunResult, nodes: HistoryNodeResult[], notifyPanel: boolean = true): void {
         const entry: RunHistoryEntry = {
             id: inst.id,
             workflowName: inst.name,
@@ -4345,7 +4347,11 @@ window.addEventListener('message', event => {
         this._activeRun = undefined;
         this.postWorkbenchData();
         this.postRunState();
-        this._flowEditor.postMessage({ command: 'runPhase', phase: 'ended' });
+        // 归档失败暂停实例以发起新运行时，不向面板下发 ended——新运行即将开始，
+        // 此处的 ended 指向旧实例，会让面板误判当前运行结束
+        if (notifyPanel) {
+            this._flowEditor.postMessage({ command: 'runPhase', phase: 'ended' });
+        }
     }
 
     /** 从失败节点恢复执行：已成功节点跳过，其余重新调度；失败暂停期间面板修改的节点命令一并生效 */
