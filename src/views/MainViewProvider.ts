@@ -658,13 +658,11 @@ body {
     min-height: 40px;
 }
 
-/* ShortCutCmd Tab 没有项目列表，日志面板向上延伸填满剩余空间（拖拽设置的内联 height 优先于 flex-basis） */
-#shortcutLogContainer {
-    flex: 1 0 auto;
-}
-
-/* ShortCutCmd Tab 命令列表与日志面板直接相邻，去掉双边框缝隙 */
+/* ShortCutCmd Tab 没有项目列表：命令列表改为自动填充剩余空间（与 Cmd Tab 项目列表一致），
+   日志面板走标准 .log-container 固定高度，拖动 log-resizer 时两区域联动（日志变大↔列表变小） */
 #shortcutCommandList {
+    flex: 1;
+    min-height: 40px;
     border-bottom: none;
 }
 
@@ -2364,6 +2362,16 @@ function clearTxtCmdLogs(e) {
     vscode.postMessage({ command: 'clearTxtCmdLogs' });
 }
 
+/* 统一设置所有 log-container 高度：同时覆盖 flex 为 0 0 <height>。
+   ShortCutCmd 的 #shortcutLogContainer 默认 flex:1 0 auto 会吃掉全部剩余空间，
+   仅设 height 会被 flex 增长覆盖导致拖拽无效，必须一并固定 flex-basis */
+function applyLogHeight(px) {
+    document.querySelectorAll('.log-container').forEach(c => {
+        c.style.height = px;
+        c.style.flex = '0 0 ' + px;
+    });
+}
+
 function toggleLog() {
     const containers = document.querySelectorAll('.log-container');
     const currentHeight = containers[0] ? containers[0].getBoundingClientRect().height : 60;
@@ -2372,15 +2380,14 @@ function toggleLog() {
         // Expand to saved height
         logExpanded = true;
         logUserResized = true;
-        const targetH = savedLogHeight + 'px';
-        logInitHeight = targetH;
-        containers.forEach(c => { c.style.height = targetH; });
+        logInitHeight = savedLogHeight + 'px';
+        applyLogHeight(savedLogHeight + 'px');
     } else {
         // Collapse to minimum
         logExpanded = false;
         logUserResized = false;
         logInitHeight = '60px';
-        containers.forEach(c => { c.style.height = '60px'; });
+        applyLogHeight('60px');
     }
     vscode.postMessage({ command: 'toggleLogExpanded', expanded: logExpanded });
 }
@@ -2426,6 +2433,7 @@ function toggleLog() {
         const delta = startY - e.clientY;
         const newHeight = Math.min(Math.max(startHeight + delta, 40), window.innerHeight * 0.8);
         activeContainer.style.height = newHeight + 'px';
+        activeContainer.style.flex = '0 0 ' + newHeight + 'px';
         draggedHeight = newHeight + 'px';
         logExpanded = newHeight > 60;
         if (newHeight > 80) {
@@ -2453,6 +2461,7 @@ function toggleLog() {
         if (finalHeight) {
             document.querySelectorAll('.log-container').forEach(c => {
                 c.style.height = finalHeight;
+                c.style.flex = '0 0 ' + finalHeight;
             });
         }
     }
@@ -3040,13 +3049,17 @@ function toggleTxtCmdLog() {
     const container = document.getElementById('txtCmdLogContainer');
     if (!container) return;
     const currentHeight = container.getBoundingClientRect().height;
+    let targetH;
     if (currentHeight <= 80) {
         txtCmdLogExpanded = true;
-        container.style.height = txtCmdSavedLogHeight + 'px';
+        targetH = txtCmdSavedLogHeight + 'px';
     } else {
         txtCmdLogExpanded = false;
-        container.style.height = '60px';
+        targetH = '60px';
     }
+    // height 与 flex-basis 同步设置，保证命令区（flex:1）与日志区联动
+    container.style.height = targetH;
+    container.style.flex = '0 0 ' + targetH;
     const icon = document.getElementById('txtCmdLogToggle');
     if (icon) icon.textContent = txtCmdLogExpanded ? '▼' : '▶';
 }
@@ -3106,6 +3119,9 @@ function renderTxtCmdLogs() {
         const newHeight = Math.min(Math.max(startHeight + delta, 40), window.innerHeight * 0.8);
         const container = document.getElementById('txtCmdLogContainer');
         container.style.height = newHeight + 'px';
+        // 固定 flex-basis，防止 .log-container 的 flex 属性与内联 height 冲突
+        // 导致命令区（flex:1）与日志区联动失效（与 applyLogHeight 同理）
+        container.style.flex = '0 0 ' + newHeight + 'px';
         txtCmdLogExpanded = newHeight > 60;
         if (newHeight > 80) txtCmdSavedLogHeight = newHeight;
     }
@@ -3179,8 +3195,7 @@ window.addEventListener('message', event => {
         case 'restoreLogHeight':
             const restoredH = message.height;
             if (restoredH && restoredH > 60) {
-                const containers = document.querySelectorAll('.log-container');
-                containers.forEach(c => { c.style.height = restoredH + 'px'; });
+                applyLogHeight(restoredH + 'px');
                 logExpanded = true;
                 savedLogHeight = restoredH;
                 logUserResized = true;
