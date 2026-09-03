@@ -222,6 +222,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'clearLogs': this.handleClearLogs(); break;
             case 'clearTxtCmdLogs': this._txtCmdLogs = []; break;
             case 'notifyInfo': vscode.window.showInformationMessage(message.message); break;
+            case 'openProjectFolder': this.handleOpenProjectFolder(message.path); break;
             case 'exportLog': await this.handleExportLog(message.content, message.tabId); break;
             case 'toggleLogExpanded': this.handleToggleLogExpanded(message.expanded); break;
             case 'logHeightChange': this.handleLogHeightChange(message.height); break;
@@ -2570,6 +2571,8 @@ function updateProjectList() {
             item.appendChild(count);
 
             item.onclick = function() { toggleProjectSelection(p.id); };
+            // 双击项目：打开该项目目录（系统资源管理器）
+            item.ondblclick = function(e) { e.stopPropagation(); vscode.postMessage({ command: 'openProjectFolder', path: p.path }); };
 
             return item;
         }
@@ -3298,7 +3301,8 @@ window.addEventListener('message', event => {
                 const child = cp.exec(pythonCmd + ' "' + scriptPath + '"', {
                     encoding: 'utf8',
                     maxBuffer: 1024 * 1024 * 10,
-                    timeout: 30000,
+                    // 使用 Set Tab 配置的命令超时（默认 300s），与其他命令执行路径一致
+                    timeout: this._commandTimeout * 1000,
                     env: { ...process.env, ...this.getEnvVariables() }
                 }, (error: Error | null, stdout: string, stderr: string) => {
                     try { fs.unlinkSync(scriptPath); } catch (e) { }
@@ -3392,6 +3396,12 @@ window.addEventListener('message', event => {
 
     private async handleCreateBranch(branch: string): Promise<void> {
         await this.executeGitOperation('create-branch', branch);
+    }
+
+    private handleOpenProjectFolder(path: string): void {
+        // 双击项目：用系统资源管理器打开项目目录
+        if (!path) { return; }
+        vscode.env.openExternal(vscode.Uri.file(path));
     }
 
     private async handleGetBranchList(projectId: string): Promise<void> {
