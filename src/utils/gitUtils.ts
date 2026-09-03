@@ -173,12 +173,12 @@ export class GitUtils {
     }
 
     public static async gitCommit(project: Project, message: string): Promise<GitOperationResult> {
-        logManager.info(`Committing staged changes for project: ${project.name}`);
+        logManager.info(`Committing tracked changes for project: ${project.name}`);
         try {
-            // 只提交已暂存（staged）的文件，不做 add 动作
+            // commit -a：自动暂存并提交已跟踪文件的修改，不纳入未跟踪的新文件（等价于不做 add .）
             const commitMsg = message || 'Auto commit';
             logManager.info(`Committing with message: "${commitMsg}" in ${project.name}`);
-            const commitResult = await this.executeGitCommand(project.path, `commit -m "${commitMsg}"`);
+            const commitResult = await this.executeGitCommand(project.path, `commit -a -m "${commitMsg}"`);
             if (commitResult.success) {
                 logManager.success(`Successfully committed changes in ${project.name}`, commitResult.output);
             } else {
