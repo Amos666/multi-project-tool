@@ -173,22 +173,9 @@ export class GitUtils {
     }
 
     public static async gitCommit(project: Project, message: string): Promise<GitOperationResult> {
-        logManager.info(`Committing changes for project: ${project.name}`);
+        logManager.info(`Committing staged changes for project: ${project.name}`);
         try {
-            // 先添加所有文件
-            logManager.info(`Adding files for commit in ${project.name}`);
-            const addResult = await this.executeGitCommand(project.path, 'add .');
-            if (!addResult.success) {
-                logManager.error(`Failed to add files in ${project.name}`, addResult.error);
-                return {
-                    success: false,
-                    message: `Failed to add files in ${project.name}`,
-                    project: project,
-                    error: addResult.error
-                };
-            }
-
-            // 提交
+            // 只提交已暂存（staged）的文件，不做 add 动作
             const commitMsg = message || 'Auto commit';
             logManager.info(`Committing with message: "${commitMsg}" in ${project.name}`);
             const commitResult = await this.executeGitCommand(project.path, `commit -m "${commitMsg}"`);
