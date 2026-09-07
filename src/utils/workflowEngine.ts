@@ -28,6 +28,9 @@ export type WorkflowEngineEvent =
     | { type: 'confirm'; nodeId: string; text: string }
     | { type: 'done'; result: RunResult; duration: number; nodes: HistoryNodeResult[] };
 
+/** 转发到面板的引擎事件：附带运行实例 id，多运行实例并存时面板按 runId 过滤 */
+export type WorkflowEngineEventEnvelope = WorkflowEngineEvent & { runId?: string };
+
 type NodeState = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
 
 /**

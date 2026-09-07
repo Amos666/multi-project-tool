@@ -3,9 +3,10 @@
 
 export const WORKBENCH_JS = `
 /* ==================== Workbench: state ==================== */
-var WB = { data: { checklist: [], workflows: [], templates: [], history: [], batchGroups: [], hiddenTabs: [] }, batchIdx: 0, run: null };
-/* 画布/属性/监控已迁移至主编辑区 Flow Editor 面板；侧边栏仅保留运行锁与批量节点映射 */
-var WF = { running: false, batchNodeIds: [] };
+var WB = { data: { checklist: [], workflows: [], templates: [], history: [], batchGroups: [], hiddenTabs: [] }, batchIdx: 0, run: [] };
+/* 画布/属性/监控已迁移至主编辑区 Flow Editor 面板；侧边栏仅保留运行锁与批量节点映射。
+   WB.run 为运行实例数组（活动运行 + 失败暂停实例并存）；WF.runId 为批量运行的实例 id（事件过滤用） */
+var WF = { running: false, batchNodeIds: [], runId: null };
 
 function wbEsc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
@@ -54,7 +55,8 @@ window.addEventListener('message', function (event) {
     if (!m || !m.command) { return; }
     if (m.command === 'workbenchData') { wbOnData(m.data); }
     else if (m.command === 'workflowEvent') { wfOnEvent(m.event); }
-    else if (m.command === 'runState') { WB.run = m.run; renderRunningList(); }
+    else if (m.command === 'runState') { WB.run = m.runs || []; renderRunningList(); }
+    else if (m.command === 'batchRunStarted') { WF.runId = m.runId || null; }
 });
 
 function wbOnData(data) {
@@ -193,20 +195,21 @@ function wfDeleteTemplate(id) {
 function renderRunningList() {
     var box = wbEl('wfRunningList');
     if (!box) { return; }
-    var r = WB.run;
-    if (!r) {
+    var runs = WB.run || [];
+    if (!runs.length) {
         box.innerHTML = '<div class="wf-list-item dim">' + wbEsc(t('wb.wf.noRunning')) + '</div>';
         return;
     }
-    var failedPaused = r.phase === 'failed-paused';
-    var icon = failedPaused
-        ? '<svg class="wb-icon" style="stroke:var(--state-error)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="8" cy="8" r="6.2"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/></svg>'
-        : '<svg class="wb-icon" style="stroke:var(--brand-primary)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M8 2a6 6 0 1 0 6 6"/><path d="M8 4.5A3.5 3.5 0 1 0 11.5 8"/></svg>';
-    var phaseLabel = failedPaused ? t('wb.wf.failedPaused') : t('wb.wf.stRunning');
-    box.innerHTML = '<div class="wf-list-item" onclick="wfOpenRun()" title="' + wbEsc(r.name) + '">' +
-        icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(r.name) + ' · ' + wbEsc(phaseLabel) + '</span></div>';
+    var errIcon = '<svg class="wb-icon" style="stroke:var(--state-error)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="8" cy="8" r="6.2"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/></svg>';
+    var runIcon = '<svg class="wb-icon" style="stroke:var(--brand-primary)" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M8 2a6 6 0 1 0 6 6"/><path d="M8 4.5A3.5 3.5 0 1 0 11.5 8"/></svg>';
+    box.innerHTML = runs.map(function (r) {
+        var failedPaused = r.phase === 'failed-paused';
+        var phaseLabel = failedPaused ? t('wb.wf.failedPaused') : t('wb.wf.stRunning');
+        return '<div class="wf-list-item" onclick="wfOpenRun(\\'' + r.id + '\\')" title="' + wbEsc(r.name) + '">' +
+            (failedPaused ? errIcon : runIcon) + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(r.name) + ' · ' + wbEsc(phaseLabel) + '</span></div>';
+    }).join('');
 }
-function wfOpenRun() { wfRelay({ type: 'openRun' }); }
+function wfOpenRun(runId) { wfRelay({ type: 'openRun', runId: runId }); }
 /* ---- 历史记录：双击只读查看详情 / 单项删除 / 全部清空 ---- */
 function renderHistoryList() {
     var box = wbEl('wfHistoryList');
@@ -253,6 +256,9 @@ function batchAppendOutput(level, text, stamp) {
 }
 function wfOnEvent(ev) {
     if (!ev) { return; }
+    /* 按 runId 过滤：多运行实例并存时，其他运行（如失败暂停实例被取消的终局事件）
+       不影响批量执行的进度/状态展示 */
+    if (ev.runId && WF.runId && ev.runId !== WF.runId) { return; }
     if (ev.type === 'nodeState') {
         var bIdx = WF.batchNodeIds.indexOf(ev.nodeId);
         if (bIdx >= 0) { batchUpdatePill(bIdx, ev.state, ev.dur); }
@@ -401,6 +407,7 @@ function batchRun() {
     WF.batchNodeIds = built.ids;
     WB.batchRunning = true;
     WF.running = true;
+    WF.runId = null; // 宿主创建实例后经 batchRunStarted 消息回填
     wbEl('batchStatus').textContent = t('wb.wf.stRunning');
     batchResetPills();
     batchClearLog();

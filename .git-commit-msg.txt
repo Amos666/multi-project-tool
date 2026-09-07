@@ -1,0 +1,7 @@
+fix: ShortCutCmd/Python Tab 日志面板拖拽调节失效
+
+- ShortCutCmd 命令列表改为 flex:1 自动填充，日志面板回归标准固定高度，
+  拖动 log-resizer 时两区域联动（日志变大列表变小）
+- Python Tab 独立 resizer 与 toggleTxtCmdLog 同步固定 flex-basis，
+  修复只设 height 被 flex 覆盖导致联动失效的问题
+- 统一 applyLogHeight：拖拽/折叠/恢复高度时 height 与 flex 一致设置
