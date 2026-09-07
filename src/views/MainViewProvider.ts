@@ -82,6 +82,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     /** 失败暂停后被新运行换下的实例：仍保留在"正在运行"分组，可修复后续跑/取消 */
     private _pausedRuns: ActiveRun[] = [];
     private _flowEditor: FlowEditorProvider;
+    /** 命令行运行实例跟踪：key = `${tabId}:${commandId}`，值为可取消句柄（同一命令可能多次并发） */
+    private _activeCmdRuns = new Map<string, Array<{ cancel: () => void }>>();
 
     constructor(private readonly _extensionUri: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
@@ -214,6 +216,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'runShortcutCmd': await this.handleRunShortcutCmdContent(message.cmd); break;
             case 'saveCommandTree': await this.handleSaveCommandTree(message.tabId, message.tree); break;
             case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
+            case 'cancelCommand': this.handleCancelCommand(message.tabId, message.commandId); break;
             case 'saveSettings': await this.handleSaveSettings(message.settings); break;
             case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
             case 'addEnvVariable': await this.handleAddEnvVariable(message.variable); break;
@@ -791,6 +794,19 @@ body {
 .cmd-action-btn.run:hover { color: var(--state-success); border-color: var(--state-success); }
 .cmd-action-btn.edit:hover { color: var(--brand-primary); border-color: var(--brand-primary); }
 .cmd-action-btn.delete:hover { color: var(--state-error); border-color: var(--state-error); }
+.cmd-action-btn.cancel:hover { color: var(--state-error); border-color: var(--state-error); }
+.cmd-action-btn:disabled { opacity: 0.4; cursor: default; }
+.cmd-action-btn:disabled:hover { background-color: var(--brand-surface); border-color: var(--brand-border-subtle); }
+
+/* --- 命令执行中：整行闪烁提示（结束/取消后自动恢复） --- */
+.command-item.executing {
+    border-radius: var(--radius-sm);
+    animation: cmdExecBlink 1.1s ease-in-out infinite;
+}
+@keyframes cmdExecBlink {
+    0%, 100% { background-color: var(--brand-surface-raised); box-shadow: inset 2px 0 0 var(--state-info); }
+    50% { background-color: var(--brand-primary-subtle); box-shadow: inset 2px 0 0 var(--state-warning); }
+}
 
 /* --- 分类层级树（cmd / pyt 两 tab 统一风格） --- */
 .tree-category { margin-bottom: 6px; }
@@ -1823,6 +1839,8 @@ let logUserResized = false;
 let logInitHeight = '60px';
 let branchList = [];
 let currentBranch = '';
+/* 命令行运行状态：key = tabId + ':' + commandId；驱动执行中闪烁与 cancel 按钮显隐 */
+let runningCmds = new Set();
 
 window.addEventListener('load', () => { vscode.postMessage({ command: 'init' }); applyTranslations(); });
 
@@ -2263,13 +2281,35 @@ function confirmDeleteCategory() {
     closeDeleteCategoryModal();
 }
 
-// --- 运行命令 / 折叠切换 ---
+// --- 运行命令 / 取消运行 / 折叠切换 ---
 function runCommand(tabId, commandId) {
     if (tabId === 'cmd' && selectedProjectIds.size === 0) {
         document.getElementById('selectionWarning').classList.add('show');
         return;
     }
+    // 执行中不允许重复启动（宿主完成/取消后会下发 done 清除状态）
+    var runKey = tabId + ':' + commandId;
+    if (runningCmds.has(runKey)) { return; }
+    updateCmdRunUi(tabId, commandId, true);
     vscode.postMessage({ command: 'runCommand', tabId: tabId, commandId: commandId });
+}
+
+function cancelCommand(tabId, commandId) {
+    vscode.postMessage({ command: 'cancelCommand', tabId: tabId, commandId: commandId });
+}
+
+/** 更新命令行运行态 UI：闪烁样式、run 按钮禁用、cancel 按钮显隐 */
+function updateCmdRunUi(tabId, commandId, running) {
+    var runKey = tabId + ':' + commandId;
+    if (running) { runningCmds.add(runKey); } else { runningCmds.delete(runKey); }
+    var listId = tabId === 'pyt' ? 'pythonTxtCmdList' : tabId === 'shortcut' ? 'shortcutCommandList' : 'commandList';
+    var row = document.querySelector('#' + listId + ' .command-item[data-node-id="' + commandId + '"]');
+    if (!row) { return; }
+    row.classList.toggle('executing', running);
+    var runBtn = row.querySelector('.cmd-action-btn.run');
+    if (runBtn) { runBtn.disabled = running; }
+    var cancelBtn = row.querySelector('.cmd-action-btn.cancel');
+    if (cancelBtn) { cancelBtn.style.display = running ? '' : 'none'; }
 }
 
 function toggleCategory(tabId, nodeId) {
@@ -2634,7 +2674,8 @@ const TREE_ICONS = {
     folderPlus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h2.3a1.5 1.5 0 0 1 1.06.44l.7.7a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.5z"/><path d="M8 7.5v3.5M6.25 9.25h3.5"/></svg>',
     pencil: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L6 12l-2.7.7L4 10l7.5-7.5z"/></svg>',
     trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.5 4.5v-1h3v1"/><path d="M4.5 4.5l.6 8a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8"/></svg>',
-    play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4.2v7.6L12 8 5.5 4.2z"/></svg>'
+    play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4.2v7.6L12 8 5.5 4.2z"/></svg>',
+    stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/></svg>'
 };
 
 function getShellLabel(shell) {
@@ -2758,6 +2799,10 @@ function buildTreeNode(tabId, node) {
     const item = document.createElement('div');
     item.className = 'command-item tree-row-draggable';
     item.draggable = true;
+    item.dataset.nodeId = node.id;
+    // 渲染时按运行状态恢复闪烁样式与按钮态（重渲染可能发生在执行期间）
+    const isRunning = runningCmds.has(tabId + ':' + node.id);
+    if (isRunning) { item.classList.add('executing'); }
 
     const preview = (node.content || '').split('\\n')[0];
 
@@ -2796,8 +2841,18 @@ function buildTreeNode(tabId, node) {
     runBtn.className = 'cmd-action-btn run';
     runBtn.title = t('cmd.run');
     runBtn.innerHTML = TREE_ICONS.play;
+    runBtn.disabled = isRunning;
     runBtn.onclick = function(e) { e.stopPropagation(); runCommand(tabId, node.id); };
     actions.appendChild(runBtn);
+
+    // 执行中显示的取消按钮：终止宿主侧子进程树
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cmd-action-btn cancel';
+    cancelBtn.title = t('cmd.cancelRun');
+    cancelBtn.innerHTML = TREE_ICONS.stop;
+    cancelBtn.style.display = isRunning ? '' : 'none';
+    cancelBtn.onclick = function(e) { e.stopPropagation(); cancelCommand(tabId, node.id); };
+    actions.appendChild(cancelBtn);
 
     const editBtn2 = document.createElement('button');
     editBtn2.className = 'cmd-action-btn edit';
@@ -3153,6 +3208,16 @@ window.addEventListener('message', event => {
         case 'updateTxtCmdLogs': txtCmdLogs = message.logs || []; renderTxtCmdLogs(); break;
         case 'addLog': addLogEntry(message.entry); break;
         case 'updateCommandTree': setTree(message.tabId, message.tree || []); renderCommandTree(message.tabId); break;
+        case 'cmdRunState': updateCmdRunUi(message.tabId, message.commandId, message.state === 'running'); break;
+        case 'cmdRunStateSync':
+            // 宿主批量同步活跃命令（webview 重载后恢复闪烁态）
+            runningCmds.clear();
+            (message.keys || []).forEach(function(k) {
+                var sep = k.indexOf(':');
+                if (sep <= 0) { return; }
+                updateCmdRunUi(k.slice(0, sep), k.slice(sep + 1), true);
+            });
+            break;
         case 'updateEnvVariables': envVariables = message.variables; updateEnvVariables(); break;
         case 'updateBranchList': updateBranchList(message.branches, message.current); break;
         case 'updateSettings':
@@ -3252,7 +3317,7 @@ window.addEventListener('message', event => {
         this.updateWebview();
     }
 
-    private async handleRunPythonTxtCmd(cmd: PythonTxtCommand): Promise<void> {
+    private async handleRunPythonTxtCmd(cmd: PythonTxtCommand, runKey?: string): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             this.addTxtCmdLog(t('backend.noEditor', this._language), 'error');
@@ -3270,8 +3335,10 @@ window.addEventListener('message', event => {
         this.addTxtCmdLog(`${t('backend.execCmd', this._language)}: ${cmd.alias}`, 'info');
 
         try {
-            const result = await this.executePythonTransform(selectedText, cmd.content);
-            if (result.success) {
+            const result = await this.executePythonTransform(selectedText, cmd.content, runKey);
+            if (result.cancelled) {
+                this.addTxtCmdLog(`${t('backend.cmdCancelled', this._language)}: ${cmd.alias}`, 'error');
+            } else if (result.success) {
                 await editor.edit(editBuilder => {
                     editBuilder.replace(selection, result.output);
                 });
@@ -3284,7 +3351,7 @@ window.addEventListener('message', event => {
         }
     }
 
-    private executePythonTransform(input: string, script: string): Promise<{ success: boolean; output: string; error?: string }> {
+    private executePythonTransform(input: string, script: string, runKey?: string): Promise<{ success: boolean; output: string; error?: string; cancelled?: boolean }> {
         return new Promise((resolve) => {
             const cp = require('child_process');
             const fs = require('fs');
@@ -3298,6 +3365,8 @@ window.addEventListener('message', event => {
                 fs.writeFileSync(scriptPath, script, 'utf8');
 
                 const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+                // 取消标记：句柄触发后置位，回调据此返回 cancelled 而非执行失败
+                let cancelled = false;
                 const child = cp.exec(pythonCmd + ' "' + scriptPath + '"', {
                     encoding: 'utf8',
                     maxBuffer: 1024 * 1024 * 10,
@@ -3306,7 +3375,10 @@ window.addEventListener('message', event => {
                     env: { ...process.env, ...this.getEnvVariables() }
                 }, (error: Error | null, stdout: string, stderr: string) => {
                     try { fs.unlinkSync(scriptPath); } catch (e) { }
-                    if (error) {
+                    if (runKey) { this.unregisterCmdRun(runKey, handle); }
+                    if (cancelled) {
+                        resolve({ success: false, output: '', error: t('backend.cmdCancelled', this._language), cancelled: true });
+                    } else if (error) {
                         const errMsg = error.message;
                         if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
                             resolve({ success: false, output: '', error: t('backend.pythonNotFound', this._language) });
@@ -3317,6 +3389,9 @@ window.addEventListener('message', event => {
                         resolve({ success: true, output: stdout });
                     }
                 });
+
+                const handle = { cancel: () => { cancelled = true; this.killChildTree(child); } };
+                if (runKey) { this.registerCmdRun(runKey, handle); }
 
                 if (child.stdin) {
                     child.stdin.write(input);
@@ -3522,68 +3597,146 @@ window.addEventListener('message', event => {
         this.saveAllConfig();
     }
 
-    private async handleRunCommand(tabId: string, commandId: string): Promise<void> {
-        if (tabId === 'pyt') {
-            const node = findNodeById(this._pythonTxtCommandTree, commandId);
-            if (!node || node.type !== 'command') { return; }
-            await this.handleRunPythonTxtCmd({ id: node.id, alias: node.name, content: node.content || '' });
-            return;
+    // ==================== 命令行运行跟踪与取消 ====================
+
+    private cmdRunKey(tabId: string, commandId: string): string {
+        return tabId + ':' + commandId;
+    }
+
+    private registerCmdRun(key: string, handle: { cancel: () => void }): void {
+        let list = this._activeCmdRuns.get(key);
+        if (!list) {
+            list = [];
+            this._activeCmdRuns.set(key, list);
         }
+        list.push(handle);
+    }
 
-        if (tabId === 'shortcut') {
-            await this.handleRunShortcutCommand(commandId);
-            return;
+    private unregisterCmdRun(key: string, handle: { cancel: () => void }): void {
+        const list = this._activeCmdRuns.get(key);
+        if (!list) { return; }
+        const idx = list.indexOf(handle);
+        if (idx >= 0) { list.splice(idx, 1); }
+        if (list.length === 0) { this._activeCmdRuns.delete(key); }
+    }
+
+    /** 通知前端命令行运行状态（running/done），驱动闪烁样式与 cancel 按钮显隐 */
+    private notifyCmdRunState(tabId: string, commandId: string, running: boolean): void {
+        this._view?.webview.postMessage({
+            command: 'cmdRunState',
+            tabId,
+            commandId,
+            state: running ? 'running' : 'done'
+        });
+    }
+
+    /** 取消指定命令的所有活跃执行实例（终止子进程树） */
+    private handleCancelCommand(tabId: string, commandId: string): void {
+        const key = this.cmdRunKey(tabId, commandId);
+        const list = this._activeCmdRuns.get(key);
+        if (!list || list.length === 0) { return; }
+        // 复制后遍历：cancel 会触发 close 回调注销句柄，原数组会被修改
+        for (const handle of list.slice()) {
+            try { handle.cancel(); } catch (e) { /* ignore */ }
         }
+    }
 
-        const command = findNodeById(this._customCommandTree, commandId);
-        if (!command || command.type !== 'command') { return; }
-
-        const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id));
-        if (selectedProjects.length === 0) {
-            vscode.window.showInformationMessage(t('backend.noProjects', this._language));
-            return;
-        }
-
-        // 每个命令按自身保存的 shell 类型执行；无类型数据回退到当前所选 shell
-        const runShell = command.shell && VALID_SHELLS.includes(command.shell)
-            ? command.shell
-            : this._currentShell;
-        const shellLabel = this.getShellLabel(runShell);
-        this.addLog('▶ [' + shellLabel + '] ' + command.name + ' — ' + selectedProjects.length + ' projects');
-
-        const commandLines = (command.content || '').split('\n').filter(c => c.trim());
-
-        let successCount = 0;
-        for (const project of selectedProjects) {
-            this.addLog('├── ' + project.name, undefined, project.name);
-
-            try {
-                const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
-                // 为每条命令注入追踪：输出 "$ command => executed result: output"
-                const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
-                const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
-                    if (line.trim()) {
-                        this.addLog('│   ' + line, 'info', project.name);
-                    }
-                });
-                if (result.success) {
-                    successCount++;
-                    this.addLog('│   ✓ Completed', 'success', project.name);
-                } else {
-                    this.addLog('│   ✗ ' + (result.error || result.output), 'error', project.name);
-                }
-            } catch (error) {
-                this.addLog('│   ✗ Error: ' + error, 'error', project.name);
+    /** 终止子进程及其派生进程树（Windows 用 taskkill /T，其余平台 SIGTERM） */
+    private killChildTree(child: { pid?: number; kill: (signal?: string) => boolean }): void {
+        try {
+            if (process.platform === 'win32' && child.pid) {
+                require('child_process').exec('taskkill /pid ' + child.pid + ' /T /F');
+                return;
             }
+            if (child.pid) {
+                try { child.kill('SIGTERM'); } catch (e) { /* ignore */ }
+                return;
+            }
+            child.kill('SIGTERM');
+        } catch (e) {
+            try { child.kill('SIGTERM'); } catch (e2) { /* ignore */ }
         }
+    }
 
-        this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
+    private async handleRunCommand(tabId: string, commandId: string): Promise<void> {
+        // 状态通知成对发送（running/done）：无论后续校验结果如何都不遗留前端运行态
+        this.notifyCmdRunState(tabId, commandId, true);
+        try {
+            if (tabId === 'pyt') {
+                const node = findNodeById(this._pythonTxtCommandTree, commandId);
+                if (!node || node.type !== 'command') { return; }
+                await this.handleRunPythonTxtCmd({ id: node.id, alias: node.name, content: node.content || '' }, this.cmdRunKey(tabId, commandId));
+                return;
+            }
+
+            if (tabId === 'shortcut') {
+                await this.handleRunShortcutCommand(commandId);
+                return;
+            }
+
+            const command = findNodeById(this._customCommandTree, commandId);
+            if (!command || command.type !== 'command') { return; }
+
+            const selectedProjects = this._projects.filter(p => this._selectedProjectIds.has(p.id));
+            if (selectedProjects.length === 0) {
+                vscode.window.showInformationMessage(t('backend.noProjects', this._language));
+                return;
+            }
+
+            // 每个命令按自身保存的 shell 类型执行；无类型数据回退到当前所选 shell
+            const runShell = command.shell && VALID_SHELLS.includes(command.shell)
+                ? command.shell
+                : this._currentShell;
+            const shellLabel = this.getShellLabel(runShell);
+            this.addLog('▶ [' + shellLabel + '] ' + command.name + ' — ' + selectedProjects.length + ' projects');
+
+            const commandLines = (command.content || '').split('\n').filter(c => c.trim());
+            const runKey = this.cmdRunKey(tabId, commandId);
+
+            let successCount = 0;
+            let cancelled = false;
+            for (const project of selectedProjects) {
+                this.addLog('├── ' + project.name, undefined, project.name);
+
+                try {
+                    const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
+                    // 为每条命令注入追踪：输出 "$ command => executed result: output"
+                    const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+                    const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
+                        if (line.trim()) {
+                            this.addLog('│   ' + line, 'info', project.name);
+                        }
+                    }, undefined, runKey);
+                    if (result.cancelled) {
+                        cancelled = true;
+                        this.addLog('│   ⊘ ' + t('backend.cmdCancelled', this._language), 'error', project.name);
+                        break;
+                    }
+                    if (result.success) {
+                        successCount++;
+                        this.addLog('│   ✓ Completed', 'success', project.name);
+                    } else {
+                        this.addLog('│   ✗ ' + (result.error || result.output), 'error', project.name);
+                    }
+                } catch (error) {
+                    this.addLog('│   ✗ Error: ' + error, 'error', project.name);
+                }
+            }
+
+            if (cancelled) {
+                this.addLog('⊘ ' + t('backend.cmdCancelled', this._language) + ' — ' + command.name + ' (' + successCount + '/' + selectedProjects.length + ')', 'error');
+            } else {
+                this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
+            }
+        } finally {
+            this.notifyCmdRunState(tabId, commandId, false);
+        }
     }
 
     private async handleRunShortcutCommand(commandId: string): Promise<void> {
         const command = findNodeById(this._shortcutCommandTree, commandId);
         if (!command || command.type !== 'command') { return; }
-        await this.executeShortcutCommand(command.name, command.content || '', command.shell);
+        await this.executeShortcutCommand(command.name, command.content || '', command.shell, this.cmdRunKey('shortcut', commandId));
     }
 
     private async handleRunShortcutCmdContent(cmd: { alias?: string; content?: string; shell?: string }): Promise<void> {
@@ -3591,7 +3744,7 @@ window.addEventListener('message', event => {
         await this.executeShortcutCommand(cmd.alias || t('pytxt.tempCmd', this._language), cmd.content, cmd.shell);
     }
 
-    private async executeShortcutCommand(name: string, content: string, shell?: string): Promise<void> {
+    private async executeShortcutCommand(name: string, content: string, shell?: string, runKey?: string): Promise<void> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
             vscode.window.showInformationMessage(t('backend.noWorkspace', this._language));
@@ -3615,8 +3768,10 @@ window.addEventListener('message', event => {
                 if (line.trim()) {
                     this.addLog('│   ' + line, 'info');
                 }
-            });
-            if (result.success) {
+            }, undefined, runKey);
+            if (result.cancelled) {
+                this.addLog('⊘ ' + t('backend.cmdCancelled', this._language) + ' — ' + name, 'error');
+            } else if (result.success) {
                 this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + name, 'success');
             } else {
                 this.addLog('✗ ' + (result.error || result.output), 'error');
@@ -3840,7 +3995,7 @@ window.addEventListener('message', event => {
         return result;
     }
 
-    private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void, shellOverride?: string): Promise<{ success: boolean; output: string; error?: string }> {
+    private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void, shellOverride?: string, runKey?: string): Promise<{ success: boolean; output: string; error?: string; cancelled?: boolean }> {
         return new Promise((resolve) => {
             const timeout = this._commandTimeout * 1000;
             let shell = shellOverride || this._currentShell;
@@ -3927,9 +4082,15 @@ window.addEventListener('message', event => {
                 shell: useShell
             });
 
-            // 设置超时
+            // 取消标记：句柄触发后置位，close 回调据此返回 cancelled 而非普通失败
+            let cancelled = false;
+            const handle = { cancel: () => { cancelled = true; this.killChildTree(child); } };
+            if (runKey) { this.registerCmdRun(runKey, handle); }
+            const cleanupRun = () => { if (runKey) { this.unregisterCmdRun(runKey, handle); } };
+
+            // 设置超时（仅终止进程树；cancelled 标记只用于用户主动取消）
             const timer = setTimeout(() => {
-                try { child.kill(); } catch (e) { /* ignore */ }
+                try { this.killChildTree(child); } catch (e) { /* ignore */ }
             }, timeout);
 
             if (child.stdout) {
@@ -3960,6 +4121,7 @@ window.addEventListener('message', event => {
 
             child.on('close', (code: number | null) => {
                 clearTimeout(timer);
+                cleanupRun();
                 // 处理剩余的缓冲
                 if (stdoutBuf.trim() && onOutput) onOutput(stdoutBuf.trim());
                 if (stderrBuf.trim() && onOutput) onOutput(stderrBuf.trim());
@@ -3971,7 +4133,14 @@ window.addEventListener('message', event => {
                 const allStdout = collectedStdout.join('').trim();
                 const allStderr = collectedStderr.join('').trim();
 
-                if (code !== 0 && code !== null) {
+                if (cancelled) {
+                    resolve({
+                        success: false,
+                        cancelled: true,
+                        output: allStdout,
+                        error: t('backend.cmdCancelled', this._language)
+                    });
+                } else if (code !== 0 && code !== null) {
                     resolve({
                         success: false,
                         output: allStdout,
@@ -3987,6 +4156,7 @@ window.addEventListener('message', event => {
 
             child.on('error', (error: Error) => {
                 clearTimeout(timer);
+                cleanupRun();
                 try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
                 try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
 
@@ -4222,6 +4392,8 @@ window.addEventListener('message', event => {
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'cmd', tree: this._customCommandTree });
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'pyt', tree: this._pythonTxtCommandTree });
         this._view?.webview.postMessage({ command: 'updateCommandTree', tabId: 'shortcut', tree: this._shortcutCommandTree });
+        // 同步命令行运行状态（webview 重载后恢复闪烁与 cancel 按钮）
+        this._view?.webview.postMessage({ command: 'cmdRunStateSync', keys: Array.from(this._activeCmdRuns.keys()) });
         this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
         this._view?.webview.postMessage({ command: 'setLanguage', language: this._language });
         // Flow Editor 面板同步命令树与语言（ref 节点引用、界面文案依赖）
