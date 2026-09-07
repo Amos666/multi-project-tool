@@ -411,6 +411,48 @@ test('JS: shared tree rendering + icons for both tabs', () => {
     assert.ok(/folder/.test(js) && /chevron/.test(js) && /folderPlus/.test(js), 'unified SVG icon set');
 });
 
+test('JS+CSS: command rows expose cancel button and blink while executing', () => {
+    // 前端运行状态跟踪与 UI 更新
+    assert.ok(js.includes('let runningCmds = new Set()'), 'running state set declared');
+    assert.ok(js.includes('function updateCmdRunUi'), 'UI updater exists');
+    assert.ok(js.includes('function cancelCommand'), 'cancel sender exists');
+    // runCommand 阻止执行中重复启动，并乐观标记运行态
+    const runBody = js.split('function runCommand(').slice(1)[0].split('function cancelCommand')[0];
+    assert.ok(runBody.includes('runningCmds.has(runKey)'), 'blocks re-run while executing');
+    assert.ok(runBody.includes('updateCmdRunUi(tabId, commandId, true)'), 'marks row running optimistically');
+    // cancelCommand 发送终止消息
+    const cancelBody = js.split('function cancelCommand(').slice(1)[0].split('function updateCmdRunUi')[0];
+    assert.ok(cancelBody.includes("command: 'cancelCommand'"), 'cancel posts message to host');
+    // buildTreeNode 渲染 cancel 按钮 + executing 类 + data-node-id 定位
+    const buildBody = js.split('function buildTreeNode(').slice(1)[0].split('function attachDndHandlers')[0];
+    assert.ok(buildBody.includes("className = 'cmd-action-btn cancel'"), 'cancel button rendered');
+    assert.ok(buildBody.includes('TREE_ICONS.stop'), 'stop icon used');
+    assert.ok(buildBody.includes('dataset.nodeId = node.id'), 'rows carry data-node-id');
+    assert.ok(buildBody.includes("'executing'") && buildBody.includes('runningCmds.has'), 'rendering restores executing state');
+    // 消息协议：宿主驱动状态更新 + 批量同步（webview 重载恢复）
+    assert.ok(js.includes("case 'cmdRunState'"), 'cmdRunState handled');
+    assert.ok(js.includes("case 'cmdRunStateSync'"), 'cmdRunStateSync handled');
+    // CSS：执行中闪烁 + cancel 按钮 hover + run 按钮禁用态
+    assert.ok(css.includes('.command-item.executing') && css.includes('@keyframes cmdExecBlink'), 'blink animation exists');
+    assert.ok(css.includes('.cmd-action-btn.cancel:hover'), 'cancel button hover style');
+    assert.ok(css.includes('.cmd-action-btn:disabled'), 'run button disabled style');
+    // 宿主源码：运行跟踪 + 取消路由 + 进程树终止
+    for (const sym of ['_activeCmdRuns', 'registerCmdRun', 'unregisterCmdRun', 'notifyCmdRunState', 'handleCancelCommand', 'killChildTree']) {
+        assert.ok(mvpSrcCache.includes(sym), 'MainViewProvider missing: ' + sym);
+    }
+    assert.ok(mvpSrcCache.includes("case 'cancelCommand':"), 'host routes cancelCommand');
+    assert.ok(mvpSrcCache.includes("command: 'cmdRunState'"), 'host pushes run state');
+    assert.ok(mvpSrcCache.includes("command: 'cmdRunStateSync'"), 'host syncs active run keys');
+    // 三条执行链路均传入 runKey（cmd 多项目循环 / shortcut / pyt python 子进程）
+    assert.ok(mvpSrcCache.includes("executeShellCommand(project.path, tracedCommand"), 'cmd loop executes shell');
+    assert.ok(mvpSrcCache.includes('undefined, runKey'), 'shell executor receives runKey');
+    assert.ok(mvpSrcCache.includes('this.executePythonTransform(selectedText, cmd.content, runKey)'), 'pyt transform receives runKey');
+    // i18n 双语
+    for (const k of ['cmd.cancelRun', 'backend.cmdCancelled']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+});
+
 test('JS: drag-and-drop across/within categories for both containers', () => {
     for (const sym of ['attachDndHandlers', 'getDropPosition', 'moveNode', 'findNodeLocation', 'clearDropIndicators', 'draggedNode']) {
         assert.ok(js.includes(sym), 'missing DnD symbol: ' + sym);
@@ -519,6 +561,34 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         await provider.handleRunCommand('shortcut', 'missing-id');
         await provider.handleRunShortcutCmdContent(null);
         await provider.handleRunShortcutCmdContent({ alias: '', content: '   ' });
+    });
+
+    await testAsync('host: cancelCommand terminates a running shortcut command', async () => {
+        await provider.handleSaveCommandTree('shortcut', [{ id: 'slp1', type: 'command', name: 'Sleep', content: 'sleep 30', shell: 'git-bash' }]);
+        const posted = [];
+        provider._view = { webview: { postMessage: (m) => posted.push(m), cspSource: 'vscode-resource:' } };
+        const runPromise = provider.handleRunCommand('shortcut', 'slp1');
+        // 轮询等待子进程注册（spawn 为异步）
+        const deadline = Date.now() + 5000;
+        while (!(provider._activeCmdRuns.get('shortcut:slp1') || []).length && Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 25));
+        }
+        assert.ok((provider._activeCmdRuns.get('shortcut:slp1') || []).length > 0, 'run registered in active cmd runs');
+        provider.handleCancelCommand('shortcut', 'slp1');
+        await runPromise;
+        assert.ok(!provider._activeCmdRuns.has('shortcut:slp1'), 'run unregistered after cancel');
+        // 状态通知成对下发：running → done（驱动前端闪烁与按钮恢复）
+        const states = posted.filter(m => m.command === 'cmdRunState' && m.commandId === 'slp1').map(m => m.state);
+        assert.deepStrictEqual(states, ['running', 'done'], 'run state notifications paired');
+        // 取消事件记录到日志
+        assert.ok(provider._logs.some(l => (l.message || '').indexOf('cancelled') >= 0), 'cancel recorded in logs');
+        provider._view = undefined;
+    });
+
+    await testAsync('host: cancelCommand on idle command is a no-op', async () => {
+        provider.handleCancelCommand('cmd', 'not-running');
+        provider.handleCancelCommand('shortcut', 'not-running');
+        provider.handleCancelCommand('pyt', 'not-running');
     });
 
     await testAsync('host: updateWebview posts updateCommandTree for both tabs', async () => {

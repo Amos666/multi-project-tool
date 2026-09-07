@@ -1,8 +1,8 @@
 # Multi-Project Tool
 
-A VSCode extension for managing multiple projects with unified Git operations, per-project command batching (**ProjectsCmd**), one-click workspace-root quick commands (**ShortCutCmd**), and configuration management.
+A VSCode extension for managing multiple projects with unified Git operations, per-project command batching (**ProjectsCmd**), one-click workspace-root quick commands (**ShortCutCmd**), Python text transforms (**Pyt**), and a visual workflow engine (**Flow**).
 
-![Version](https://img.shields.io/badge/version-1.0.6-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![VSCode](https://img.shields.io/badge/VSCode-^1.120.0-37AAFF)
+![Version](https://img.shields.io/badge/version-1.0.7-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![VSCode](https://img.shields.io/badge/VSCode-^1.120.0-37AAFF)
 
 ## Features
 
@@ -10,7 +10,9 @@ A VSCode extension for managing multiple projects with unified Git operations, p
 - **Batch Git operations** across multiple projects at once (Pull / Commit / Branch / Push)
 - **ProjectsCmd** — run custom shell commands against every selected Git project, in each project's own directory
 - **ShortCutCmd** — one-click quick commands that run once in the workspace root directory, ideal for frequently used scripts
+- **Command cancel + running indicator** — every command row (ProjectsCmd / ShortCutCmd / Pyt) has a cancel button that terminates the running process tree; the row blinks while executing and returns to normal when the run finishes or is cancelled
 - **Shell-typed commands** — every command is stored with its shell type (Git Bash / CMD / PowerShell / WSL); the shell selector filters the command list by type, and newly created commands are stamped with the currently selected type. Commands created before shell typing exist are treated as Git Bash
+- **Flow (visual workflows)** — build, run and monitor node-based workflows (commands, conditions, forks, manual confirm, notifications) in a dedicated main-editor Flow Editor panel
 - **Multi-line script support** with shared context variables across lines
 - **Per-line execution log** in `$ command => executed result: output` format
 - **Project list collapse/expand** to maximize working area
@@ -115,9 +117,10 @@ Run custom shell commands against **multiple Git projects at once**. The command
   $ echo $VAR => executed result: hello
   ```
 - **Shell badge** — each command row shows the shell type it belongs to
+- **Cancel running command** — while a command executes, its row blinks (blue→amber pulse with a left status bar), the ▶ button is disabled, and a ■ cancel button appears. Clicking it terminates the host-side process tree (shell + children); the log records the cancellation and the row returns to normal. The same applies to ShortCutCmd and Pyt rows
 - **Environment variables** — inject custom env vars into every command execution
 - **Selected N** counter + **Select All** + collapse/expand (same as Git Tab)
-- Running requires **at least one selected project**; the command is executed for each of them
+- Running requires **at least one selected project**; the command is executed for each of them. Cancelling a multi-project run stops after the current project and reports `cancelled (done/total)`
 
 ### ShortCutCmd Tab
 One-click quick commands that run **once, in the workspace root directory** (the first workspace folder). Designed for frequently used scripts that are not tied to a specific Git project — cache cleanup, environment checks, one-off maintenance scripts, etc.
@@ -127,6 +130,7 @@ One-click quick commands that run **once, in the workspace root directory** (the
 - **Shell selector (type filter)** — works exactly like ProjectsCmd, but keeps its own independent selection; commands are stamped with the type selected at creation time
 - **Same tree layout** — categories, commands, drag & drop, rename, delete — shared with ProjectsCmd
 - **Editor Run button** — try the editor content directly without saving first
+- **Cancel running command** — same blinking row + ■ cancel button as ProjectsCmd; terminates the workspace-root execution immediately
 - **Same per-line log format** as the other tabs
 
 #### ProjectsCmd vs ShortCutCmd
@@ -151,6 +155,31 @@ Manage global parameters and tab visibility.
 
 ### Pyt Tab
 Python-based text transformation utilities. Requires `python` on PATH (see Prerequisites).
+
+- Command rows support the same **run/cancel + executing blink** interaction as the other tabs; cancelling kills the `python` child process
+- Transform logs (success / failure / cancel) are kept host-side and restored after webview reload
+
+### Flow Tab (Workflow Editor)
+Visual workflow canvas opened in a dedicated main-editor panel (the sidebar Flow tab keeps only the list and entry buttons).
+
+- **Node palette** — start (scheduled), command (shell), condition, fork/join (parallel branches), confirm (manual approval), notify, ref (reference saved commands from ProjectsCmd / ShortCutCmd / Pyt / Git)
+- **Run monitoring** — live node states, logs with filter, failed/skipped counters, duration; run detail is a read-only replay
+- **Background runs** — switching to another flow while a run is active does not stop it: running and paused runs stay in the **RUNNING** group, and the canvas remains fully editable for other flows. Clicking the run in the RUNNING group returns to its monitor view
+- **Node actions bar** — floats above the target node: confirm nodes offer continue/cancel/pause; failed-paused nodes offer resume (with command editing before retry) or cancel
+- **Log export** — the monitor's export button opens the full run log in a new editor
+- **History** — every finished run is archived (result, duration, per-node outcomes); entries can be deleted individually or cleared
+
+## Recent Updates
+
+Summary of the most recent changes:
+
+- **Command cancel + executing blink (new)** — all command rows in ProjectsCmd, ShortCutCmd and Pyt now show a ■ cancel button while executing; the host tracks every active run (`tab:commandId`) and terminates the whole process tree on cancel (Windows `taskkill /T /F`, POSIX `SIGTERM`). Rows blink while running and restore their normal style on completion or cancellation. State survives webview reloads via an active-run sync message; re-running the same command while it is executing is blocked
+- **Flow switching during active runs** — running/paused workflows no longer lock the whole Flow tab. Runs continue in the background and stay listed in the RUNNING group; you can freely switch to, edit and run other flows, and even start a new run when a previous one is failed-paused (the old instance is archived to history as `failed`)
+- **Templates merged into workflows** — the separate TEMPLATES group is gone; templates are regular workflows, editable in place and deletable with a confirmation modal (built-ins can be hidden)
+- **Node actions bar** — manual confirm (continue/cancel/pause) and failed-paused resume/cancel, including editing a failed node's command before retrying; paused confirm runs stay in the RUNNING list and restore their actions when reopened
+- **Fork parallelism** — fork branches now execute truly concurrently, with `maxParallel` decoupled from batch concurrency
+- **Flow Editor panel** — the flow canvas moved from the sidebar to a main-editor WebviewPanel; the sidebar keeps the list and entry buttons
+- **Log export & history management** — monitor log export button; history delete/clear-all now use a custom confirm modal (works inside webviews)
 
 ## Configuration
 
@@ -232,7 +261,7 @@ Press <kbd>F5</kbd> in VSCode to launch an Extension Development Host with the e
 
 ```bash
 # Local package
-vsce package --no-git-tag-version -o multi-project-tool-1.0.6.vsix
+vsce package --no-git-tag-version -o multi-project-tool-1.0.7.vsix
 
 # Publish to Marketplace (requires PAT)
 vsce login ghema
