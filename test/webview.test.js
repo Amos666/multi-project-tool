@@ -438,6 +438,12 @@ test('JS+CSS: command rows expose cancel button and blink while executing', () =
     assert.ok(js.includes("case 'cmdRunStateSync'"), 'cmdRunStateSync handled');
     // CSS：执行中闪烁 + cancel 按钮 hover + run 按钮禁用态
     assert.ok(css.includes('.command-item.executing') && css.includes('@keyframes cmdExecBlink'), 'blink animation exists');
+    // 闪烁必须覆盖整条背景（≥0.2 透明度的背景色脉冲），而非仅边缘阴影
+    const blinkBody = css.split('@keyframes cmdExecBlink').slice(1)[0].split('}').slice(0, 4).join('}');
+    assert.ok(/background-color:\s*rgba\((?:125,\s*207,\s*255,\s*0\.[2-9]\d*)\)/.test(blinkBody), 'blink pulses full-row translucent background (alpha >= 0.2)');
+    assert.ok(!/background-color:\s*var\(--brand-primary-subtle\)/.test(blinkBody), 'blink no longer uses barely-visible subtle tint');
+    // 执行中文字保持高对比（描影 + 高亮文字色），避免被脉冲背景遮盖
+    assert.ok(/\.command-item\.executing \.alias[\s\S]{0,120}text-shadow/.test(css), 'executing text stays readable via text-shadow');
     assert.ok(css.includes('.cmd-action-btn.cancel:hover'), 'cancel button hover style');
     assert.ok(css.includes('.cmd-action-btn:disabled'), 'run button disabled style');
     // 宿主源码：运行跟踪 + 取消路由 + 进程树终止

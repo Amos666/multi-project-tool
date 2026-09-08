@@ -10,7 +10,7 @@ A VSCode extension for managing multiple projects with unified Git operations, p
 - **Batch Git operations** across multiple projects at once (Pull / Commit / Branch / Push)
 - **ProjectsCmd** — run custom shell commands against every selected Git project, in each project's own directory
 - **ShortCutCmd** — one-click quick commands that run once in the workspace root directory, ideal for frequently used scripts
-- **Command cancel + running indicator** — every command row (ProjectsCmd / ShortCutCmd / Pyt) has a cancel button that terminates the running process tree; the row blinks while executing and returns to normal when the run finishes or is cancelled
+- **Command cancel + running indicator** — every command row (ProjectsCmd / ShortCutCmd / Pyt) has a cancel button that terminates the running process tree; while executing, the whole row background pulses with a translucent blue tint (text stays high-contrast via text shadow) and returns to normal when the run finishes or is cancelled
 - **Shell-typed commands** — every command is stored with its shell type (Git Bash / CMD / PowerShell / WSL); the shell selector filters the command list by type, and newly created commands are stamped with the currently selected type. Commands created before shell typing exist are treated as Git Bash
 - **Flow (visual workflows)** — build, run and monitor node-based workflows (commands, conditions, forks, manual confirm, notifications) in a dedicated main-editor Flow Editor panel
 - **Multi-line script support** with shared context variables across lines
@@ -117,7 +117,7 @@ Run custom shell commands against **multiple Git projects at once**. The command
   $ echo $VAR => executed result: hello
   ```
 - **Shell badge** — each command row shows the shell type it belongs to
-- **Cancel running command** — while a command executes, its row blinks (blue→amber pulse with a left status bar), the ▶ button is disabled, and a ■ cancel button appears. Clicking it terminates the host-side process tree (shell + children); the log records the cancellation and the row returns to normal. The same applies to ShortCutCmd and Pyt rows
+- **Cancel running command** — while a command executes, the entire row background blinks with a translucent blue pulse (not just the edge), the row text switches to a high-contrast color with a text shadow so it stays readable over the pulsing background, the ▶ button is disabled, and a ■ cancel button appears. Clicking it terminates the host-side process tree (shell + children); the log records the cancellation and the row returns to normal. The same applies to ShortCutCmd and Pyt rows
 - **Environment variables** — inject custom env vars into every command execution
 - **Selected N** counter + **Select All** + collapse/expand (same as Git Tab)
 - Running requires **at least one selected project**; the command is executed for each of them. Cancelling a multi-project run stops after the current project and reports `cancelled (done/total)`
@@ -173,7 +173,9 @@ Visual workflow canvas opened in a dedicated main-editor panel (the sidebar Flow
 
 Summary of the most recent changes:
 
-- **Command cancel + executing blink (new)** — all command rows in ProjectsCmd, ShortCutCmd and Pyt now show a ■ cancel button while executing; the host tracks every active run (`tab:commandId`) and terminates the whole process tree on cancel (Windows `taskkill /T /F`, POSIX `SIGTERM`). Rows blink while running and restore their normal style on completion or cancellation. State survives webview reloads via an active-run sync message; re-running the same command while it is executing is blocked
+- **Enhanced executing blink** — the executing indicator now pulses the **entire row background** with a ~1/3-opacity translucent blue tint (previously only a barely-visible edge tint), so it is clearly noticeable. Text readability is preserved during the pulse: the alias and preview text switch to the high-contrast text color with a dark text shadow, and the row border glows in sync. The style restores automatically on completion or cancellation
+- **Merged with main (multi-run workflows + cancel coexistence)** — the command cancel/blink feature was re-integrated on top of main's multi-run architecture: `executeShellCommand` regained its `runKey` tracking parameter (register/unregister cancel handles, cleanup on close/error, process-tree kill on timeout), cancelled runs return a `cancelled` result that aborts the remaining projects, and the webview restores blink/cancel state via `cmdRunStateSync` after reloads — while main's multi paused-run workflow engine (`_activeRun` / `_pausedRuns`) remains fully intact
+- **Command cancel + executing blink** — all command rows in ProjectsCmd, ShortCutCmd and Pyt show a ■ cancel button while executing; the host tracks every active run (`tab:commandId`) and terminates the whole process tree on cancel (Windows `taskkill /T /F`, POSIX `SIGTERM`). Re-running the same command while it is executing is blocked
 - **Flow switching during active runs** — running/paused workflows no longer lock the whole Flow tab. Runs continue in the background and stay listed in the RUNNING group; you can freely switch to, edit and run other flows, and even start a new run when a previous one is failed-paused (the old instance is archived to history as `failed`)
 - **Templates merged into workflows** — the separate TEMPLATES group is gone; templates are regular workflows, editable in place and deletable with a confirmation modal (built-ins can be hidden)
 - **Node actions bar** — manual confirm (continue/cancel/pause) and failed-paused resume/cancel, including editing a failed node's command before retrying; paused confirm runs stay in the RUNNING list and restore their actions when reopened
