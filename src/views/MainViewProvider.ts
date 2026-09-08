@@ -798,14 +798,29 @@ body {
 .cmd-action-btn:disabled { opacity: 0.4; cursor: default; }
 .cmd-action-btn:disabled:hover { background-color: var(--brand-surface); border-color: var(--brand-border-subtle); }
 
-/* --- 命令执行中：整行闪烁提示（结束/取消后自动恢复） --- */
+/* --- 命令执行中：整行背景闪烁提示（结束/取消后自动恢复） --- */
 .command-item.executing {
     border-radius: var(--radius-sm);
     animation: cmdExecBlink 1.1s ease-in-out infinite;
 }
+/* 执行中文字保持高对比：半透明背景脉冲时加深文字并加描影，避免被背景色遮盖 */
+.command-item.executing .alias,
+.command-item.executing .cmd-content-preview {
+    color: var(--brand-text);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
 @keyframes cmdExecBlink {
-    0%, 100% { background-color: var(--brand-surface-raised); box-shadow: inset 2px 0 0 var(--state-info); }
-    50% { background-color: var(--brand-primary-subtle); box-shadow: inset 2px 0 0 var(--state-warning); }
+    0%, 100% {
+        background-color: var(--brand-surface-raised);
+        border-color: var(--brand-border-subtle);
+        box-shadow: inset 3px 0 0 var(--state-info);
+    }
+    50% {
+        /* 整条背景透色脉冲（~1/3 透明度主色），非仅边缘提示 */
+        background-color: rgba(125, 207, 255, 0.32);
+        border-color: var(--state-info);
+        box-shadow: inset 3px 0 0 var(--state-warning);
+    }
 }
 
 /* --- 分类层级树（cmd / pyt 两 tab 统一风格） --- */
