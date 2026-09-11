@@ -163,6 +163,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'wb.node.ref': 'Ref Command',
         'wb.node.start': 'Start',
         'wb.node.confirm': 'Manual Confirm',
+        'wb.node.vscode': 'VSCode Command',
 
         // Workbench: workflow canvas & properties
         'wb.wf.nodes': 'Nodes',
@@ -224,6 +225,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'wb.wf.refParam': 'Parameter (commit msg / branch)',
         'wb.wf.refChoose': 'Choose a command…',
         'wb.wf.refMissing': '(command not found)',
+        'wb.wf.vscodeCommandId': 'VSCode Command ID',
+        'wb.wf.vscodeArgs': 'Arguments (JSON array or text)',
         'wb.wf.gitOp.pull': 'git pull',
         'wb.wf.gitOp.commit': 'git commit',
         'wb.wf.gitOp.push': 'git push',
@@ -489,6 +492,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'wb.node.ref': '引用命令',
         'wb.node.start': '开始',
         'wb.node.confirm': '人工确认',
+        'wb.node.vscode': 'VSCode 命令',
 
         // Workbench: workflow canvas & properties
         'wb.wf.nodes': '节点',
@@ -550,6 +554,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'wb.wf.refParam': '参数（提交信息 / 分支名）',
         'wb.wf.refChoose': '请选择命令…',
         'wb.wf.refMissing': '(命令不存在)',
+        'wb.wf.vscodeCommandId': 'VSCode 命令 ID',
+        'wb.wf.vscodeArgs': '参数（JSON 数组或文本）',
         'wb.wf.gitOp.pull': 'git 拉取 (pull)',
         'wb.wf.gitOp.commit': 'git 提交 (commit)',
         'wb.wf.gitOp.push': 'git 推送 (push)',

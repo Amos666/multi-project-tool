@@ -74,6 +74,9 @@ export const FLOW_EDITOR_BODY = `
                 </select>
                 <label id="wfPRefCmdLabel" data-i18n="wb.wf.refCmd" style="display:none">Referenced Command</label>
                 <select id="wfPRefCmd" style="display:none" onchange="wfEditProp('refCommandId',this.value)"></select>
+                <label id="wfPVscodeCmdLabel" data-i18n="wb.wf.vscodeCommandId" style="display:none">VSCode Command ID</label>
+                <input type="text" id="wfPVscodeCmd" list="wfVscodeCmdList" style="display:none" placeholder="workbench.action.tasks.build" oninput="wfEditProp('vscodeCommandId',this.value)">
+                <datalist id="wfVscodeCmdList"></datalist>
                 <label id="wfPSchedModeLabel" data-i18n="wb.wf.schedMode" style="display:none">Schedule</label>
                 <select id="wfPSchedMode" style="display:none" onchange="wfEditProp('scheduleMode',this.value);wfSchedModeChange()">
                     <option value="none" data-i18n="wb.wf.schedNone">None (manual)</option>

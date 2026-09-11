@@ -251,6 +251,13 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             // 历史记录删除 / 清空
             case 'historyDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteHistory(message.id)); break;
             case 'historyClearAll': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().clearHistory()); break;
+            // vscode 节点：查询当前所有插件注册的命令 ID（属性面板 datalist 自动补全）
+            case 'listVscodeCommands':
+                try {
+                    const commands = await vscode.commands.getCommands(false);
+                    this._flowEditor.postMessage({ command: 'vscodeCommandList', commands });
+                } catch { /* ignore */ }
+                break;
             // 侧边栏 Flow Tab 的中继动作：在主编辑区打开 Flow Editor 面板并执行
             case 'flowEditorAction':
                 // openRun 需要携带运行实例的完整数据（画布快照 + 已收集状态/日志），按 runId 定位
@@ -4508,8 +4515,44 @@ window.addEventListener('message', event => {
             envVariables: this.getEnvVariables(),
             // 工作流 Fork/Join 的并行度由画布设计决定，不受批量执行的 Concurrency 设置约束
             maxParallel: 32,
-            runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log)
+            runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log),
+            runVscodeCommand: (commandId: string, argsText: string, log: any) => this.executeVscodeCommand(commandId, argsText, log)
         };
+    }
+
+    /**
+     * Flow vscode 节点执行器：调用任意插件通过 vscode.commands.registerCommand 注册的命令。
+     * 参数支持三种形式：留空=无参；JSON 数组字符串=展开为多参（如 ["a", 1, true]）；其他=单字符串参数。
+     * 命令不存在或执行抛错视为失败；命令有返回值时序列化输出到工作流日志。
+     */
+    private async executeVscodeCommand(commandId: string, argsText: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
+        try {
+            const args = this.parseVscodeCommandArgs(argsText);
+            log('dim', `[VSCode] $ executeCommand ${commandId}${args.length ? ' ' + JSON.stringify(args) : ''}`);
+            const result = await vscode.commands.executeCommand(commandId, ...args);
+            if (result !== undefined && result !== null) {
+                const text = JSON.stringify(result);
+                log('info', `[VSCode] => ${text.length > 200 ? text.slice(0, 200) + '…' : text}`);
+            }
+            log('ok', `[VSCode] ✓ ${commandId}`);
+            return true;
+        } catch (error) {
+            log('err', `[VSCode] ✗ ${commandId}: ${error && (error as Error).message ? (error as Error).message : error}`);
+            return false;
+        }
+    }
+
+    /** 解析 vscode 节点参数文本：JSON 数组展开为多参，其他非空文本作为单个字符串参数 */
+    private parseVscodeCommandArgs(argsText: string): unknown[] {
+        const text = (argsText || '').trim();
+        if (!text) { return []; }
+        if (text.startsWith('[')) {
+            try {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) { return parsed; }
+            } catch { /* 非 JSON 数组，按纯文本参数处理 */ }
+        }
+        return [text];
     }
 
     /** 引擎事件统一处理：收集到运行实例，并按结果路由（失败暂停 / 终局写历史） */

@@ -21,7 +21,7 @@ const vscodeMock = {
         createOutputChannel: () => outputChannel,
         createWebviewPanel: () => ({ webview: { html: '', onDidReceiveMessage: () => ({ dispose() {} }) }, onDidDispose: () => ({ dispose() {} }), reveal() {} })
     },
-    commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve() },
+    commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => Promise.resolve(), getCommands: () => Promise.resolve([]) },
     ViewColumn: { One: 1, Two: 2, Beside: -2 },
     Uri: {
         file: (p) => ({ fsPath: p, scheme: 'file', path: p, toString: () => 'file://' + p })

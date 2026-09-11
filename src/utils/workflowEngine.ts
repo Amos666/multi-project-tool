@@ -20,6 +20,8 @@ export interface WorkflowEngineOptions {
     maxParallel: number;
     /** ref 节点执行器：由宿主提供，按 (tab, commandId) 执行各页签已保存命令，返回成败；param 承载节点参数（如 git 分支名/提交信息） */
     runRef?: (tab: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void, param?: string) => Promise<boolean>;
+    /** vscode 节点执行器：由宿主提供，执行任意插件注册的 VSCode 命令（vscode.commands.executeCommand）；argsText 为参数原文（JSON 数组或纯文本，已完成变量替换） */
+    runVscodeCommand?: (commandId: string, argsText: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void) => Promise<boolean>;
 }
 
 export type WorkflowEngineEvent =
@@ -298,6 +300,43 @@ export class WorkflowEngine {
                     }
                 } finally {
                     release();
+                }
+                return;
+            }
+
+            if (node.tag === 'vscode') {
+                const commandId = (node.vscodeCommandId || '').trim();
+                const argsText = this.resolveVariables(node.cmd || '', options.commonParameters).trim();
+                if (!commandId) {
+                    log(node.id, 'err', `[VSCode] ${node.label}: no command id configured`);
+                    setNodeState(node.id, 'failed', Date.now() - start);
+                    if (node.failPolicy === 'stop') { this._abort = true; }
+                    return;
+                }
+                const attempt = async (): Promise<boolean> => {
+                    if (!options.runVscodeCommand) {
+                        log(node.id, 'err', '[VSCode] executor not available in this host');
+                        return false;
+                    }
+                    return options.runVscodeCommand(commandId, argsText, (level, text) => log(node.id, level, text));
+                };
+                let ok = await attempt();
+                if (!ok && node.failPolicy === 'retry1' && !this._stopFlag) {
+                    log(node.id, 'dim', '[Engine] failPolicy=retry1 → retry once');
+                    await this.delay(500);
+                    ok = await attempt();
+                    if (ok) { log(node.id, 'ok', '[Engine] retry succeeded'); }
+                }
+                if (ok) {
+                    setNodeState(node.id, 'success', Date.now() - start);
+                } else {
+                    setNodeState(node.id, 'failed', Date.now() - start);
+                    if (node.failPolicy === 'stop') {
+                        this._abort = true;
+                        log(node.id, 'err', '[Engine] failPolicy=stop → abort workflow, pending nodes will be skipped');
+                    } else if (node.failPolicy === 'skip') {
+                        log(node.id, 'dim', '[Engine] failPolicy=skip → downstream continues');
+                    }
                 }
                 return;
             }
