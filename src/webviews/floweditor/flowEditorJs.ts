@@ -24,7 +24,7 @@ var WF = {
     bgRunning: false
 };
 var WF_W = 118, WF_H = 44, WF_VB_W = 1000, WF_VB_H = 460;
-var WF_TAG_COLOR = { start: '#48bfe3', cmd: '#7aa2f7', condition: '#e0af68', fork: '#9ece6a', join: '#2ac3de', notify: '#f7768e', confirm: '#ff9e64', ref: '#bb9af7' };
+var WF_TAG_COLOR = { start: '#48bfe3', cmd: '#7aa2f7', condition: '#e0af68', fork: '#9ece6a', join: '#2ac3de', notify: '#f7768e', confirm: '#ff9e64', ref: '#bb9af7', vscode: '#73daca' };
 /* ref 节点引用的命令树（由宿主推送更新） */
 var customCommandTree = [];
 var pythonTxtCommandTree = [];
@@ -79,6 +79,7 @@ window.addEventListener('message', function (event) {
     else if (m.command === 'workflowRunStarted') { wfOnRunStarted(m.workflow, m.runId); }
     else if (m.command === 'runPhase') { wfOnRunPhase(m.phase, m.durationMs, m.runId, m.engineBusy); }
     else if (m.command === 'flowEditorAction') { wfApplyAction(m.action); }
+    else if (m.command === 'vscodeCommandList') { wfFillCommandList(m.commands); }
 });
 function setTree(tabId, tree) {
     if (tabId === 'pyt') { pythonTxtCommandTree = tree || []; }
@@ -394,7 +395,7 @@ function renderPalette() {
     var box = wbEl('wfPalette');
     if (!box) { return; }
     var html = '';
-    ['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref'].forEach(function (tag) {
+    ['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref', 'vscode'].forEach(function (tag) {
         html += '<div class="wf-pal-node" onclick="wfAddNode(\\'' + tag + '\\')">' +
             '<span class="wf-pal-dot" style="background:' + WF_TAG_COLOR[tag] + '"></span>' + wbEsc(wfByLabel(tag)) + '</div>';
     });
@@ -456,7 +457,8 @@ function wfDraw() {
         var badgeColor = st === 'success' ? '#9ece6a' : st === 'failed' ? '#f7768e' : st === 'running' ? '#7dcfff' : '#565f89';
         var cmdText = n.tag === 'cmd' || n.tag === 'condition' || n.tag === 'confirm' ? (n.cmd || '').slice(0, 14)
             : n.tag === 'start' ? wfStartDesc(n).slice(0, 14)
-            : n.tag === 'ref' ? (wfRefName(n) || t('wb.wf.refChoose')).slice(0, 14) : '';
+            : n.tag === 'ref' ? (wfRefName(n) || t('wb.wf.refChoose')).slice(0, 14)
+            : n.tag === 'vscode' ? (n.vscodeCommandId || t('wb.wf.vscodeCommandId')).slice(0, 14) : '';
         s += '<g class="wf-node ' + st + sel + src + '" data-id="' + n.id + '">' +
             '<rect class="body" x="' + n.x + '" y="' + n.y + '" width="' + WF_W + '" height="' + WF_H + '" rx="6"/>' +
             '<rect x="' + n.x + '" y="' + n.y + '" width="5" height="' + WF_H + '" rx="2" fill="' + (WF_TAG_COLOR[n.tag] || '#888') + '"/>' +
@@ -568,6 +570,7 @@ function wfCmdLabelKey(n) {
     if (n.tag === 'condition') { return 'wb.wf.expr'; }
     if (n.tag === 'confirm') { return 'wb.wf.confirmText'; }
     if (n.tag === 'ref') { return 'wb.wf.refParam'; }
+    if (n.tag === 'vscode') { return 'wb.wf.vscodeArgs'; }
     if (n.tag === 'notify') {
         var nt = n.notifyType || 'text';
         return nt === 'cmd' ? 'wb.wf.cmd' : nt === 'http' ? 'wb.wf.notifyUrl' : 'wb.wf.notifyText';
@@ -646,6 +649,22 @@ function wfRefTabChange(val) {
     wfSyncCmdField(n);
     wfDraw();
 }
+/* ---- vscode 节点：命令 ID datalist 自动补全（列表只拉取一次，插件变更后重选节点刷新） ---- */
+var wfVscodeCmdsLoaded = false;
+function wfRequestCommandList() {
+    if (wfVscodeCmdsLoaded) { return; }
+    wfVscodeCmdsLoaded = true;
+    vscode.postMessage({ command: 'listVscodeCommands' });
+}
+function wfFillCommandList(commands) {
+    var dl = wbEl('wfVscodeCmdList');
+    if (!dl) { return; }
+    var html = '';
+    (commands || []).forEach(function (c) {
+        if (typeof c === 'string' && c) { html += '<option value="' + wbEsc(c) + '"></option>'; }
+    });
+    dl.innerHTML = html;
+}
 function wfSchedModeChange() {
     var n = wfNodeById(WF.selected);
     if (!n || n.tag !== 'start') { return; }
@@ -694,6 +713,14 @@ function wfSelectNode(id) {
     if (isRef) {
         wbEl('wfPRefTab').value = n.refTab || 'cmd';
         wfFillRefCmdSelect(n);
+    }
+    /* vscode 节点：显示命令 ID 输入框并按需拉取命令列表（datalist 自动补全） */
+    var isVscode = n.tag === 'vscode';
+    wbEl('wfPVscodeCmdLabel').style.display = isVscode ? '' : 'none';
+    wbEl('wfPVscodeCmd').style.display = isVscode ? '' : 'none';
+    if (isVscode) {
+        wbEl('wfPVscodeCmd').value = n.vscodeCommandId || '';
+        wfRequestCommandList();
     }
     var isStart = n.tag === 'start';
     wbEl('wfPSchedModeLabel').style.display = isStart ? '' : 'none';
@@ -768,6 +795,7 @@ function wfAddNode(tag) {
         cmd: tag === 'cmd' ? 'echo hello' : '', timeout: 300, failPolicy: 'stop',
         notifyType: tag === 'notify' ? 'text' : undefined,
         refTab: tag === 'ref' ? 'cmd' : undefined, refCommandId: tag === 'ref' ? '' : undefined,
+        vscodeCommandId: tag === 'vscode' ? '' : undefined,
         scheduleMode: tag === 'start' ? 'none' : undefined, scheduleValue: tag === 'start' ? '' : undefined
     });
     wfDraw();

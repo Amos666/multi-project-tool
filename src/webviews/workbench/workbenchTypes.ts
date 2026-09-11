@@ -9,7 +9,7 @@ export interface ChecklistTask {
     createdAt: number;
 }
 
-export type WfNodeTag = 'start' | 'cmd' | 'condition' | 'fork' | 'join' | 'notify' | 'confirm' | 'ref';
+export type WfNodeTag = 'start' | 'cmd' | 'condition' | 'fork' | 'join' | 'notify' | 'confirm' | 'ref' | 'vscode';
 export type WfFailPolicy = 'stop' | 'skip' | 'retry1';
 
 export interface WfNode {
@@ -34,6 +34,8 @@ export interface WfNode {
     /** 仅 ref 节点：引用其他页签已保存命令的 (tab, commandId)；git 为内置操作集 */
     refTab?: 'cmd' | 'pyt' | 'shortcut' | 'git';
     refCommandId?: string;
+    /** 仅 vscode 节点：要执行的 VSCode 命令 ID（任意插件通过 vscode.commands.registerCommand 注册的命令） */
+    vscodeCommandId?: string;
     /** 仅 start 节点：定时启动方式。none=手动、countdown=倒计时、clock=固定时间 */
     scheduleMode?: 'none' | 'countdown' | 'clock';
     /** countdown: 秒数；clock: HH:MM 或 HH:MM:SS（今天未到则今天，否则次日） */

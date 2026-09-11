@@ -169,7 +169,7 @@ test('HTML+JS: ref node (reference saved commands from other tabs)', () => {
     }
     assert.ok(flowHtml.includes('wfRefTabChange(this.value)'), 'tab selector wired');
     assert.ok(flowHtml.includes("wfEditProp('refCommandId',this.value)"), 'command selector wired');
-    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes ref');
+    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref', 'vscode']"), 'palette includes ref');
     assert.ok(flowJs.includes('ref: '), 'tag color defined');
     assert.ok(flowJs.includes("refTab: tag === 'ref' ? 'cmd' : undefined"), 'new ref node defaults');
     assert.ok(flowJs.includes('function wfRefCommands'), 'command flattener with category paths');
@@ -192,8 +192,37 @@ test('HTML+JS: ref node supports git tab operations', () => {
     assert.ok(flowJs.includes('function wfSyncCmdField'), 'cmd field doubles as git ref parameter');
 });
 
+test('HTML+JS: vscode node (execute commands from other extensions)', () => {
+    // 属性面板：命令 ID 输入框 + datalist 自动补全
+    for (const id of ['wfPVscodeCmdLabel', 'wfPVscodeCmd', 'wfVscodeCmdList']) {
+        assert.ok(flowHtml.includes('id="' + id + '"'), 'missing vscode property element: ' + id);
+    }
+    assert.ok(flowHtml.includes("wfEditProp('vscodeCommandId',this.value)"), 'command id input wired');
+    assert.ok(flowHtml.includes('list="wfVscodeCmdList"'), 'command id input backed by datalist');
+    // webview JS：palette / 默认值 / 属性联动 / 命令列表拉取与填充
+    assert.ok(flowJs.includes('vscode: \'#73daca\''), 'vscode tag color defined');
+    assert.ok(flowJs.includes("vscodeCommandId: tag === 'vscode' ? '' : undefined"), 'new vscode node defaults');
+    assert.ok(flowJs.includes("'wb.wf.vscodeArgs'"), 'cmd field relabeled as arguments for vscode nodes');
+    assert.ok(flowJs.includes('wfRequestCommandList()'), 'selecting a vscode node requests the command list');
+    assert.ok(flowJs.includes("command: 'listVscodeCommands'"), 'list request sent to host');
+    assert.ok(flowJs.includes("m.command === 'vscodeCommandList'") && flowJs.includes('function wfFillCommandList'), 'command list response fills datalist');
+    assert.ok(flowJs.includes("n.tag === 'vscode' ? (n.vscodeCommandId"), 'canvas node shows command id');
+    // 宿主源码：执行器注册 + 参数解析 + 消息路由
+    for (const sym of ['runVscodeCommand', 'executeVscodeCommand', 'parseVscodeCommandArgs', 'listVscodeCommands']) {
+        assert.ok(mvpSrcCache.includes(sym), 'missing host symbol: ' + sym);
+    }
+    // 引擎源码：vscode 分支
+    const engineSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'workflowEngine.ts'), 'utf8');
+    assert.ok(engineSrc.includes("node.tag === 'vscode'"), 'engine executes vscode nodes');
+    assert.ok(engineSrc.includes('runVscodeCommand?:'), 'engine options expose runVscodeCommand');
+    // i18n
+    assert.ok(translations.en['wb.node.vscode'] && translations.zh['wb.node.vscode'], 'node label i18n');
+    assert.ok(translations.en['wb.wf.vscodeCommandId'] && translations.zh['wb.wf.vscodeCommandId'], 'command id label i18n');
+    assert.ok(translations.en['wb.wf.vscodeArgs'] && translations.zh['wb.wf.vscodeArgs'], 'arguments label i18n');
+});
+
 test('HTML+JS: start node (scheduled start) and confirm node (manual approval)', () => {
-    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref']"), 'palette includes start & confirm');
+    assert.ok(flowJs.includes("['start', 'cmd', 'condition', 'fork', 'join', 'confirm', 'notify', 'ref', 'vscode']"), 'palette includes start & confirm');
     for (const id of ['wfPSchedModeLabel', 'wfPSchedMode', 'wfPSchedValueLabel', 'wfPSchedValue']) {
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing schedule element: ' + id);
     }
@@ -700,6 +729,61 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         assert.ok(entry, 'ref run recorded in history');
         assert.strictEqual(entry.result, 'success');
         assert.strictEqual(entry.nodes[0].state, 'success');
+    });
+
+    await testAsync('host: workflow vscode node executes registered VSCode command', async () => {
+        const { vscodeMock } = require('./vscodeMock');
+        const calls = [];
+        const orig = vscodeMock.commands.executeCommand;
+        vscodeMock.commands.executeCommand = (id, ...args) => {
+            calls.push([id, ...args]);
+            return Promise.resolve({ done: true });
+        };
+        try {
+            const wf = {
+                id: 'wvs', name: 'VscodeFlow', updatedAt: 1,
+                nodes: [{ id: 'v1', label: 'save all', tag: 'vscode', x: 0, y: 0, cmd: '["a.txt", 42]', timeout: 10, failPolicy: 'stop', vscodeCommandId: 'workbench.action.files.saveAll' }],
+                edges: []
+            };
+            await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        } finally {
+            vscodeMock.commands.executeCommand = orig;
+        }
+        assert.deepStrictEqual(calls, [['workbench.action.files.saveAll', 'a.txt', 42]], 'executeCommand called with JSON-array args spread');
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        const entry = onDisk.history.find(h => h.workflowName === 'VscodeFlow');
+        assert.ok(entry, 'vscode run recorded in history');
+        assert.strictEqual(entry.result, 'success');
+        assert.strictEqual(entry.nodes[0].state, 'success');
+    });
+
+    await testAsync('host: workflow vscode node failure when command throws', async () => {
+        const { vscodeMock } = require('./vscodeMock');
+        const orig = vscodeMock.commands.executeCommand;
+        vscodeMock.commands.executeCommand = () => Promise.reject(new Error('command not found'));
+        try {
+            const wf = {
+                id: 'wvs2', name: 'VscodeFlowFail', updatedAt: 1,
+                nodes: [{ id: 'v1', label: 'missing', tag: 'vscode', x: 0, y: 0, cmd: '', timeout: 10, failPolicy: 'stop', vscodeCommandId: 'no.such.command' }],
+                edges: []
+            };
+            await provider.handleWorkflowRun(wf, 'git-bash', 'dev');
+        } finally {
+            vscodeMock.commands.executeCommand = orig;
+        }
+        // failed 先进入失败暂停态（不写历史）；断言后取消归档，避免污染后续测试的运行列表
+        assert.ok(provider._activeRun, 'failed-paused instance retained');
+        assert.strictEqual(provider._activeRun.phase, 'failed-paused', 'phase is failed-paused');
+        assert.strictEqual(provider._activeRun.states['v1'].state, 'failed', 'vscode node failed');
+        provider.handleWorkflowCancel();
+        const wbFile = path.join(dir, '.multi-project-tool', 'workbench.json');
+        const onDisk = JSON.parse(fs.readFileSync(wbFile, 'utf8'));
+        const entry = onDisk.history.find(h => h.workflowName === 'VscodeFlowFail');
+        assert.ok(entry, 'failed vscode run recorded in history after cancel');
+        assert.strictEqual(entry.result, 'failed');
+        assert.strictEqual(entry.nodes[0].state, 'failed');
+        assert.strictEqual(provider._activeRun, undefined, 'active run cleared after cancel');
     });
 
     await testAsync('host: workflow ref node to missing command fails the run', async () => {

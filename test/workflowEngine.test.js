@@ -470,6 +470,79 @@ async function runOnce(workflow, options) {
         assert.strictEqual(r2.states.r, 'failed', 'unconfigured ref → failed');
     });
 
+    await testAsync('engine: vscode node runs via host runVscodeCommand callback', async () => {
+        const calls = [];
+        const o = opts({
+            runVscodeCommand: (commandId, argsText, log) => {
+                calls.push(commandId + ':' + argsText);
+                log('info', 'vscode command executed');
+                return Promise.resolve(true);
+            }
+        });
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('v', '["a", 1]', 'vscode', { vscodeCommandId: 'workbench.action.files.save' })],
+            edges: []
+        };
+        const { done, states, events } = await runOnce(wf, o);
+        assert.strictEqual(states.v, 'success');
+        assert.strictEqual(done.result, 'success');
+        assert.deepStrictEqual(calls, ['workbench.action.files.save:["a", 1]'], 'command id + raw args text forwarded to host');
+        assert.ok(events.some(e => e.type === 'log' && e.text === 'vscode command executed'), 'host log forwarded');
+    });
+
+    await testAsync('engine: vscode node substitutes ${var} in args text', async () => {
+        const calls = [];
+        const o = opts({
+            commonParameters: { mode: 'release' },
+            runVscodeCommand: (commandId, argsText) => { calls.push(argsText); return Promise.resolve(true); }
+        });
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('v', 'build ${mode}', 'vscode', { vscodeCommandId: 'myext.build' })],
+            edges: []
+        };
+        await runOnce(wf, o);
+        assert.deepStrictEqual(calls, ['build release'], 'common parameters resolved before host call');
+    });
+
+    await testAsync('engine: vscode node failure with stop aborts downstream', async () => {
+        const o = opts({ runVscodeCommand: () => Promise.resolve(false) });
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('v', '', 'vscode', { vscodeCommandId: 'myext.fail' }), node('b', 'echo never')],
+            edges: [{ from: 'v', to: 'b' }]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(states.v, 'failed');
+        assert.strictEqual(states.b, 'skipped');
+        assert.strictEqual(done.result, 'failed');
+    });
+
+    await testAsync('engine: vscode node without command id fails', async () => {
+        const o = opts({ runVscodeCommand: () => Promise.resolve(true) });
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('v', '', 'vscode', { vscodeCommandId: '' })],
+            edges: []
+        };
+        const { states } = await runOnce(wf, o);
+        assert.strictEqual(states.v, 'failed', 'unconfigured vscode node → failed');
+    });
+
+    await testAsync('engine: vscode node retry1 retries host callback once', async () => {
+        let n = 0;
+        const o = opts({ runVscodeCommand: () => { n++; return Promise.resolve(n > 1); } });
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('v', '', 'vscode', { vscodeCommandId: 'myext.retry', failPolicy: 'retry1' })],
+            edges: []
+        };
+        const { states } = await runOnce(wf, o);
+        assert.strictEqual(n, 2, 'called twice');
+        assert.strictEqual(states.v, 'success');
+    });
+
     await testAsync('engine: start node countdown delays downstream start', async () => {
         const o = opts();
         const wf = {
