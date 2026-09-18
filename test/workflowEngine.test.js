@@ -543,6 +543,58 @@ async function runOnce(workflow, options) {
         assert.strictEqual(states.v, 'success');
     });
 
+    await testAsync('engine: node disconnected from start is skipped, not executed', async () => {
+        const o = opts();
+        // start 与 cmd 之间的连线被删除：cmd 断连，不应执行
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('a', 'echo leaked > leaked.txt')
+            ],
+            edges: []
+        };
+        const { done, states, events } = await runOnce(wf, o);
+        assert.strictEqual(states.s, 'success', 'start node runs');
+        assert.strictEqual(states.a, 'skipped', 'disconnected node skipped');
+        assert.ok(!fs.existsSync(path.join(o.cwd, 'leaked.txt')), 'disconnected command did NOT execute');
+        assert.strictEqual(done.result, 'success');
+        assert.ok(events.some(e => e.type === 'log' && e.text.indexOf('disconnected') >= 0), 'skip reason logged');
+    });
+
+    await testAsync('engine: downstream of a disconnected node is also skipped', async () => {
+        const o = opts();
+        // start → a → b，删除 start→a 后整条链路都不可达
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('a', 'echo a > a.txt'),
+                node('b', 'echo b > b.txt')
+            ],
+            edges: [{ from: 'a', to: 'b' }]
+        };
+        const { states } = await runOnce(wf, o);
+        assert.strictEqual(states.a, 'skipped', 'disconnected head skipped');
+        assert.strictEqual(states.b, 'skipped', 'downstream skipped too');
+        assert.ok(!fs.existsSync(path.join(o.cwd, 'a.txt')) && !fs.existsSync(path.join(o.cwd, 'b.txt')), 'chain did not execute');
+    });
+
+    await testAsync('engine: without start, no-indegree nodes remain entry points (multi-entry)', async () => {
+        const o = opts();
+        // 无 start 节点的画法：无入边节点均为入口（批量执行转换的 fork 图依赖此语义）
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [node('a', 'echo one > one.txt'), node('b', 'echo two > two.txt')],
+            edges: []
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(states.a, 'success');
+        assert.strictEqual(states.b, 'success');
+        assert.strictEqual(done.result, 'success');
+        assert.ok(fs.existsSync(path.join(o.cwd, 'one.txt')) && fs.existsSync(path.join(o.cwd, 'two.txt')), 'both entries ran');
+    });
+
     await testAsync('engine: start node countdown delays downstream start', async () => {
         const o = opts();
         const wf = {

@@ -398,6 +398,9 @@ export class WorkflowEngine {
         const promises: Record<string, Promise<void>> = {};
         // 拓扑排序保证上游 promise 先创建
         const order = this.topoSort(nodes, edges);
+        // 是否存在 start 节点：存在时执行入口收敛为 start（断连节点不执行）；
+        // 不存在时维持多入口语义（无入边节点均为起点，兼容单节点工作流与批量执行转换的 fork 图）
+        const hasStart = nodes.some(n => n.tag === 'start');
         for (const id of order) {
             const node = byId(id);
             if (!node) { continue; }
@@ -413,11 +416,15 @@ export class WorkflowEngine {
                     setNodeState(id, 'skipped', 0);
                     return;
                 }
-                // 至少一条入边被激活才执行；无入边的起始节点直接执行
-                const activated = inEdges[id].length === 0 || inEdges[id].some(i => edgeActivated[i]);
+                // 执行条件：入口节点（无入边且被允许为起点）或至少一条入边被激活。
+                // 存在 start 时仅 start 可作为入口——删除 start 连线后的断连节点跳过，不再误执行
+                const isEntry = inEdges[id].length === 0 && (!hasStart || node.tag === 'start');
+                const activated = isEntry || inEdges[id].some(i => edgeActivated[i]);
                 if (!activated) {
                     setNodeState(id, 'skipped', 0);
-                    log(id, 'dim', `[Skip] ${node.label}: branch not taken`);
+                    log(id, 'dim', inEdges[id].length === 0
+                        ? `[Skip] ${node.label}: disconnected (no incoming edge from start)`
+                        : `[Skip] ${node.label}: branch not taken`);
                     return;
                 }
                 await executeNode(node);
