@@ -245,6 +245,188 @@ async function runOnce(workflow, options) {
         assert.ok(done.duration < 2400, `fork branches should overlap (took ${done.duration}ms)`);
     });
 
+    await testAsync('engine: start → fork → parallel branches → join → downstream pipeline', async () => {
+        const o = opts();
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('p1', 'echo p1 > p1.txt'),
+                node('p2', 'echo p2 > p2.txt'),
+                node('jn', '', 'join'),
+                node('end', 'echo end > end.txt')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 'p1' }, { from: 'fk', to: 'p2' },
+                { from: 'p1', to: 'jn' }, { from: 'p2', to: 'jn' },
+                { from: 'jn', to: 'end' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(done.result, 'success');
+        for (const id of ['s', 'fk', 'p1', 'p2', 'jn', 'end']) {
+            assert.strictEqual(states[id], 'success', id + ' should succeed');
+        }
+        for (const f of ['p1.txt', 'p2.txt', 'end.txt']) {
+            assert.ok(fs.existsSync(path.join(o.cwd, f)), f + ' written');
+        }
+    });
+
+    await testAsync('engine: with start node, fork branches still overlap in time', async () => {
+        const o = opts();
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('s1', 'sleep 1.2 && echo s1-done > s1.flag', 'cmd', { timeout: 30 }),
+                node('s2', 'sleep 1.2 && echo s2-done > s2.flag', 'cmd', { timeout: 30 }),
+                node('jn', '', 'join')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 's1' }, { from: 'fk', to: 's2' },
+                { from: 's1', to: 'jn' }, { from: 's2', to: 'jn' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(done.result, 'success');
+        for (const id of ['s', 'fk', 's1', 's2', 'jn']) { assert.strictEqual(states[id], 'success', id); }
+        assert.ok(done.duration < 2400, `branches should still be concurrent behind start (took ${done.duration}ms)`);
+    });
+
+    await testAsync('engine: join waits for the slowest branch before downstream runs', async () => {
+        const o = opts();
+        // p2 比 p1 慢 0.4s：join 下游必须等两个分支都完成（串行追加文件验证顺序）
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('p1', 'echo p1 >> order.txt'),
+                node('p2', 'sleep 0.4 && echo p2 >> order.txt', 'cmd', { timeout: 30 }),
+                node('jn', '', 'join'),
+                node('end', 'echo end >> order.txt')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 'p1' }, { from: 'fk', to: 'p2' },
+                { from: 'p1', to: 'jn' }, { from: 'p2', to: 'jn' },
+                { from: 'jn', to: 'end' }
+            ]
+        };
+        const { done } = await runOnce(wf, o);
+        assert.strictEqual(done.result, 'success');
+        const lines = fs.readFileSync(path.join(o.cwd, 'order.txt'), 'utf8').trim().split(/\r?\n/);
+        assert.ok(lines.includes('p1') && lines.includes('p2'), 'both branches ran');
+        assert.strictEqual(lines[lines.length - 1], 'end', 'downstream of join ran after ALL branches finished');
+    });
+
+    await testAsync('engine: fork branch failure with skip policy lets join and downstream continue', async () => {
+        const o = opts();
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('bad', 'exit 1', 'cmd', { failPolicy: 'skip' }),
+                node('good', 'echo good > good.txt'),
+                node('jn', '', 'join'),
+                node('end', 'echo end > end.txt')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 'bad' }, { from: 'fk', to: 'good' },
+                { from: 'bad', to: 'jn' }, { from: 'good', to: 'jn' },
+                { from: 'jn', to: 'end' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(states.bad, 'failed', 'failing branch marked failed');
+        assert.strictEqual(states.good, 'success');
+        assert.strictEqual(states.jn, 'success', 'join runs when a skip-policy branch still activates its edge');
+        assert.strictEqual(states.end, 'success', 'downstream continues past join');
+        assert.strictEqual(done.result, 'failed', 'workflow result reflects the real failure');
+    });
+
+    await testAsync('engine: fork branch failure with stop policy aborts join and downstream', async () => {
+        const o = opts();
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('bad', 'exit 1'),
+                node('jn', '', 'join'),
+                node('end', 'echo end > end.txt')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 'bad' },
+                { from: 'bad', to: 'jn' },
+                { from: 'jn', to: 'end' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(states.bad, 'failed');
+        assert.strictEqual(states.jn, 'skipped', 'join skipped after abort');
+        assert.strictEqual(states.end, 'skipped', 'downstream skipped after abort');
+        assert.strictEqual(done.result, 'failed');
+    });
+
+    await testAsync('engine: fork subgraph disconnected from start is fully skipped', async () => {
+        const o = opts();
+        // start 与 fork 之间无连线：整个 fork 子图断连，均不执行
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('p1', 'echo p1 > leaked.txt'),
+                node('jn', '', 'join')
+            ],
+            edges: [
+                { from: 'fk', to: 'p1' },
+                { from: 'p1', to: 'jn' }
+            ]
+        };
+        const { states } = await runOnce(wf, o);
+        assert.strictEqual(states.s, 'success', 'start itself runs');
+        assert.strictEqual(states.fk, 'skipped', 'disconnected fork skipped');
+        assert.strictEqual(states.p1, 'skipped', 'branch under disconnected fork skipped');
+        assert.strictEqual(states.jn, 'skipped', 'join under disconnected fork skipped');
+        assert.ok(!fs.existsSync(path.join(o.cwd, 'leaked.txt')), 'disconnected fork branch did NOT execute');
+    });
+
+    await testAsync('engine: join with only one branch connected still runs after that branch', async () => {
+        const o = opts();
+        // fork → p1 → join（p2→join 的连线被删）：join 只有一条入边，等 p1 完成即执行
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('s', '', 'start'),
+                node('fk', '', 'fork'),
+                node('p1', 'echo p1 > p1.txt'),
+                node('p2', 'echo p2 > p2.txt'),
+                node('jn', '', 'join'),
+                node('end', 'echo end > end.txt')
+            ],
+            edges: [
+                { from: 's', to: 'fk' },
+                { from: 'fk', to: 'p1' }, { from: 'fk', to: 'p2' },
+                { from: 'p1', to: 'jn' },
+                { from: 'jn', to: 'end' }
+            ]
+        };
+        const { done, states } = await runOnce(wf, o);
+        assert.strictEqual(states.p2, 'success', 'p2 still runs (fork activates it)');
+        assert.strictEqual(states.jn, 'success', 'join runs on its single connected input');
+        assert.strictEqual(states.end, 'success');
+        assert.strictEqual(done.result, 'success');
+    });
+
     await testAsync('engine: WB_ENV injected from env option', async () => {
         const wf = { id: 'w', name: 'w', updatedAt: 1, nodes: [node('a', 'echo env=$WB_ENV')], edges: [] };
         const { events } = await runOnce(wf, opts({ env: 'test' }));
