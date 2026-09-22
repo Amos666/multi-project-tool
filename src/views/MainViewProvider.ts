@@ -50,6 +50,8 @@ interface EnvVariable {
 
 export class MainViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'multi-project-tool.main-view';
+    /** 项目行按钮命令在 context.globalState 中的存储键（插件级全局存储，跨工作区共享） */
+    private static readonly PRC_STATE_KEY = 'projectRowCommands';
 
     private _view: vscode.WebviewView | undefined;
     private _projects: Project[] = [];
@@ -68,10 +70,11 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _currentShell: string = 'git-bash';
     private _shortcutShell: string = 'git-bash';
     private _envVariables: EnvVariable[] = [];
-    /** Projects view 项目行右侧动态按钮命令（Set Tab 配置，Git / ProjectsCmd 两页签共用） */
+    /** Projects view 项目行右侧动态按钮命令（Set Tab 配置，Git / ProjectsCmd 两页签共用）。
+     *  插件级全局存储（context.globalState）：所有工作区共享同一份配置，修改后全局生效 */
     private _projectRowCommands: ProjectRowCommand[] = [];
-    /** 标记本次启动播种了默认项目行命令，待全部数据加载完成后统一落盘 */
-    private _projectRowCommandsSeeded = false;
+    /** 迁移标记：检测到工作区级旧配置已并入全局存储，待全部数据加载完成后重写工作区配置以清除旧字段 */
+    private _prcLegacyCleanupPending = false;
     private _autoRefresh: boolean = true;
     private _logRetention: number = 50;
     private _concurrency: number = 1;
@@ -89,7 +92,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     /** 命令行运行实例跟踪：key = `${tabId}:${commandId}`，值为可取消句柄（同一命令可能多次并发） */
     private _activeCmdRuns = new Map<string, Array<{ cancel: () => void }>>();
 
-    constructor(private readonly _extensionUri: vscode.Uri) {
+    constructor(private readonly _extensionUri: vscode.Uri, private readonly _globalState?: vscode.Memento) {
         this._projectScanner = ProjectScanner.getInstance();
         this._flowEditor = new FlowEditorProvider(
             _extensionUri,
@@ -116,9 +119,9 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             await this.loadEnvVariables();
             await this.loadPythonTxtCommands();
             await this.loadShortcutCommands();
-            // 播种的默认项目行命令此时落盘（全部字段已加载，避免半初始化配置覆盖磁盘）
-            if (this._projectRowCommandsSeeded) {
-                this._projectRowCommandsSeeded = false;
+            // 工作区级旧配置已迁移到全局存储：此时所有字段加载完毕，重写工作区配置以清除旧字段
+            if (this._prcLegacyCleanupPending) {
+                this._prcLegacyCleanupPending = false;
                 this.saveAllConfig();
             }
             // 项目加载可能较慢，先显示其他数据
@@ -169,10 +172,23 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this._concurrency = config.settings.concurrency;
         this._commandTimeout = config.settings.commandTimeout;
         this._language = (config.settings.language as Language) || 'en';
-        // 项目行按钮命令：老配置无此字段时按当前语言播种两条默认命令（打开目录 / 打开 GitHub 页面），用户可在 Set Tab 增删改
-        const seeded = !Array.isArray(config.settings.projectRowCommands);
-        this._projectRowCommandsSeeded = seeded;
-        this._projectRowCommands = seeded ? this.defaultProjectRowCommands() : (config.settings.projectRowCommands || []);
+        // 项目行按钮命令：插件级全局存储（context.globalState），所有工作区共享一份配置
+        const stored = this._globalState
+            ? this._globalState.get<ProjectRowCommand[]>(MainViewProvider.PRC_STATE_KEY)
+            : undefined;
+        const legacyWs = config.settings.projectRowCommands; // 工作区级旧配置（仅用于一次性迁移）
+        if (Array.isArray(stored)) {
+            this._projectRowCommands = stored;
+        } else if (Array.isArray(legacyWs) && legacyWs.length > 0) {
+            // 一次性迁移：工作区级旧数据 → 全局存储；全部数据加载完成后重写工作区配置清除旧字段
+            this._projectRowCommands = legacyWs;
+            this._prcLegacyCleanupPending = true;
+            this.saveProjectRowCommands();
+        } else {
+            // 全新安装：按当前语言播种两条默认命令（打开目录 / 打开 GitHub 页面）
+            this._projectRowCommands = this.defaultProjectRowCommands();
+            this.saveProjectRowCommands();
+        }
     }
 
     /** 项目行按钮命令默认值：Windows 下资源管理器打开项目目录 + 打开项目 GitHub 页面 */
@@ -4480,7 +4496,7 @@ window.addEventListener('message', event => {
         this._concurrency = settings.concurrency;
         this._currentShell = settings.defaultShell;
         this._commandTimeout = settings.commandTimeout;
-        // 项目行按钮命令（Set Tab 自定义命令列表保存）：逐项校验并补齐 id
+        // 项目行按钮命令（Set Tab 自定义命令列表保存）：逐项校验并补齐 id，写入插件级全局存储
         if (Array.isArray(settings.projectRowCommands)) {
             this._projectRowCommands = settings.projectRowCommands
                 .filter((c: any) => c && typeof c.alias === 'string' && c.alias.trim() && typeof c.command === 'string' && c.command.trim())
@@ -4490,6 +4506,7 @@ window.addEventListener('message', event => {
                     command: c.command,
                     tip: typeof c.tip === 'string' ? c.tip : ''
                 }));
+            this.saveProjectRowCommands();
         }
         this.saveAllConfig();
         // 立即刷新 webview：Set Tab 列表与项目行按钮同步更新
@@ -4500,7 +4517,7 @@ window.addEventListener('message', event => {
 
     private handleAddProjectRowCommand(): void {
         this._projectRowCommands.push({ id: this.newProjectRowCommandId(), alias: '', command: '', tip: '' });
-        this.saveAllConfig();
+        this.saveProjectRowCommands();
         this.updateWebview();
     }
 
@@ -4513,14 +4530,14 @@ window.addEventListener('message', event => {
             command: typeof command.command === 'string' ? command.command : cur.command,
             tip: typeof command.tip === 'string' ? command.tip : cur.tip
         };
-        this.saveAllConfig();
+        this.saveProjectRowCommands();
         this.updateWebview();
     }
 
     private handleDeleteProjectRowCommand(index: number): void {
         if (index < 0 || index >= this._projectRowCommands.length) { return; }
         this._projectRowCommands.splice(index, 1);
-        this.saveAllConfig();
+        this.saveProjectRowCommands();
         this.updateWebview();
     }
 
@@ -4652,13 +4669,18 @@ window.addEventListener('message', event => {
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
                 commandTimeout: this._commandTimeout,
-                language: this._language,
-                projectRowCommands: this._projectRowCommands
+                language: this._language
             },
             customCommandTree: this._customCommandTree,
             envVariables: this._envVariables
         };
         ConfigStore.getInstance().save(config);
+    }
+
+    /** 项目行按钮命令持久化：写入插件级全局存储（context.globalState），所有工作区共享 */
+    private async saveProjectRowCommands(): Promise<void> {
+        if (!this._globalState) { return; }
+        await this._globalState.update(MainViewProvider.PRC_STATE_KEY, this._projectRowCommands);
     }
 
     private handleClearLogs(): void {

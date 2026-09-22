@@ -4,7 +4,8 @@ import { MainViewProvider } from './views/MainViewProvider';
 export function activate(context: vscode.ExtensionContext) {
     console.log('Multi-Project Tool extension is now active!');
 
-    const mainViewProvider = new MainViewProvider(context.extensionUri);
+    // globalState：插件级全局存储（Project Row Commands 等跨工作区共享配置）
+    const mainViewProvider = new MainViewProvider(context.extensionUri, context.globalState);
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
