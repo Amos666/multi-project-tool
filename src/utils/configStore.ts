@@ -3,6 +3,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CommandTreeNode, migrateConfig } from './configMigration';
 
+/** Projects view 项目行右侧动态按钮命令：别名 / 命令内容 / 悬停描述 tips */
+export interface ProjectRowCommand {
+    id: string;
+    alias: string;
+    command: string;
+    tip: string;
+}
+
 export interface WorkspaceConfig {
     settings: {
         commonParameters: Record<string, any>;
@@ -13,6 +21,8 @@ export interface WorkspaceConfig {
         concurrency: number;
         commandTimeout: number;
         language: string;
+        /** 项目行按钮命令；undefined 表示尚未初始化（老配置/新工作区），由宿主按语言播种默认命令 */
+        projectRowCommands?: ProjectRowCommand[];
     };
     customCommandTree: CommandTreeNode[];
     envVariables: Array<{
@@ -31,6 +41,7 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
         concurrency: 1,
         commandTimeout: 300,
         language: 'en'
+        // projectRowCommands 缺省：首次加载时由宿主按语言播种默认命令并落盘
     },
     customCommandTree: [],
     envVariables: []
@@ -118,7 +129,9 @@ export class ConfigStore {
                 logRetention: config?.settings?.logRetention || 50,
                 concurrency: config?.settings?.concurrency || 1,
                 commandTimeout: config?.settings?.commandTimeout || 300,
-                language: config?.settings?.language || 'en'
+                language: config?.settings?.language || 'en',
+                // 保持 undefined（未初始化）以区分「用户删空」与「老配置无此字段」
+                projectRowCommands: Array.isArray(config?.settings?.projectRowCommands) ? config.settings.projectRowCommands : undefined
             },
             customCommandTree: migration.customCommandTree,
             envVariables: config?.envVariables || []

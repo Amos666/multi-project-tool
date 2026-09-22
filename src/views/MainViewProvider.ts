@@ -3,7 +3,7 @@ import { Project, GitOperationResult } from '../models/project';
 import { MultiProjectToolSettings } from '../models/settings';
 import { GitUtils } from '../utils/gitUtils';
 import { ProjectScanner } from '../utils/projectScanner';
-import { ConfigStore } from '../utils/configStore';
+import { ConfigStore, ProjectRowCommand } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
 import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
@@ -68,6 +68,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _currentShell: string = 'git-bash';
     private _shortcutShell: string = 'git-bash';
     private _envVariables: EnvVariable[] = [];
+    /** Projects view 项目行右侧动态按钮命令（Set Tab 配置，Git / ProjectsCmd 两页签共用） */
+    private _projectRowCommands: ProjectRowCommand[] = [];
+    /** 标记本次启动播种了默认项目行命令，待全部数据加载完成后统一落盘 */
+    private _projectRowCommandsSeeded = false;
     private _autoRefresh: boolean = true;
     private _logRetention: number = 50;
     private _concurrency: number = 1;
@@ -112,6 +116,11 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             await this.loadEnvVariables();
             await this.loadPythonTxtCommands();
             await this.loadShortcutCommands();
+            // 播种的默认项目行命令此时落盘（全部字段已加载，避免半初始化配置覆盖磁盘）
+            if (this._projectRowCommandsSeeded) {
+                this._projectRowCommandsSeeded = false;
+                this.saveAllConfig();
+            }
             // 项目加载可能较慢，先显示其他数据
             this.updateWebview();
             await this.loadProjects();
@@ -160,6 +169,33 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this._concurrency = config.settings.concurrency;
         this._commandTimeout = config.settings.commandTimeout;
         this._language = (config.settings.language as Language) || 'en';
+        // 项目行按钮命令：老配置无此字段时按当前语言播种两条默认命令（打开目录 / 打开 GitHub 页面），用户可在 Set Tab 增删改
+        const seeded = !Array.isArray(config.settings.projectRowCommands);
+        this._projectRowCommandsSeeded = seeded;
+        this._projectRowCommands = seeded ? this.defaultProjectRowCommands() : (config.settings.projectRowCommands || []);
+    }
+
+    /** 项目行按钮命令默认值：Windows 下资源管理器打开项目目录 + 打开项目 GitHub 页面 */
+    private defaultProjectRowCommands(): ProjectRowCommand[] {
+        const zh = this._language === 'zh';
+        return [
+            {
+                id: this.newProjectRowCommandId(),
+                alias: zh ? '打开目录' : 'Open Folder',
+                command: 'explorer "${projectPath}"',
+                tip: zh ? '在系统资源管理器中打开此项目目录' : 'Open this project folder in system explorer'
+            },
+            {
+                id: this.newProjectRowCommandId(),
+                alias: 'GitHub',
+                command: 'start ${projectRemoteUrl}',
+                tip: zh ? '在浏览器中打开此项目的 GitHub 仓库页面' : 'Open this project GitHub repository page in browser'
+            }
+        ];
+    }
+
+    private newProjectRowCommandId(): string {
+        return 'prc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
     }
 
     private async loadCommands(): Promise<void> {
@@ -218,6 +254,11 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'runCommand': await this.handleRunCommand(message.tabId, message.commandId); break;
             case 'cancelCommand': this.handleCancelCommand(message.tabId, message.commandId); break;
             case 'saveSettings': await this.handleSaveSettings(message.settings); break;
+            // Projects view 项目行动态按钮命令（Set Tab 配置）
+            case 'addProjectRowCommand': this.handleAddProjectRowCommand(); break;
+            case 'updateProjectRowCommand': this.handleUpdateProjectRowCommand(message.index, message.command); break;
+            case 'deleteProjectRowCommand': this.handleDeleteProjectRowCommand(message.index); break;
+            case 'runProjectRowCommand': await this.handleRunProjectRowCommand(message.path, message.id); break;
             case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
             case 'addEnvVariable': await this.handleAddEnvVariable(message.variable); break;
             case 'updateEnvVariable': await this.handleUpdateEnvVariable(message.index, message.variable); break;
@@ -996,6 +1037,22 @@ body {
 
 .env-variable-list { margin-bottom: 10px; }
 
+/* --- Set Tab：项目行命令列表编辑器 --- */
+.prc-list { margin-bottom: 10px; }
+.prc-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    background-color: var(--brand-surface-raised);
+    border: 1px solid var(--brand-border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+}
+.prc-item .prc-alias { width: 90px; flex: none; }
+.prc-item .prc-command { flex: 1; min-width: 0; }
+.prc-item .prc-tip { flex: 1; min-width: 0; }
+
 .env-variable-item {
     display: flex;
     align-items: center;
@@ -1689,6 +1746,13 @@ body {
                 </div>
 
                 <div class="settings-section">
+                    <h3>📌 <span data-i18n="settings.projectRowCommands">Project Row Commands</span></h3>
+                    <div class="subtitle" data-i18n="settings.projectRowCommandsDesc">Shown as buttons on each project row (Git &amp; ProjectsCmd)</div>
+                    <div class="prc-list" id="projectRowCommandList"></div>
+                    <button class="btn btn-secondary" onclick="addProjectRowCommand()" data-i18n="prc.add">+ Add Command</button>
+                </div>
+
+                <div class="settings-section">
                     <h3>⚙️ <span data-i18n="settings.other">Other Settings</span></h3>
                     <div class="settings-row">
                         <label data-i18n="settings.autoRefresh">Auto Refresh</label>
@@ -1863,6 +1927,8 @@ let branchList = [];
 let currentBranch = '';
 /* 命令行运行状态：key = tabId + ':' + commandId；驱动执行中闪烁与 cancel 按钮显隐 */
 let runningCmds = new Set();
+/* Projects view 项目行动态按钮命令（Set Tab 配置，Git / ProjectsCmd 共用） */
+let projectRowCommands = [];
 
 window.addEventListener('load', () => { vscode.postMessage({ command: 'init' }); applyTranslations(); });
 
@@ -2632,6 +2698,23 @@ function updateProjectList() {
             count.textContent = p.changeCount || 0;
             item.appendChild(count);
 
+            // 项目行动态按钮：按 Set Tab 配置顺序渲染；tooltip = 别名 + 描述 tips；点击在该项目目录执行
+            const actions = document.createElement('div');
+            actions.className = 'project-row-actions';
+            projectRowCommands.forEach(function(rc) {
+                if (!rc || !rc.alias) { return; }
+                const btn = document.createElement('button');
+                btn.className = 'project-row-btn';
+                btn.textContent = rc.alias;
+                btn.title = rc.alias + (rc.tip ? ' — ' + rc.tip : '');
+                btn.onclick = function(e) {
+                    e.stopPropagation();
+                    vscode.postMessage({ command: 'runProjectRowCommand', path: p.path, id: rc.id });
+                };
+                actions.appendChild(btn);
+            });
+            if (actions.childElementCount > 0) { item.appendChild(actions); }
+
             item.onclick = function() { toggleProjectSelection(p.id); };
             // 双击项目：打开该项目目录（系统资源管理器）
             item.ondblclick = function(e) { e.stopPropagation(); vscode.postMessage({ command: 'openProjectFolder', path: p.path }); };
@@ -3075,6 +3158,57 @@ function updateEnvVariables() {
     });
 }
 
+/* ---- Set Tab：项目行命令列表编辑器（别名 / 命令 / 描述 tips，增删改即时持久化） ---- */
+function renderProjectRowCommands() {
+    const list = document.getElementById('projectRowCommandList');
+    if (!list) { return; }
+    list.innerHTML = '';
+    projectRowCommands.forEach((c, i) => {
+        const item = document.createElement('div');
+        item.className = 'prc-item';
+
+        const aliasInput = document.createElement('input');
+        aliasInput.type = 'text';
+        aliasInput.className = 'prc-alias';
+        aliasInput.value = c.alias;
+        aliasInput.placeholder = t('prc.alias');
+        aliasInput.onchange = function() { updateProjectRowCommand(i, this.value, c.command, c.tip); };
+        item.appendChild(aliasInput);
+
+        const cmdInput = document.createElement('input');
+        cmdInput.type = 'text';
+        cmdInput.className = 'prc-command';
+        cmdInput.value = c.command;
+        cmdInput.placeholder = t('prc.command');
+        cmdInput.onchange = function() { updateProjectRowCommand(i, c.alias, this.value, c.tip); };
+        item.appendChild(cmdInput);
+
+        const tipInput = document.createElement('input');
+        tipInput.type = 'text';
+        tipInput.className = 'prc-tip';
+        tipInput.value = c.tip;
+        tipInput.placeholder = t('prc.tip');
+        tipInput.onchange = function() { updateProjectRowCommand(i, c.alias, c.command, this.value); };
+        item.appendChild(tipInput);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = '×';
+        delBtn.onclick = function() { deleteProjectRowCommand(i); };
+        item.appendChild(delBtn);
+
+        list.appendChild(item);
+    });
+}
+
+function addProjectRowCommand() { vscode.postMessage({ command: 'addProjectRowCommand' }); }
+
+function updateProjectRowCommand(index, alias, command, tip) {
+    vscode.postMessage({ command: 'updateProjectRowCommand', index: index, command: { alias: alias, command: command, tip: tip } });
+}
+
+function deleteProjectRowCommand(index) { vscode.postMessage({ command: 'deleteProjectRowCommand', index: index }); }
+
 function addLogEntry(entry) {
     logs.push(entry);
     if (logs.length > 50) logs.shift();
@@ -3253,6 +3387,8 @@ window.addEventListener('message', event => {
             document.getElementById('shellSelector').value = message.settings.defaultShell;
             shortcutShell = message.settings.shortcutShell || 'git-bash';
             document.getElementById('shortcutShellSelector').value = shortcutShell;
+            projectRowCommands = Array.isArray(message.settings.projectRowCommands) ? message.settings.projectRowCommands : [];
+            renderProjectRowCommands();
             renderCommandTree('cmd');
             renderCommandTree('shortcut');
             if (message.settings.language) {
@@ -4308,7 +4444,127 @@ window.addEventListener('message', event => {
         this._concurrency = settings.concurrency;
         this._currentShell = settings.defaultShell;
         this._commandTimeout = settings.commandTimeout;
+        // 项目行按钮命令（Set Tab 自定义命令列表保存）：逐项校验并补齐 id
+        if (Array.isArray(settings.projectRowCommands)) {
+            this._projectRowCommands = settings.projectRowCommands
+                .filter((c: any) => c && typeof c.alias === 'string' && c.alias.trim() && typeof c.command === 'string' && c.command.trim())
+                .map((c: any) => ({
+                    id: typeof c.id === 'string' && c.id ? c.id : this.newProjectRowCommandId(),
+                    alias: c.alias.trim(),
+                    command: c.command,
+                    tip: typeof c.tip === 'string' ? c.tip : ''
+                }));
+        }
         this.saveAllConfig();
+        // 立即刷新 webview：Set Tab 列表与项目行按钮同步更新
+        this.updateWebview();
+    }
+
+    /* ============ Projects view 项目行动态按钮命令 ============ */
+
+    private handleAddProjectRowCommand(): void {
+        this._projectRowCommands.push({ id: this.newProjectRowCommandId(), alias: '', command: '', tip: '' });
+        this.saveAllConfig();
+        this.updateWebview();
+    }
+
+    private handleUpdateProjectRowCommand(index: number, command: any): void {
+        if (index < 0 || index >= this._projectRowCommands.length || !command) { return; }
+        const cur = this._projectRowCommands[index];
+        this._projectRowCommands[index] = {
+            id: cur.id,
+            alias: typeof command.alias === 'string' ? command.alias : cur.alias,
+            command: typeof command.command === 'string' ? command.command : cur.command,
+            tip: typeof command.tip === 'string' ? command.tip : cur.tip
+        };
+        this.saveAllConfig();
+        this.updateWebview();
+    }
+
+    private handleDeleteProjectRowCommand(index: number): void {
+        if (index < 0 || index >= this._projectRowCommands.length) { return; }
+        this._projectRowCommands.splice(index, 1);
+        this.saveAllConfig();
+        this.updateWebview();
+    }
+
+    /**
+     * 项目行按钮点击：在对应项目目录执行配置的命令。
+     * 占位符：${projectPath} / ${projectName} / ${projectBranch} / ${projectRemoteUrl}（remote 归一化为 https 浏览地址）。
+     * shell 同 ProjectsCmd 默认 shell；执行过程与结果全部写入 Log 面板。
+     */
+    private async handleRunProjectRowCommand(projectPath: string, commandId: string): Promise<void> {
+        const project = this._projects.find(p => p.path === projectPath);
+        if (!project) {
+            this.addLog('✗ ' + t('backend.prcNoProject', this._language) + ': ' + projectPath, 'error');
+            return;
+        }
+        const cfg = this._projectRowCommands.find(c => c.id === commandId);
+        if (!cfg || !cfg.alias.trim() || !(cfg.command || '').trim()) {
+            this.addLog('✗ ' + t('backend.prcNoCommand', this._language), 'error', project.name);
+            return;
+        }
+        const runShell = this._currentShell;
+        const shellLabel = this.getShellLabel(runShell);
+        this.addLog('▶ [' + shellLabel + '] ' + cfg.alias + ' — ' + project.name + ' (' + project.path + ')', 'info', project.name);
+
+        try {
+            // remote URL 仅在命令引用时解析（需要一次 git 调用）
+            const needsRemote = cfg.command.includes('${projectRemoteUrl}');
+            let remoteUrl = '';
+            if (needsRemote) {
+                remoteUrl = await this.getProjectRemoteUrl(project.path);
+                if (!remoteUrl) {
+                    this.addLog('✗ ' + t('backend.prcNoRemote', this._language), 'error', project.name);
+                    return;
+                }
+            }
+            // 项目占位符替换 → 全局参数替换（与 ProjectsCmd 一致）
+            let resolved = cfg.command;
+            if (needsRemote) { resolved = resolved.split('${projectRemoteUrl}').join(remoteUrl); }
+            resolved = resolved.split('${projectPath}').join(project.path)
+                .split('${projectName}').join(project.name)
+                .split('${projectBranch}').join(project.currentBranch || '');
+            const commandLines = resolved.split('\n').filter(c => c.trim());
+            const finalLines = commandLines.map(c => this.resolveCommandVariables(c));
+            const tracedCommand = this.injectCommandTracing(finalLines, runShell);
+            const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
+                if (line.trim()) { this.addLog('│   ' + line, 'info', project.name); }
+            });
+            if (result.success) {
+                this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + cfg.alias + ' — ' + project.name, 'success', project.name);
+            } else {
+                this.addLog('✗ ' + (result.error || result.output), 'error', project.name);
+            }
+        } catch (error) {
+            this.addLog('✗ Error: ' + error, 'error', project.name);
+        }
+    }
+
+    /** 读取项目 remote origin 地址并归一化为可浏览的 https URL（ssh/scp 形式 → https，去掉 .git 后缀） */
+    private async getProjectRemoteUrl(projectPath: string): Promise<string> {
+        try {
+            const result = await this.executeShellCommand(projectPath, 'git remote get-url origin', undefined, this._currentShell);
+            if (!result.success) { return ''; }
+            const url = (result.output || '').trim().split(/\r?\n/).pop() || '';
+            return this.normalizeGitRemoteUrl(url);
+        } catch {
+            return '';
+        }
+    }
+
+    private normalizeGitRemoteUrl(url: string): string {
+        let u = (url || '').trim();
+        if (!u) { return ''; }
+        // scp 形式：git@github.com:owner/repo.git
+        const scp = /^([^@/]+)@([^:/]+):(.+)$/.exec(u);
+        if (scp) {
+            u = 'https://' + scp[2] + '/' + scp[3];
+        } else if (u.startsWith('ssh://')) {
+            u = 'https://' + u.slice('ssh://'.length).replace(/^[^@/]+@/, '');
+        }
+        if (u.endsWith('.git')) { u = u.slice(0, -4); }
+        return u;
     }
 
     private async handleSaveCommonParameters(parameters: string): Promise<void> {
@@ -4360,7 +4616,8 @@ window.addEventListener('message', event => {
                 logRetention: this._logRetention,
                 concurrency: this._concurrency,
                 commandTimeout: this._commandTimeout,
-                language: this._language
+                language: this._language,
+                projectRowCommands: this._projectRowCommands
             },
             customCommandTree: this._customCommandTree,
             envVariables: this._envVariables
@@ -4433,7 +4690,8 @@ window.addEventListener('message', event => {
                 defaultShell: this._currentShell,
                 shortcutShell: this._shortcutShell,
                 commandTimeout: this._commandTimeout,
-                language: this._language
+                language: this._language,
+                projectRowCommands: this._projectRowCommands
             }
         });
         this.postWorkbenchData();
