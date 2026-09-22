@@ -93,6 +93,17 @@ export const translations: Record<Language, Record<string, string>> = {
         'settings.saved': 'Saved',
         'settings.settingsSaved': 'Settings saved!',
 
+        // Projects view 项目行动态按钮命令
+        'settings.projectRowCommands': 'Project Row Commands',
+        'settings.projectRowCommandsDesc': 'Shown as buttons on each project row (Git & ProjectsCmd). Placeholders: ${projectPath}, ${projectName}, ${projectBranch}, ${projectRemoteUrl}',
+        'prc.alias': 'Alias',
+        'prc.command': 'Command',
+        'prc.tip': 'Tip (shown on hover)',
+        'prc.add': '+ Add Command',
+        'backend.prcNoProject': 'Project not found',
+        'backend.prcNoCommand': 'Command config is missing or empty',
+        'backend.prcNoRemote': 'No git remote origin URL found for this project',
+
         // Commit modal
         'commit.title': 'Commit Confirmation',
         'commit.message': 'Commit message (leave empty for default):',
@@ -421,6 +432,17 @@ export const translations: Record<Language, Record<string, string>> = {
         'settings.saveSettings': '保存设置',
         'settings.saved': '已保存',
         'settings.settingsSaved': '设置已保存！',
+
+        // Projects view 项目行动态按钮命令
+        'settings.projectRowCommands': '项目行命令',
+        'settings.projectRowCommandsDesc': '在 Git / ProjectsCmd 的项目列表每行右侧显示为按钮。可用占位符：${projectPath}、${projectName}、${projectBranch}、${projectRemoteUrl}',
+        'prc.alias': '别名',
+        'prc.command': '命令',
+        'prc.tip': '描述提示（悬停显示）',
+        'prc.add': '+ 添加命令',
+        'backend.prcNoProject': '未找到该项目',
+        'backend.prcNoCommand': '命令配置不存在或为空',
+        'backend.prcNoRemote': '未找到该项目的 git remote origin 地址',
 
         // Commit modal
         'commit.title': '提交确认',

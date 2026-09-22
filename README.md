@@ -9,6 +9,7 @@ A VSCode extension for managing multiple projects with unified Git operations, p
 - **Auto-scan workspace** to discover Git repositories (configurable depth)
 - **Batch Git operations** across multiple projects at once (Pull / Commit / Branch / Push)
 - **ProjectsCmd** — run custom shell commands against every selected Git project, in each project's own directory
+- **Project row quick actions** — configurable buttons on the right side of each project row (Git / ProjectsCmd) that run a command in that project's directory, e.g. open the folder in Explorer or open the project's GitHub page
 - **ShortCutCmd** — one-click quick commands that run once in the workspace root directory, ideal for frequently used scripts
 - **Command cancel + running indicator** — every command row (ProjectsCmd / ShortCutCmd / Pyt) has a cancel button that terminates the running process tree; while executing, the whole row background pulses with a translucent blue tint (text stays high-contrast via text shadow) and returns to normal when the run finishes or is cancelled
 - **Shell-typed commands** — every command is stored with its shell type (Git Bash / CMD / PowerShell / WSL); the shell selector filters the command list by type, and newly created commands are stamped with the currently selected type. Commands created before shell typing exist are treated as Git Bash
@@ -99,6 +100,7 @@ Batch Git operations across selected projects.
 - **Selected N** counter — shows the number of currently selected projects
 - **▼/▶ button** — collapse or expand the project list
 - Each project row shows: checkbox, name, current branch, change count
+- **Quick-action buttons** on the right of each project row (shared with ProjectsCmd, see [Project Row Quick Actions](#project-row-quick-actions)) — click to run a configured command (open folder, open GitHub page, ...) directly on that project
 
 ### ProjectsCmd Tab
 Run custom shell commands against **multiple Git projects at once**. The command runs once per selected project, inside that project's own directory.
@@ -121,6 +123,19 @@ Run custom shell commands against **multiple Git projects at once**. The command
 - **Environment variables** — inject custom env vars into every command execution
 - **Selected N** counter + **Select All** + collapse/expand (same as Git Tab)
 - Running requires **at least one selected project**; the command is executed for each of them. Cancelling a multi-project run stops after the current project and reports `cancelled (done/total)`
+
+### Project Row Quick Actions
+
+The shared project list on the Git and ProjectsCmd tabs renders **configurable action buttons on the right side of every project row**. Each button runs its configured command **in that project's own directory** — the same button on different rows targets different projects (e.g. the "GitHub" button on the `backend` row opens the backend repo, on the `frontend` row the frontend repo).
+
+- **Default commands** (seeded automatically on first run, fully editable/removable afterwards):
+  1. **Open Folder** — `explorer "${projectPath}"`: opens the project directory in Windows Explorer
+  2. **GitHub** — `start ${projectRemoteUrl}`: opens the project's GitHub repository page in the default browser. The `origin` remote URL is read with `git remote get-url origin` and normalized from SSH/scp form (`git@github.com:owner/repo.git`) to an `https://` browse URL
+- **Manage in the Set tab** — the *Project Row Commands* editor lists every command with its **Alias** (button text), **Command** content and **Tip** (hover description). Add, edit or delete entries; every change is saved immediately and the buttons on all project rows refresh at once. Buttons are rendered in insertion order (no sorting)
+- **Hover tips** — hovering a row button shows `alias — tip`, e.g. `GitHub — Open this project GitHub repository page in browser`
+- **Placeholders** — substituted per project before execution: `${projectPath}`, `${projectName}`, `${projectBranch}` and `${projectRemoteUrl}`; global `${var}` parameters from the JSON tab are also supported
+- **Execution** — runs through the shell currently selected on the ProjectsCmd tab; clicking a button executes immediately (no confirmation dialog, no cancel) and waits for the result. All command output and the final status are written to the Logs panel, tagged with the project name
+- Stored under `settings.projectRowCommands` in `.multi-project-tool/config.json`
 
 ### ShortCutCmd Tab
 One-click quick commands that run **once, in the workspace root directory** (the first workspace folder). Designed for frequently used scripts that are not tied to a specific Git project — cache cleanup, environment checks, one-off maintenance scripts, etc.
@@ -173,6 +188,7 @@ Visual workflow canvas opened in a dedicated main-editor panel (the sidebar Flow
 
 Summary of the most recent changes:
 
+- **Project row quick actions (new)** — every project row on the Git / ProjectsCmd tabs now has configurable buttons on its right side that run a command in that project's directory. Two defaults are seeded on first run: *Open Folder* (Windows Explorer) and *GitHub* (opens the project's `origin` remote, normalized to an `https://` browse URL, in the browser). Manage the list in the Set tab's *Project Row Commands* editor — alias / command / hover tip per entry, add-edit-delete with immediate persistence and instant button refresh, insertion order preserved. Placeholders `${projectPath}`, `${projectName}`, `${projectBranch}`, `${projectRemoteUrl}` plus global `${var}` parameters are substituted per project; execution output and result go to the Logs panel
 - **VSCode command node (new)** — the Flow node palette gains a **VSCode Command** node type that invokes any command registered by other extensions via `vscode.commands.executeCommand`, so workflows can drive other plugins' features (run task providers, format documents, trigger testing tools, open views, etc.). The node's Command ID field offers autocomplete from all currently registered command IDs; arguments accept a JSON array (spread as multiple parameters, e.g. `["src/main.ts", true]`) or plain text (single string parameter), with `${var}` substitution from common parameters. A missing/throwing command fails the node and honors the node's fail policy (stop / skip / retry once); command return values are serialized into the workflow log
 - **Enhanced executing blink** — the executing indicator now pulses the **entire row background** with a ~1/3-opacity translucent blue tint (previously only a barely-visible edge tint), so it is clearly noticeable. Text readability is preserved during the pulse: the alias and preview text switch to the high-contrast text color with a dark text shadow, and the row border glows in sync. The style restores automatically on completion or cancellation
 - **Merged with main (multi-run workflows + cancel coexistence)** — the command cancel/blink feature was re-integrated on top of main's multi-run architecture: `executeShellCommand` regained its `runKey` tracking parameter (register/unregister cancel handles, cleanup on close/error, process-tree kill on timeout), cancelled runs return a `cancelled` result that aborts the remaining projects, and the webview restores blink/cancel state via `cmdRunStateSync` after reloads — while main's multi paused-run workflow engine (`_activeRun` / `_pausedRuns`) remains fully intact
@@ -207,7 +223,7 @@ Workspace-level data (per workspace folder, under `.multi-project-tool/`):
 
 | File | Content |
 |---|---|
-| `config.json` | Settings, ProjectsCmd command tree, environment variables |
+| `config.json` | Settings, ProjectsCmd command tree, project row quick actions, environment variables |
 | `shortcutCommands.json` | ShortCutCmd command tree |
 | `customPythonTxt.json` | Python text-transform command tree |
 
@@ -234,6 +250,7 @@ Workspace-level data (per workspace folder, under `.multi-project-tool/`):
    rm -rf node_modules/.cache
    ```
    Save → click ▶. The script runs once in `my-workspace/` (the workspace root) — no project selection needed.
+6. **Project row buttons** — every project row has quick-action buttons on its right (defaults: *Open Folder*, *GitHub*). Hover a button to see its tip (e.g. `GitHub — Open this project GitHub repository page in browser`); click it and the command runs in that project's directory — e.g. the *GitHub* button on the `backend` row opens `https://github.com/your-org/backend`. Add your own buttons in the **Set tab → Project Row Commands** editor.
 
 ## Troubleshooting
 
@@ -248,6 +265,7 @@ Workspace-level data (per workspace folder, under `.multi-project-tool/`):
 | Command list looks empty after switching shell type | The shell selector is a **type filter** — commands of other types are hidden, not deleted. Switch back to their type to see them |
 | Old commands all appear under Git Bash | Commands created before shell typing were migrated to the Git Bash type; edit and recreate them under another type if needed |
 | ShortCutCmd runs in the wrong directory | It always runs in the workspace root; add `cd /your/path` as the first line of the script |
+| GitHub row button fails with *No git remote origin URL* | The project has no `origin` remote. Add one (`git remote add origin <url>`) or edit/remove the button in the Set tab → Project Row Commands |
 
 ## Development
 
