@@ -256,7 +256,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'saveSettings': await this.handleSaveSettings(message.settings); break;
             // Projects view 项目行动态按钮命令（Set Tab 配置）
             case 'addProjectRowCommand': this.handleAddProjectRowCommand(); break;
-            case 'updateProjectRowCommand': this.handleUpdateProjectRowCommand(message.index, message.command); break;
+            case 'updateProjectRowCommand': this.handleUpdateProjectRowCommand(message.index, message.row); break;
             case 'deleteProjectRowCommand': this.handleDeleteProjectRowCommand(message.index); break;
             case 'runProjectRowCommand': await this.handleRunProjectRowCommand(message.path, message.id); break;
             case 'saveCommonParameters': await this.handleSaveCommonParameters(message.parameters); break;
@@ -1276,6 +1276,41 @@ body {
 .change-count.success { color: var(--state-success); background-color: rgba(158, 206, 106, 0.1); }
 .change-count.warning { color: var(--state-warning); background-color: rgba(224, 175, 104, 0.1); }
 .change-count.error { color: var(--state-error); background-color: rgba(247, 118, 142, 0.12); }
+
+/* --- Projects view 项目行动态命令按钮（Set Tab Project Row Commands 配置） --- */
+.project-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-left: 6px;
+}
+
+.project-row-btn {
+    height: 20px;
+    padding: 0 8px;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    line-height: 1;
+    color: var(--brand-text-muted);
+    background-color: var(--brand-surface);
+    border: 1px solid var(--brand-border-subtle);
+    border-radius: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.project-row-btn:hover {
+    color: var(--brand-primary);
+    border-color: var(--brand-primary);
+    background-color: var(--brand-primary-subtle);
+}
+
+.project-row-btn:active { transform: scale(0.95); }
 
 .log-container {
     flex-shrink: 0;
@@ -3172,7 +3207,7 @@ function renderProjectRowCommands() {
         aliasInput.className = 'prc-alias';
         aliasInput.value = c.alias;
         aliasInput.placeholder = t('prc.alias');
-        aliasInput.onchange = function() { updateProjectRowCommand(i, this.value, c.command, c.tip); };
+        aliasInput.onchange = function() { updateProjectRowCommand(i, this.value, cmdInput.value, tipInput.value); };
         item.appendChild(aliasInput);
 
         const cmdInput = document.createElement('input');
@@ -3180,7 +3215,7 @@ function renderProjectRowCommands() {
         cmdInput.className = 'prc-command';
         cmdInput.value = c.command;
         cmdInput.placeholder = t('prc.command');
-        cmdInput.onchange = function() { updateProjectRowCommand(i, c.alias, this.value, c.tip); };
+        cmdInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, this.value, tipInput.value); };
         item.appendChild(cmdInput);
 
         const tipInput = document.createElement('input');
@@ -3188,7 +3223,7 @@ function renderProjectRowCommands() {
         tipInput.className = 'prc-tip';
         tipInput.value = c.tip;
         tipInput.placeholder = t('prc.tip');
-        tipInput.onchange = function() { updateProjectRowCommand(i, c.alias, c.command, this.value); };
+        tipInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, cmdInput.value, this.value); };
         item.appendChild(tipInput);
 
         const delBtn = document.createElement('button');
@@ -3204,7 +3239,8 @@ function renderProjectRowCommands() {
 function addProjectRowCommand() { vscode.postMessage({ command: 'addProjectRowCommand' }); }
 
 function updateProjectRowCommand(index, alias, command, tip) {
-    vscode.postMessage({ command: 'updateProjectRowCommand', index: index, command: { alias: alias, command: command, tip: tip } });
+    // 注意：数据对象必须用 row 键。若也叫 command 会覆盖外层消息类型字符串，导致宿主 switch 无法路由（内容无法保存）
+    vscode.postMessage({ command: 'updateProjectRowCommand', index: index, row: { alias: alias, command: command, tip: tip } });
 }
 
 function deleteProjectRowCommand(index) { vscode.postMessage({ command: 'deleteProjectRowCommand', index: index }); }
