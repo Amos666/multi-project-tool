@@ -19,16 +19,19 @@ function loadStore(workspaceDir) {
 
 const WB_FILE = 'workbench.json';
 
-test('load: no workspace returns defaults with preset batch groups', () => {
+test('load: no workspace returns defaults with preset batch workflows', () => {
     setWorkspace(null);
     const Store = freshRequire('../out/utils/workbenchStore').WorkbenchStore;
     const d = Store.getInstance().load();
     assert.deepStrictEqual(d.checklist, []);
-    assert.deepStrictEqual(d.workflows, []);
     assert.deepStrictEqual(d.history, []);
     assert.deepStrictEqual(d.hiddenTabs, []);
-    assert.strictEqual(d.batchGroups.length, 2);
-    assert.strictEqual(d.batchGroups[0].name, 'wb.batch.javaBuild');
+    assert.strictEqual(d.workflows.length, 2);
+    assert.ok(d.workflows.every(w => w.kind === 'batch'), 'presets are kind=batch workflows');
+    assert.strictEqual(d.workflows[0].name, 'wb.batch.javaBuild');
+    assert.ok(d.workflows[0].nodes.every(n => n.tag === 'cmd'), 'serial preset is a cmd chain');
+    assert.strictEqual(d.workflows[0].nodes.length, 4, 'java build preset has 4 commands');
+    assert.strictEqual(d.batchGroups, undefined, 'legacy batchGroups field is gone');
 });
 
 test('load: missing file returns defaults; allTemplates exposes 3 builtins', () => {
@@ -36,7 +39,8 @@ test('load: missing file returns defaults; allTemplates exposes 3 builtins', () 
     const Store = loadStore(dir);
     const store = Store.getInstance();
     const d = store.load();
-    assert.strictEqual(d.batchGroups.length, 2);
+    assert.strictEqual(d.workflows.length, 2);
+    assert.ok(d.workflows.every(w => w.kind === 'batch'));
     const tpls = store.allTemplates();
     assert.strictEqual(tpls.length, 3);
     assert.ok(tpls.every(t => t.builtin === true && Array.isArray(t.nodes) && t.nodes.length > 0));
@@ -65,18 +69,22 @@ test('workflow upsert/update/delete round-trip', () => {
     const store = Store.getInstance();
     const wf = { id: 'wf1', name: 'Flow A', nodes: [{ id: 'n1', label: 'A', tag: 'cmd', x: 10, y: 10, cmd: 'echo a', timeout: 300, failPolicy: 'stop' }], edges: [], updatedAt: 1 };
     store.upsertWorkflow(wf);
-    assert.strictEqual(store.load().workflows.length, 1);
+    /* 新工作区默认播种 2 个 kind='batch' 清单工作流，画布工作流只算非 batch 的 */
+    const canvas = () => store.load().workflows.filter(w => w.kind !== 'batch');
+    assert.strictEqual(canvas().length, 1);
+    assert.strictEqual(canvas()[0].name, 'Flow A');
 
     const updated = Object.assign({}, wf, { name: 'Flow A2' });
     store.upsertWorkflow(updated);
-    assert.strictEqual(store.load().workflows.length, 1, 'upsert by id, no duplicate');
-    assert.strictEqual(store.load().workflows[0].name, 'Flow A2');
+    assert.strictEqual(canvas().length, 1, 'upsert by id, no duplicate');
+    assert.strictEqual(canvas()[0].name, 'Flow A2');
 
     store.deleteWorkflow('wf1');
-    assert.deepStrictEqual(store.load().workflows, []);
+    assert.deepStrictEqual(canvas(), []);
+    assert.strictEqual(store.load().workflows.filter(w => w.kind === 'batch').length, 2, 'batch presets untouched');
 
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, '.multi-project-tool', WB_FILE), 'utf8'));
-    assert.deepStrictEqual(onDisk.workflows, []);
+    assert.ok(onDisk.workflows.every(w => w.kind === 'batch'), 'only batch presets remain on disk');
 });
 
 test('custom templates save/update/delete; builtin delete hides it', () => {
@@ -121,18 +129,48 @@ test('history: newest first and capped at 30', () => {
     assert.strictEqual(hist[29].workflowName, 'w5', 'oldest trimmed');
 });
 
-test('batch groups + hiddenTabs persist', () => {
+test('legacy batchGroups migrate to kind=batch workflows; hiddenTabs persist', () => {
+    const dir = makeWorkspace();
+    const cfgDir = path.join(dir, '.multi-project-tool');
+    fs.mkdirSync(cfgDir, { recursive: true });
+    fs.writeFileSync(path.join(cfgDir, WB_FILE), JSON.stringify({
+        workflows: [],
+        batchGroups: [
+            { id: 'g1', name: 'Mine', mode: 'parallel', commands: ['echo 1', 'echo 2'] },
+            { id: 'g2', name: 'Serial', mode: 'serial', commands: ['echo 3'] }
+        ],
+        hiddenTabs: ['workflow', 'batch']
+    }));
+    const Store = loadStore(dir);
+    const d = Store.getInstance().load();
+    assert.strictEqual(d.workflows.length, 2);
+    assert.ok(d.workflows.every(w => w.kind === 'batch'));
+    const mine = d.workflows.find(w => w.name === 'Mine');
+    assert.ok(mine, 'parallel group migrated');
+    assert.ok(mine.nodes.some(n => n.tag === 'fork') && mine.nodes.some(n => n.tag === 'join'), 'parallel keeps fork/join');
+    assert.strictEqual(mine.nodes.filter(n => n.tag === 'cmd').length, 2);
+    const serial = d.workflows.find(w => w.name === 'Serial');
+    assert.ok(serial.nodes.every(n => n.tag === 'cmd') && serial.nodes.length === 1, 'serial is a cmd chain');
+    // 迁移结果已落盘，旧字段不再写出
+    const saved = JSON.parse(fs.readFileSync(path.join(cfgDir, WB_FILE), 'utf8'));
+    assert.strictEqual(saved.batchGroups, undefined, 'legacy batchGroups dropped after migration');
+    assert.strictEqual(saved.workflows.length, 2);
+    assert.deepStrictEqual(d.hiddenTabs, ['workflow', 'batch']);
+});
+
+test('batch workflow upsert/delete via unified workflow API', () => {
     const dir = makeWorkspace();
     const Store = loadStore(dir);
     const store = Store.getInstance();
-    store.saveBatchGroups([{ id: 'g1', name: 'Mine', mode: 'parallel', commands: ['echo 1'] }]);
-    store.saveHiddenTabs(['workflow', 'batch']);
-
-    const Store2 = loadStore(dir);
-    const d = Store2.getInstance().load();
-    assert.strictEqual(d.batchGroups.length, 1);
-    assert.strictEqual(d.batchGroups[0].mode, 'parallel');
-    assert.deepStrictEqual(d.hiddenTabs, ['workflow', 'batch']);
+    const wf = { id: 'bw1', name: 'Custom', kind: 'batch', nodes: [], edges: [], updatedAt: 1 };
+    store.upsertWorkflow(wf);
+    store.upsertWorkflow({ ...wf, name: 'Renamed', updatedAt: 2 });
+    let d = store.load();
+    assert.strictEqual(d.workflows.filter(w => w.kind === 'batch').length, 3, 'preset 2 + custom 1');
+    assert.strictEqual(d.workflows.find(w => w.id === 'bw1').name, 'Renamed');
+    store.deleteWorkflow('bw1');
+    d = store.load();
+    assert.strictEqual(d.workflows.filter(w => w.id === 'bw1').length, 0);
 });
 
 test('load: corrupted JSON falls back to defaults', () => {
@@ -146,7 +184,8 @@ test('load: corrupted JSON falls back to defaults', () => {
     try {
         const d = Store.getInstance().load();
         assert.deepStrictEqual(d.checklist, []);
-        assert.strictEqual(d.batchGroups.length, 2);
+        assert.strictEqual(d.workflows.length, 2);
+        assert.ok(d.workflows.every(w => w.kind === 'batch'));
     } finally {
         console.error = origErr;
     }
@@ -160,7 +199,8 @@ test('load: partial file keeps defaults for missing domains', () => {
     const Store = loadStore(dir);
     const d = Store.getInstance().load();
     assert.strictEqual(d.checklist.length, 1);
-    assert.strictEqual(d.batchGroups.length, 2, 'missing batchGroups falls back to presets');
+    assert.strictEqual(d.workflows.length, 2, 'missing workflows falls back to batch presets');
+    assert.ok(d.workflows.every(w => w.kind === 'batch'));
     assert.deepStrictEqual(d.hiddenTabs, []);
 });
 

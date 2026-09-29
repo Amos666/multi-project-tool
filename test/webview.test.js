@@ -248,6 +248,25 @@ test('HTML: batch panel has own shell selector and live log area', () => {
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
 });
 
+test('JS: batch panel operates on kind=batch workflows (single data domain)', () => {
+    // 批量组 = workflows 中 kind='batch' 的子集；Flow 画布列表过滤掉
+    assert.ok(js.includes("return w.kind === 'batch'"), 'batch list filters kind=batch workflows');
+    assert.ok(js.includes("return w.kind !== 'batch'"), 'flow list excludes batch workflows');
+    // 编辑/增删走统一的 workflowSave / workflowDelete 消息，不再有独立 batchSave
+    assert.ok(js.includes("command: 'workflowSave'"), 'batch edits persist via workflowSave');
+    assert.ok(js.includes("command: 'workflowDelete'"), 'batch group delete via workflowDelete');
+    assert.ok(!js.includes('batchSave'), 'legacy batchSave message removed');
+    // 加组用输入弹窗（window.prompt 在 webview 中被禁用）
+    assert.ok(js.includes('function wbPrompt') && html.includes('id="wbPromptModal"'), 'prompt modal wired');
+    assert.ok(!js.includes('window.prompt'), 'no blocked window.prompt calls');
+    // 清单 ↔ 图 双向转换
+    assert.ok(js.includes('function batchExtract') && js.includes('function batchBuildGraph'), 'list<->graph conversion');
+    assert.ok(js.includes('kind: \'batch\''), 'new groups marked as batch kind');
+    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
+});
+
 test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher run, counters)', () => {
     // 侧边栏：列表/批量/启动器
     for (const sym of ['wbAddTask', 'wbToggleTask', 'wfStop', 'wfRelay', 'wfOpenEditor',

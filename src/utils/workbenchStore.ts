@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
     WorkbenchData, WfTemplate, RunHistoryEntry,
-    BatchGroup, ChecklistTask, Workflow
+    BatchGroup, ChecklistTask, Workflow, WfNode, WfEdge
 } from '../webviews/workbench/workbenchTypes';
 
 // 内置模板（nodes/edges 结构与画布一致）
@@ -69,13 +69,48 @@ function defaultBatchGroups(): BatchGroup[] {
     ];
 }
 
+/** Batch 清单 → 工作流图：serial = 链式；parallel = fork/join（与 webview 侧 batchBuildGraph 保持一致） */
+function batchGraph(mode: 'serial' | 'parallel', commands: string[]): { nodes: WfNode[]; edges: WfEdge[] } {
+    const nodes: WfNode[] = [];
+    const edges: WfEdge[] = [];
+    let seq = 0;
+    const nid = () => 'batchbn_' + Date.now().toString(36) + '_' + (seq++).toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    if (mode === 'parallel') {
+        const forkId = nid();
+        const joinId = nid();
+        nodes.push({ id: forkId, label: 'Fork', tag: 'fork', x: 40, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
+        commands.forEach((c, i) => {
+            const id = nid();
+            nodes.push({ id, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 260, y: 40 + i * 90, cmd: c, timeout: 300, failPolicy: 'stop' });
+            edges.push({ from: forkId, to: id });
+            edges.push({ from: id, to: joinId });
+        });
+        nodes.push({ id: joinId, label: 'Join', tag: 'join', x: 560, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
+    } else {
+        let prev: string | null = null;
+        commands.forEach((c, i) => {
+            const id = nid();
+            nodes.push({ id, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 40 + i * 150, y: 200, cmd: c, timeout: 300, failPolicy: 'stop' });
+            if (prev) { edges.push({ from: prev, to: id }); }
+            prev = id;
+        });
+    }
+    return { nodes, edges };
+}
+
+/** 旧版 BatchGroup（独立数据域）→ kind='batch' 的 Workflow（单一数据域） */
+function batchGroupToWorkflow(g: BatchGroup): Workflow {
+    const commands = (g.commands || []).filter(c => typeof c === 'string');
+    const { nodes, edges } = batchGraph(g.mode === 'parallel' ? 'parallel' : 'serial', commands);
+    return { id: g.id, name: g.name, kind: 'batch', nodes, edges, updatedAt: Date.now() };
+}
+
 function defaults(): WorkbenchData {
     return {
         checklist: [],
-        workflows: [],
+        workflows: defaultBatchGroups().map(batchGroupToWorkflow),
         templates: [],
         history: [],
-        batchGroups: defaultBatchGroups(),
         hiddenTabs: [],
         hiddenTemplates: []
     };
@@ -121,15 +156,25 @@ export class WorkbenchStore {
             }
             const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
             const d = defaults();
+            // 一次性迁移：旧版独立存储的 batchGroups 并入 workflows（kind='batch'），迁移后原字段废弃
+            const legacyGroups: BatchGroup[] = Array.isArray(parsed.batchGroups) ? parsed.batchGroups : [];
+            let workflows: Workflow[] = Array.isArray(parsed.workflows)
+                ? parsed.workflows
+                : (legacyGroups.length ? [] : d.workflows);
+            let migrated = false;
+            if (legacyGroups.length) {
+                legacyGroups.forEach(g => workflows.push(batchGroupToWorkflow(g)));
+                migrated = true;
+            }
             this._cache = {
                 checklist: Array.isArray(parsed.checklist) ? parsed.checklist : d.checklist,
-                workflows: Array.isArray(parsed.workflows) ? parsed.workflows : d.workflows,
+                workflows,
                 templates: Array.isArray(parsed.templates) ? parsed.templates : d.templates,
                 history: Array.isArray(parsed.history) ? parsed.history : d.history,
-                batchGroups: Array.isArray(parsed.batchGroups) && parsed.batchGroups.length ? parsed.batchGroups : d.batchGroups,
                 hiddenTabs: Array.isArray(parsed.hiddenTabs) ? parsed.hiddenTabs : [],
                 hiddenTemplates: Array.isArray(parsed.hiddenTemplates) ? parsed.hiddenTemplates : []
             };
+            if (migrated) { this.save(this._cache); }
             return this._cache;
         } catch (error) {
             console.error('Failed to load workbench.json:', error);
@@ -234,12 +279,6 @@ export class WorkbenchStore {
             data.hiddenTemplates = data.hiddenTemplates || [];
             if (!data.hiddenTemplates.includes(id)) { data.hiddenTemplates.push(id); }
         }
-        this.save(data);
-    }
-
-    public saveBatchGroups(groups: BatchGroup[]): void {
-        const data = this.load();
-        data.batchGroups = groups;
         this.save(data);
     }
 

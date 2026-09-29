@@ -3,7 +3,7 @@
 
 export const WORKBENCH_JS = `
 /* ==================== Workbench: state ==================== */
-var WB = { data: { checklist: [], workflows: [], templates: [], history: [], batchGroups: [], hiddenTabs: [] }, batchIdx: 0, run: [] };
+var WB = { data: { checklist: [], workflows: [], templates: [], history: [], hiddenTabs: [] }, batchIdx: 0, run: [] };
 /* 画布/属性/监控已迁移至主编辑区 Flow Editor 面板；侧边栏仅保留运行锁与批量节点映射。
    WB.run 为运行实例数组（活动运行 + 失败暂停实例并存）；WF.runId 为批量运行的实例 id（事件过滤用） */
 var WF = { running: false, batchNodeIds: [], runId: null };
@@ -88,6 +88,31 @@ function wbConfirmClose() {
     wbEl('wbConfirmModal').style.display = 'none';
 }
 
+/* ==================== 通用输入弹窗（webview 中原生 prompt API 被禁用） ==================== */
+var wbPromptCb = null;
+function wbPrompt(msg, defVal, cb) {
+    wbEl('wbPromptText').textContent = msg;
+    var input = wbEl('wbPromptInput');
+    input.value = defVal || '';
+    wbPromptCb = cb;
+    wbEl('wbPromptModal').style.display = 'flex';
+    setTimeout(function () { input.focus(); input.select(); }, 50);
+}
+function wbPromptOk() {
+    var cb = wbPromptCb;
+    var val = wbEl('wbPromptInput').value;
+    wbPromptClose();
+    if (cb) { cb(val); }
+}
+function wbPromptClose() {
+    wbPromptCb = null;
+    wbEl('wbPromptModal').style.display = 'none';
+}
+function wbPromptKey(ev) {
+    if (ev.key === 'Enter') { wbPromptOk(); }
+    else if (ev.key === 'Escape') { wbPromptClose(); }
+}
+
 /* ==================== Checklist ==================== */
 var CL_PRIO = ['urgent', 'normal', 'low'];
 function renderChecklist() {
@@ -157,7 +182,8 @@ function wfOpenEditor() { wfRelay({ type: 'open' }); }
 function renderFlowList() {
     var box = wbEl('wfFlowList');
     if (!box) { return; }
-    var flows = WB.data.workflows || [];
+    /* kind='batch' 的清单式工作流由 Batch 面板管理，不在 Flow 画布列表展示 */
+    var flows = (WB.data.workflows || []).filter(function (w) { return w.kind !== 'batch'; });
     var tpls = WB.data.templates || [];
     if (!flows.length && !tpls.length) {
         box.innerHTML = '<div class="wf-list-item dim">' + wbEsc(t('wb.wf.noFlows')) + '</div>';
@@ -279,108 +305,63 @@ function batchClearLog() {
     if (out) { out.innerHTML = ''; }
 }
 
-/* ==================== Batch ==================== */
+/* ==================== Batch（清单式工作流：kind='batch' 的 Workflow，与 Flow 同一数据域） ==================== */
 WB.batchRunning = false;
-function batchCurrent() { return (WB.data.batchGroups || [])[WB.batchIdx]; }
-function renderBatchGroups() {
-    var sel = wbEl('batchGroupSel');
-    if (!sel) { return; }
-    var groups = WB.data.batchGroups || [];
-    if (WB.batchIdx >= groups.length) { WB.batchIdx = 0; }
-    sel.innerHTML = groups.map(function (g, i) {
-        var label = g.name.indexOf('wb.batch.') === 0 ? t(g.name) : g.name;
-        return '<option value="' + i + '"' + (i === WB.batchIdx ? ' selected' : '') + '>' + wbEsc(label) + '</option>';
-    }).join('');
-    var cur = batchCurrent();
-    wbEl('batchMode').value = cur ? cur.mode : 'serial';
-    wbEl('batchGroupName').value = cur ? (cur.name.indexOf('wb.batch.') === 0 ? t(cur.name) : cur.name) : '';
-    renderBatchList();
+/* Batch 面板展示的工作流列表（workflows 中 kind='batch' 的子集，Flow 画布列表将其过滤掉） */
+function batchFlows() {
+    return (WB.data.workflows || []).filter(function (w) { return w.kind === 'batch'; });
 }
-function renderBatchList() {
-    var ul = wbEl('batchList');
-    if (!ul) { return; }
-    var g = batchCurrent();
-    if (!g || !g.commands.length) {
-        ul.innerHTML = '<li style="justify-content:center;color:var(--brand-text-muted)">' + wbEsc(t('wb.batch.empty')) + '</li>';
-        return;
+function batchCurrent() { return batchFlows()[WB.batchIdx]; }
+function batchLabel(name) { return name.indexOf('wb.batch.') === 0 ? t(name) : name; }
+/* 从工作流图反推清单：serial = 沿链式边遍历；parallel = fork 出边目标按 y 排序 */
+function batchExtract(wf) {
+    if (!wf || !Array.isArray(wf.nodes)) { return { mode: 'serial', commands: [], ids: [] }; }
+    var byId = {};
+    wf.nodes.forEach(function (n) { byId[n.id] = n; });
+    var edges = wf.edges || [];
+    var cmdNodes = wf.nodes.filter(function (n) { return n.tag === 'cmd'; });
+    var fork = wf.nodes.find(function (n) { return n.tag === 'fork'; });
+    var ordered = [];
+    if (fork) {
+        ordered = edges.filter(function (e) { return e.from === fork.id; })
+            .map(function (e) { return byId[e.to]; })
+            .filter(function (n) { return n && n.tag === 'cmd'; })
+            .sort(function (a, b) { return a.y - b.y; });
+    } else {
+        var inDeg = {};
+        wf.nodes.forEach(function (n) { inDeg[n.id] = 0; });
+        edges.forEach(function (e) { if (inDeg[e.to] !== undefined) { inDeg[e.to]++; } });
+        var cur = cmdNodes.find(function (n) { return inDeg[n.id] === 0; });
+        while (cur) {
+            ordered.push(cur);
+            var next = null;
+            for (var k = 0; k < edges.length; k++) {
+                if (edges[k].from === cur.id) {
+                    var nn = byId[edges[k].to];
+                    if (nn && nn.tag === 'cmd') { next = nn; break; }
+                }
+            }
+            cur = next;
+        }
+        /* 容错：链式遍历与 cmd 节点数不符（手工改图等）时按坐标排序兜底 */
+        if (ordered.length !== cmdNodes.length) {
+            ordered = cmdNodes.slice().sort(function (a, b) { return (a.x - b.x) || (a.y - b.y); });
+        }
     }
-    ul.innerHTML = g.commands.map(function (c, i) {
-        return '<li draggable="true" data-bidx="' + i + '" ondragstart="batchDragStart(event,' + i + ')" ondragover="batchDragOver(event)" ondragleave="batchDragLeave(event)" ondrop="batchDrop(event,' + i + ')">' +
-            '<span class="batch-handle">≡</span><span class="batch-idx">' + (i + 1) + '.</span>' +
-            '<input class="batch-cmd-input" value="' + wbEsc(c) + '" onchange="batchEditCmd(' + i + ', this.value)">' +
-            '<span class="batch-status" id="bstat-' + i + '">⏳</span>' +
-            '<span class="batch-dur" id="bdur-' + i + '">--</span>' +
-            '<span class="batch-rm" onclick="batchRemoveCmd(' + i + ')">✕</span></li>';
-    }).join('');
+    return {
+        mode: fork ? 'parallel' : 'serial',
+        commands: ordered.map(function (n) { return n.cmd; }),
+        ids: ordered.map(function (n) { return n.id; })
+    };
 }
-function batchSave() { vscode.postMessage({ command: 'batchSave', groups: WB.data.batchGroups }); }
-function batchSelectGroup() { WB.batchIdx = Number(wbEl('batchGroupSel').value); renderBatchGroups(); }
-function batchModeChange() {
-    var g = batchCurrent();
-    if (g) { g.mode = wbEl('batchMode').value; batchSave(); }
-}
-function batchRenameGroup() {
-    var g = batchCurrent();
-    var name = (wbEl('batchGroupName').value || '').trim();
-    if (!g || !name) { return; }
-    g.name = name;
-    batchSave();
-    renderBatchGroups();
-}
-function batchAddGroup() {
-    var name = window.prompt(t('wb.batch.namePh'), 'group');
-    if (!name) { return; }
-    WB.data.batchGroups.push({ id: wbId('batch'), name: name, mode: 'serial', commands: [] });
-    WB.batchIdx = WB.data.batchGroups.length - 1;
-    batchSave();
-    renderBatchGroups();
-}
-function batchDeleteGroup() {
-    if (WB.data.batchGroups.length <= 1) { wbToast(t('wb.batch.keepOne'), 'err'); return; }
-    WB.data.batchGroups.splice(WB.batchIdx, 1);
-    WB.batchIdx = 0;
-    batchSave();
-    renderBatchGroups();
-}
-function batchAddCmd() {
-    var g = batchCurrent();
-    if (!g) { return; }
-    g.commands.push('echo hello');
-    batchSave();
-    renderBatchList();
-}
-function batchEditCmd(i, val) {
-    var g = batchCurrent();
-    if (g && g.commands[i] !== undefined) { g.commands[i] = val; batchSave(); }
-}
-function batchRemoveCmd(i) {
-    var g = batchCurrent();
-    if (g) { g.commands.splice(i, 1); batchSave(); renderBatchList(); }
-}
-var batchDragIdx = null;
-function batchDragStart(e, i) { batchDragIdx = i; e.dataTransfer.effectAllowed = 'move'; }
-function batchDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
-function batchDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
-function batchDrop(e, i) {
-    e.preventDefault();
-    e.currentTarget.classList.remove('drag-over');
-    var g = batchCurrent();
-    if (!g || batchDragIdx === null || batchDragIdx === i) { return; }
-    var item = g.commands.splice(batchDragIdx, 1)[0];
-    g.commands.splice(i, 0, item);
-    batchDragIdx = null;
-    batchSave();
-    renderBatchList();
-}
-function batchBuildWorkflow() {
-    var g = batchCurrent();
-    if (!g || !g.commands.length) { return null; }
+/* 清单 → 工作流图：serial = 链式；parallel = fork/join（与宿主迁移逻辑一致） */
+function batchBuildGraph(mode, commands) {
     var nodes = [], edges = [], ids = [];
-    if (g.mode === 'parallel') {
+    if (mode === 'parallel') {
         var forkId = wbId('bn');
         var joinId = wbId('bn');
         nodes.push({ id: forkId, label: 'Fork', tag: 'fork', x: 40, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
-        g.commands.forEach(function (c, i) {
+        commands.forEach(function (c, i) {
             var nid = wbId('bn');
             ids.push(nid);
             nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 260, y: 40 + i * 90, cmd: c, timeout: 300, failPolicy: 'stop' });
@@ -390,7 +371,7 @@ function batchBuildWorkflow() {
         nodes.push({ id: joinId, label: 'Join', tag: 'join', x: 560, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
     } else {
         var prev = null;
-        g.commands.forEach(function (c, i) {
+        commands.forEach(function (c, i) {
             var nid = wbId('bn');
             ids.push(nid);
             nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 40 + i * 150, y: 200, cmd: c, timeout: 300, failPolicy: 'stop' });
@@ -398,32 +379,148 @@ function batchBuildWorkflow() {
             prev = nid;
         });
     }
-    return { workflow: { id: wbId('batchrun'), name: g.name, nodes: nodes, edges: edges, updatedAt: Date.now() }, ids: ids };
+    return { nodes: nodes, edges: edges, ids: ids };
+}
+/* 按（可能被修改的）清单重建工作流图并持久化（复用 workflowSave，与 Flow 编辑器同一条保存路径） */
+function batchSync(wf, mode, commands) {
+    var g = batchBuildGraph(mode, commands);
+    wf.nodes = g.nodes;
+    wf.edges = g.edges;
+    wf.updatedAt = Date.now();
+    vscode.postMessage({ command: 'workflowSave', workflow: wf });
+}
+function renderBatchGroups() {
+    var sel = wbEl('batchGroupSel');
+    if (!sel) { return; }
+    var flows = batchFlows();
+    if (WB.batchIdx >= flows.length) { WB.batchIdx = 0; }
+    sel.innerHTML = flows.map(function (wf, i) {
+        return '<option value="' + i + '"' + (i === WB.batchIdx ? ' selected' : '') + '>' + wbEsc(batchLabel(wf.name)) + '</option>';
+    }).join('');
+    var cur = batchCurrent();
+    var x = cur ? batchExtract(cur) : { mode: 'serial', commands: [] };
+    wbEl('batchMode').value = x.mode;
+    wbEl('batchGroupName').value = cur ? batchLabel(cur.name) : '';
+    renderBatchList();
+}
+function renderBatchList() {
+    var ul = wbEl('batchList');
+    if (!ul) { return; }
+    var wf = batchCurrent();
+    var x = wf ? batchExtract(wf) : { commands: [] };
+    if (!wf || !x.commands.length) {
+        ul.innerHTML = '<li style="justify-content:center;color:var(--brand-text-muted)">' + wbEsc(t('wb.batch.empty')) + '</li>';
+        return;
+    }
+    ul.innerHTML = x.commands.map(function (c, i) {
+        return '<li draggable="true" data-bidx="' + i + '" ondragstart="batchDragStart(event,' + i + ')" ondragover="batchDragOver(event)" ondragleave="batchDragLeave(event)" ondrop="batchDrop(event,' + i + ')">' +
+            '<span class="batch-handle">≡</span><span class="batch-idx">' + (i + 1) + '.</span>' +
+            '<input class="batch-cmd-input" value="' + wbEsc(c) + '" onchange="batchEditCmd(' + i + ', this.value)">' +
+            '<span class="batch-status" id="bstat-' + i + '">⏳</span>' +
+            '<span class="batch-dur" id="bdur-' + i + '">--</span>' +
+            '<span class="batch-rm" onclick="batchRemoveCmd(' + i + ')">✕</span></li>';
+    }).join('');
+}
+function batchSelectGroup() { WB.batchIdx = Number(wbEl('batchGroupSel').value); renderBatchGroups(); }
+function batchModeChange() {
+    var wf = batchCurrent();
+    if (!wf) { return; }
+    var mode = wbEl('batchMode').value;
+    var x = batchExtract(wf);
+    if (x.mode === mode) { return; }
+    batchSync(wf, mode, x.commands);
+}
+function batchRenameGroup() {
+    var wf = batchCurrent();
+    var name = (wbEl('batchGroupName').value || '').trim();
+    if (!wf || !name) { return; }
+    wf.name = name;
+    wf.updatedAt = Date.now();
+    vscode.postMessage({ command: 'workflowSave', workflow: wf });
+    renderBatchGroups();
+}
+/* 原生 prompt API 在 webview 中被禁用，改用输入弹窗 */
+function batchAddGroup() {
+    wbPrompt(t('wb.batch.namePh'), 'group', function (name) {
+        name = (name || '').trim();
+        if (!name) { return; }
+        var wf = { id: wbId('batch'), name: name, kind: 'batch', nodes: [], edges: [], updatedAt: Date.now() };
+        WB.data.workflows.push(wf);
+        WB.batchIdx = batchFlows().length - 1;
+        vscode.postMessage({ command: 'workflowSave', workflow: wf });
+        renderBatchGroups();
+    });
+}
+function batchDeleteGroup() {
+    var wf = batchCurrent();
+    if (!wf) { return; }
+    wbConfirm(t('wb.batch.deleteGroupConfirm') + ' "' + batchLabel(wf.name) + '"', function () {
+        vscode.postMessage({ command: 'workflowDelete', id: wf.id });
+    });
+}
+function batchAddCmd() {
+    var wf = batchCurrent();
+    if (!wf) { return; }
+    var x = batchExtract(wf);
+    x.commands.push('echo hello');
+    batchSync(wf, x.mode, x.commands);
+    renderBatchList();
+}
+function batchEditCmd(i, val) {
+    var wf = batchCurrent();
+    if (!wf) { return; }
+    var x = batchExtract(wf);
+    if (x.commands[i] === undefined) { return; }
+    x.commands[i] = val;
+    batchSync(wf, x.mode, x.commands);
+}
+function batchRemoveCmd(i) {
+    var wf = batchCurrent();
+    if (!wf) { return; }
+    var x = batchExtract(wf);
+    x.commands.splice(i, 1);
+    batchSync(wf, x.mode, x.commands);
+    renderBatchList();
+}
+var batchDragIdx = null;
+function batchDragStart(e, i) { batchDragIdx = i; e.dataTransfer.effectAllowed = 'move'; }
+function batchDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function batchDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function batchDrop(e, i) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    var wf = batchCurrent();
+    if (!wf || batchDragIdx === null || batchDragIdx === i) { return; }
+    var x = batchExtract(wf);
+    var item = x.commands.splice(batchDragIdx, 1)[0];
+    x.commands.splice(i, 0, item);
+    batchDragIdx = null;
+    batchSync(wf, x.mode, x.commands);
+    renderBatchList();
 }
 function batchRun() {
     if (WF.running) { wbToast(t('wb.wf.runningLock'), 'err'); return; }
-    var built = batchBuildWorkflow();
-    if (!built) { wbToast(t('wb.batch.empty'), 'err'); return; }
-    WF.batchNodeIds = built.ids;
+    var wf = batchCurrent();
+    var x = wf ? batchExtract(wf) : null;
+    if (!wf || !x.commands.length) { wbToast(t('wb.batch.empty'), 'err'); return; }
+    WF.batchNodeIds = x.ids;
     WB.batchRunning = true;
     WF.running = true;
     WF.runId = null; // 宿主创建实例后经 batchRunStarted 消息回填
     wbEl('batchStatus').textContent = t('wb.wf.stRunning');
     batchResetPills();
     batchClearLog();
-    var g = batchCurrent();
-    var gLabel = g ? (g.name.indexOf('wb.batch.') === 0 ? t(g.name) : g.name) : '';
-    batchAppendOutput('hdr', '━━ ' + gLabel + ' · ' + (g && g.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' · ' + wbEl('batchShell').value + ' ━━');
+    batchAppendOutput('hdr', '━━ ' + batchLabel(wf.name) + ' · ' + (x.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' · ' + wbEl('batchShell').value + ' ━━');
     vscode.postMessage({
         command: 'workflowRun',
-        workflow: built.workflow,
+        workflow: wf,
         shell: wbEl('batchShell').value
     });
 }
 function batchResetPills() {
-    var g = batchCurrent();
-    if (!g) { return; }
-    g.commands.forEach(function (_, i) {
+    var wf = batchCurrent();
+    var x = wf ? batchExtract(wf) : { commands: [] };
+    x.commands.forEach(function (_, i) {
         var pill = wbEl('bstat-' + i);
         var dur = wbEl('bdur-' + i);
         if (pill) { pill.textContent = '⏳'; pill.className = 'batch-status'; }
@@ -441,13 +538,13 @@ function batchUpdatePill(idx, state, dur) {
     if (dur !== undefined && durEl) { durEl.textContent = (dur / 1000).toFixed(1) + 's'; }
 }
 function batchToFlow() {
-    var built = batchBuildWorkflow();
-    if (!built) { wbToast(t('wb.batch.empty'), 'err'); return; }
+    var wf = batchCurrent();
+    if (!wf || !batchExtract(wf).commands.length) { wbToast(t('wb.batch.empty'), 'err'); return; }
     wfRelay({
         type: 'batchToFlow',
-        name: built.workflow.name,
-        nodes: built.workflow.nodes,
-        edges: built.workflow.edges
+        name: batchLabel(wf.name),
+        nodes: wf.nodes,
+        edges: wf.edges
     });
 }
 
@@ -481,10 +578,9 @@ function launcherBuild() {
             run: function () { wfRelay({ type: 'loadTemplate', id: tpl.id }); }
         });
     });
-    (WB.data.batchGroups || []).forEach(function (g, i) {
-        var label = g.name.indexOf('wb.batch.') === 0 ? t(g.name) : g.name;
+    batchFlows().forEach(function (wf, i) {
         items.push({
-            icon: wbIcon('bolt'), label: label, kind: t('wb.launcher.kindBatch'),
+            icon: wbIcon('bolt'), label: batchLabel(wf.name), kind: t('wb.launcher.kindBatch'),
             run: function () { WB.batchIdx = i; switchTab('batch'); renderBatchGroups(); }
         });
     });
