@@ -75,8 +75,9 @@ export const WORKBENCH_PANELS = `
                             <option value="parallel" data-i18n="wb.batch.parallel">Parallel</option>
                         </select>
                     </label>
-                    <label><span data-i18n="wb.batch.shell">Shell</span>
-                        <select id="batchShell" title="Shell">
+                    <label><span data-i18n="wb.batch.shellAll">Apply Shell</span>
+                        <select id="batchShellAll" onchange="batchApplyShellAll(this.value)" data-i18n-title="wb.batch.shellAllHint" title="Set shell for every command in this group">
+                            <option value="" data-i18n="wb.batch.shellDefault">Default</option>
                             <option value="git-bash">Git Bash</option>
                             <option value="cmd">CMD</option>
                             <option value="powershell">PowerShell</option>

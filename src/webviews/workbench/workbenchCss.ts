@@ -249,6 +249,13 @@ export const WORKBENCH_CSS = `
     color: var(--brand-text); font-family: var(--font-mono); font-size: 12px;
     border-bottom: 1px solid var(--brand-border);
 }
+.batch-list .batch-shell-sel {
+    flex: none; width: 92px;
+    background-color: var(--brand-surface-raised); color: var(--brand-text-muted);
+    border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
+    font-size: 11px; padding: 2px 4px; outline: none;
+}
+.batch-list .batch-shell-sel.custom { color: var(--brand-primary); border-color: var(--brand-primary); }
 .batch-list .batch-status {
     font-size: 10px; padding: 1px 8px; border-radius: 9px; flex: none;
     background-color: var(--brand-surface-raised); color: var(--brand-text-muted); min-width: 52px; text-align: center;

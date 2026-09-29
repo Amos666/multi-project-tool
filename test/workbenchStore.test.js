@@ -129,33 +129,56 @@ test('history: newest first and capped at 30', () => {
     assert.strictEqual(hist[29].workflowName, 'w5', 'oldest trimmed');
 });
 
-test('legacy batchGroups migrate to kind=batch workflows; hiddenTabs persist', () => {
+test('legacy batchGroups field is ignored; hiddenTabs persist', () => {
     const dir = makeWorkspace();
     const cfgDir = path.join(dir, '.multi-project-tool');
     fs.mkdirSync(cfgDir, { recursive: true });
     fs.writeFileSync(path.join(cfgDir, WB_FILE), JSON.stringify({
         workflows: [],
         batchGroups: [
-            { id: 'g1', name: 'Mine', mode: 'parallel', commands: ['echo 1', 'echo 2'] },
-            { id: 'g2', name: 'Serial', mode: 'serial', commands: ['echo 3'] }
+            { id: 'g1', name: 'Mine', mode: 'parallel', commands: ['echo 1', 'echo 2'] }
         ],
         hiddenTabs: ['workflow', 'batch']
     }));
     const Store = loadStore(dir);
     const d = Store.getInstance().load();
-    assert.strictEqual(d.workflows.length, 2);
-    assert.ok(d.workflows.every(w => w.kind === 'batch'));
-    const mine = d.workflows.find(w => w.name === 'Mine');
-    assert.ok(mine, 'parallel group migrated');
-    assert.ok(mine.nodes.some(n => n.tag === 'fork') && mine.nodes.some(n => n.tag === 'join'), 'parallel keeps fork/join');
-    assert.strictEqual(mine.nodes.filter(n => n.tag === 'cmd').length, 2);
-    const serial = d.workflows.find(w => w.name === 'Serial');
-    assert.ok(serial.nodes.every(n => n.tag === 'cmd') && serial.nodes.length === 1, 'serial is a cmd chain');
-    // 迁移结果已落盘，旧字段不再写出
-    const saved = JSON.parse(fs.readFileSync(path.join(cfgDir, WB_FILE), 'utf8'));
-    assert.strictEqual(saved.batchGroups, undefined, 'legacy batchGroups dropped after migration');
-    assert.strictEqual(saved.workflows.length, 2);
+    assert.deepStrictEqual(d.workflows, [], 'legacy batchGroups no longer migrated');
     assert.deepStrictEqual(d.hiddenTabs, ['workflow', 'batch']);
+});
+
+test('saveBatch: intent payload builds graph host-side with per-command shell', () => {
+    const dir = makeWorkspace();
+    const Store = loadStore(dir);
+    const store = Store.getInstance();
+    /* 新建：无 id 时生成 id，serial = cmd 链，shell 持久化到节点 */
+    const created = store.saveBatch({
+        name: 'Serial G', mode: 'serial',
+        items: [{ cmd: 'echo 1', shell: 'cmd' }, { cmd: 'echo 2' }]
+    });
+    assert.strictEqual(created.kind, 'batch');
+    assert.ok(created.id.indexOf('batch') === 0, 'generated id has batch prefix');
+    assert.strictEqual(created.nodes.length, 2, 'serial chain of cmd nodes');
+    assert.strictEqual(created.nodes[0].shell, 'cmd', 'shell persisted on node');
+    assert.strictEqual(created.nodes[1].shell, undefined, 'unset shell stays inherited');
+    assert.strictEqual(created.edges.length, 1, 'serial chain has n-1 edges');
+    /* 更新：同 id 重建图；parallel 生成 fork/join */
+    const updated = store.saveBatch({
+        id: created.id, name: 'Parallel G', mode: 'parallel',
+        items: [{ cmd: 'echo a', shell: 'powershell' }, { cmd: 'echo b' }]
+    });
+    assert.strictEqual(updated.id, created.id);
+    assert.strictEqual(updated.name, 'Parallel G');
+    assert.ok(updated.nodes.some(n => n.tag === 'fork') && updated.nodes.some(n => n.tag === 'join'), 'parallel keeps fork/join');
+    const cmds = updated.nodes.filter(n => n.tag === 'cmd');
+    assert.strictEqual(cmds.length, 2);
+    assert.strictEqual(cmds.find(n => n.cmd === 'echo a').shell, 'powershell');
+    assert.strictEqual(cmds.find(n => n.cmd === 'echo b').shell, undefined);
+    assert.strictEqual(store.load().workflows.filter(w => w.id === created.id).length, 1, 'upsert, no duplicate');
+    /* 非法 items 容错 */
+    const tolerant = store.saveBatch({ id: created.id, items: [null, { cmd: 42 }, { cmd: 'echo ok', shell: '' }] });
+    assert.strictEqual(tolerant.nodes.filter(n => n.tag === 'cmd').length, 1);
+    assert.strictEqual(tolerant.nodes[0].shell, undefined, 'empty shell not persisted');
+    assert.ok(store.load().workflows.some(w => w.id === 'batch-java'), 'presets untouched');
 });
 
 test('batch workflow upsert/delete via unified workflow API', () => {

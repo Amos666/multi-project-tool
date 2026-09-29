@@ -25,7 +25,7 @@ export interface WfNode {
     failPolicy: WfFailPolicy;
     /** 仅 notify 节点：文本弹窗 / 命令行 / HTTP 请求 */
     notifyType?: 'text' | 'cmd' | 'http';
-    /** 仅真实执行 shell 的节点（cmd / condition / notify+cmd）：指定解释器；缺省 = 继承运行级 shell（Batch 面板选择或全局默认） */
+    /** 仅真实执行 shell 的节点（cmd / condition / notify+cmd）：指定解释器；缺省 = 继承运行级 shell（全局默认） */
     shell?: string;
     /** 仅 notify+http：请求方法，默认 GET */
     httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -54,11 +54,17 @@ export interface WfEdge {
 export interface Workflow {
     id: string;
     name: string;
-    /** 'batch' = Batch Tab 的清单式工作流（由旧版 batchGroups 迁移而来，Batch 面板按此过滤展示）；缺省 = Flow 画布工作流 */
+    /** 'batch' = Batch Tab 的清单式工作流（Batch 面板按此过滤展示，shell 随节点属性持久化）；缺省 = Flow 画布工作流 */
     kind?: 'batch';
     nodes: WfNode[];
     edges: WfEdge[];
     updatedAt: number;
+}
+
+/** Batch 清单命令项：cmd + 可选 shell（空 = 继承全局默认 shell），webview 与宿主建图的统一入参 */
+export interface BatchCmdItem {
+    cmd: string;
+    shell?: string;
 }
 
 export interface WfTemplate {
@@ -98,14 +104,6 @@ export interface RunHistoryEntry {
     workflow?: Workflow;
     /** 执行日志（截断保存），用于历史详情回放；旧记录可能缺失 */
     logs?: WfLogEntry[];
-}
-
-/** 旧版 Batch Tab 的独立数据结构（v1 数据域，加载时迁移为 kind='batch' 的 Workflow） */
-export interface BatchGroup {
-    id: string;
-    name: string;
-    mode: 'serial' | 'parallel';
-    commands: string[];
 }
 
 export interface WorkbenchData {

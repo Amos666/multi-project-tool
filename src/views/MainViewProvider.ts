@@ -291,6 +291,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             // ===== Workbench 新增命令（独立前缀，不影响既有协议） =====
             case 'checklistSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveChecklist(message.tasks || [])); break;
             case 'workflowSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().upsertWorkflow(message.workflow)); break;
+            // Batch 清单意图式保存：webview 传 (name, mode, items)，宿主统一建图（节点级 shell 随图持久化）
+            case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatch(message)); break;
             case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
             case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [], message.id)); break;
             case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteTemplate(message.id)); break;

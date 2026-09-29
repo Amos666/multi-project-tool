@@ -243,10 +243,13 @@ test('HTML+JS: start node (scheduled start) and confirm node (manual approval)',
     }
 });
 
-test('HTML: batch panel has own shell selector and live log area', () => {
-    for (const id of ['batchGroupSel', 'batchMode', 'batchShell', 'batchList', 'batchStatus', 'batchOutput']) {
+test('HTML: batch panel has per-command shell controls and live log area', () => {
+    for (const id of ['batchGroupSel', 'batchMode', 'batchShellAll', 'batchList', 'batchStatus', 'batchOutput']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing batch element: ' + id);
     }
+    // 运行级 shell 下拉已删除：shell 下沉到每条命令（行内下拉）+ 整组统一设置
+    assert.ok(!html.includes('id="batchShell"'), 'run-level shell selector removed from batch controls');
+    assert.ok(html.includes('batchApplyShellAll(this.value)'), 'apply-shell-to-all wired');
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
     assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
@@ -256,17 +259,24 @@ test('JS: batch panel operates on kind=batch workflows (single data domain)', ()
     // 批量组 = workflows 中 kind='batch' 的子集；Flow 画布列表过滤掉
     assert.ok(js.includes("return w.kind === 'batch'"), 'batch list filters kind=batch workflows');
     assert.ok(js.includes("return w.kind !== 'batch'"), 'flow list excludes batch workflows');
-    // 编辑/增删走统一的 workflowSave / workflowDelete 消息，不再有独立 batchSave
-    assert.ok(js.includes("command: 'workflowSave'"), 'batch edits persist via workflowSave');
+    // 清单编辑发 batchSave 意图由宿主统一建图；重命名/新组仍走 workflowSave，删除走 workflowDelete
+    assert.ok(js.includes("command: 'batchSave'"), 'batch list edits persist via batchSave intent');
+    assert.ok(js.includes("command: 'workflowSave'"), 'rename/new group persist via workflowSave');
     assert.ok(js.includes("command: 'workflowDelete'"), 'batch group delete via workflowDelete');
-    assert.ok(!js.includes('batchSave'), 'legacy batchSave message removed');
+    assert.ok(!js.includes('function batchBuildGraph') && !js.includes('function batchSync'), 'webview no longer builds graphs locally');
+    assert.ok(mvpSrcCache.includes("case 'batchSave':") && mvpSrcCache.includes('saveBatch(message)'), 'host routes batchSave to store');
+    // 每条命令的 shell：行内下拉 + 整组统一设置；batchExtract 从节点属性读取 shell
+    assert.ok(js.includes('function batchEditShell') && js.includes('function batchApplyShellAll'), 'per-command shell editors');
+    assert.ok(js.includes('batch-shell-sel'), 'row shell select rendered');
+    assert.ok(js.includes('shell: n.shell'), 'batchExtract reads shell from node');
+    assert.ok(!js.includes("wbEl('batchShell')"), 'run message no longer reads run-level shell');
     // 加组用输入弹窗（window.prompt 在 webview 中被禁用）
     assert.ok(js.includes('function wbPrompt') && html.includes('id="wbPromptModal"'), 'prompt modal wired');
     assert.ok(!js.includes('window.prompt'), 'no blocked window.prompt calls');
-    // 清单 ↔ 图 双向转换
-    assert.ok(js.includes('function batchExtract') && js.includes('function batchBuildGraph'), 'list<->graph conversion');
+    // 图 → 清单反推仍在 webview（渲染用）；清单 → 图收敛到宿主 saveBatch
+    assert.ok(js.includes('function batchExtract'), 'graph->list extraction stays in webview');
     assert.ok(js.includes('kind: \'batch\''), 'new groups marked as batch kind');
-    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm']) {
+    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm', 'wb.batch.shellAll', 'wb.batch.shellDefault']) {
         assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
     }
 });

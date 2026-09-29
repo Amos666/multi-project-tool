@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
     WorkbenchData, WfTemplate, RunHistoryEntry,
-    BatchGroup, ChecklistTask, Workflow, WfNode, WfEdge
+    BatchCmdItem, ChecklistTask, Workflow, WfNode, WfEdge
 } from '../webviews/workbench/workbenchTypes';
 
 // 内置模板（nodes/edges 结构与画布一致）
@@ -62,53 +62,55 @@ function builtinTemplates(): WfTemplate[] {
     ];
 }
 
-function defaultBatchGroups(): BatchGroup[] {
-    return [
-        { id: 'batch-java', name: 'wb.batch.javaBuild', mode: 'serial', commands: ['mvn clean', 'mvn compile', 'mvn test', 'mvn package'] },
-        { id: 'batch-quick', name: 'wb.batch.quickCheck', mode: 'serial', commands: ['echo quick check step 1', 'echo quick check step 2'] }
-    ];
-}
-
-/** Batch 清单 → 工作流图：serial = 链式；parallel = fork/join（与 webview 侧 batchBuildGraph 保持一致） */
-function batchGraph(mode: 'serial' | 'parallel', commands: string[]): { nodes: WfNode[]; edges: WfEdge[] } {
+/** Batch 清单 → 工作流图：serial = 链式；parallel = fork/join。唯一建图实现，webview 经 batchSave 消息复用 */
+export function batchGraph(mode: 'serial' | 'parallel', items: BatchCmdItem[]): { nodes: WfNode[]; edges: WfEdge[] } {
     const nodes: WfNode[] = [];
     const edges: WfEdge[] = [];
     let seq = 0;
     const nid = () => 'batchbn_' + Date.now().toString(36) + '_' + (seq++).toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    const cmdNode = (it: BatchCmdItem, i: number, x: number, y: number): WfNode => {
+        const node: WfNode = { id: nid(), label: it.cmd.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x, y, cmd: it.cmd, timeout: 300, failPolicy: 'stop' };
+        if (it.shell) { node.shell = it.shell; }
+        return node;
+    };
     if (mode === 'parallel') {
         const forkId = nid();
         const joinId = nid();
         nodes.push({ id: forkId, label: 'Fork', tag: 'fork', x: 40, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
-        commands.forEach((c, i) => {
-            const id = nid();
-            nodes.push({ id, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 260, y: 40 + i * 90, cmd: c, timeout: 300, failPolicy: 'stop' });
-            edges.push({ from: forkId, to: id });
-            edges.push({ from: id, to: joinId });
+        items.forEach((it, i) => {
+            const node = cmdNode(it, i, 260, 40 + i * 90);
+            nodes.push(node);
+            edges.push({ from: forkId, to: node.id });
+            edges.push({ from: node.id, to: joinId });
         });
         nodes.push({ id: joinId, label: 'Join', tag: 'join', x: 560, y: 200, cmd: '', timeout: 300, failPolicy: 'stop' });
     } else {
         let prev: string | null = null;
-        commands.forEach((c, i) => {
-            const id = nid();
-            nodes.push({ id, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 40 + i * 150, y: 200, cmd: c, timeout: 300, failPolicy: 'stop' });
-            if (prev) { edges.push({ from: prev, to: id }); }
-            prev = id;
+        items.forEach((it, i) => {
+            const node = cmdNode(it, i, 40 + i * 150, 200);
+            nodes.push(node);
+            if (prev) { edges.push({ from: prev, to: node.id }); }
+            prev = node.id;
         });
     }
     return { nodes, edges };
 }
 
-/** 旧版 BatchGroup（独立数据域）→ kind='batch' 的 Workflow（单一数据域） */
-function batchGroupToWorkflow(g: BatchGroup): Workflow {
-    const commands = (g.commands || []).filter(c => typeof c === 'string');
-    const { nodes, edges } = batchGraph(g.mode === 'parallel' ? 'parallel' : 'serial', commands);
-    return { id: g.id, name: g.name, kind: 'batch', nodes, edges, updatedAt: Date.now() };
+function defaultBatchWorkflows(): Workflow[] {
+    const mk = (id: string, name: string, cmds: string[]): Workflow => {
+        const { nodes, edges } = batchGraph('serial', cmds.map(c => ({ cmd: c })));
+        return { id, name, kind: 'batch', nodes, edges, updatedAt: Date.now() };
+    };
+    return [
+        mk('batch-java', 'wb.batch.javaBuild', ['mvn clean', 'mvn compile', 'mvn test', 'mvn package']),
+        mk('batch-quick', 'wb.batch.quickCheck', ['echo quick check step 1', 'echo quick check step 2'])
+    ];
 }
 
 function defaults(): WorkbenchData {
     return {
         checklist: [],
-        workflows: defaultBatchGroups().map(batchGroupToWorkflow),
+        workflows: defaultBatchWorkflows(),
         templates: [],
         history: [],
         hiddenTabs: [],
@@ -156,25 +158,14 @@ export class WorkbenchStore {
             }
             const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
             const d = defaults();
-            // 一次性迁移：旧版独立存储的 batchGroups 并入 workflows（kind='batch'），迁移后原字段废弃
-            const legacyGroups: BatchGroup[] = Array.isArray(parsed.batchGroups) ? parsed.batchGroups : [];
-            let workflows: Workflow[] = Array.isArray(parsed.workflows)
-                ? parsed.workflows
-                : (legacyGroups.length ? [] : d.workflows);
-            let migrated = false;
-            if (legacyGroups.length) {
-                legacyGroups.forEach(g => workflows.push(batchGroupToWorkflow(g)));
-                migrated = true;
-            }
             this._cache = {
                 checklist: Array.isArray(parsed.checklist) ? parsed.checklist : d.checklist,
-                workflows,
+                workflows: Array.isArray(parsed.workflows) ? parsed.workflows : d.workflows,
                 templates: Array.isArray(parsed.templates) ? parsed.templates : d.templates,
                 history: Array.isArray(parsed.history) ? parsed.history : d.history,
                 hiddenTabs: Array.isArray(parsed.hiddenTabs) ? parsed.hiddenTabs : [],
                 hiddenTemplates: Array.isArray(parsed.hiddenTemplates) ? parsed.hiddenTemplates : []
             };
-            if (migrated) { this.save(this._cache); }
             return this._cache;
         } catch (error) {
             console.error('Failed to load workbench.json:', error);
@@ -239,6 +230,24 @@ export class WorkbenchStore {
         const idx = data.workflows.findIndex(w => w.id === wf.id);
         if (idx >= 0) { data.workflows[idx] = wf; } else { data.workflows.push(wf); }
         this.save(data);
+    }
+
+    /** Batch 清单意图式保存：webview 只传 (name, mode, items)，建图统一在此完成（含节点级 shell 持久化） */
+    public saveBatch(payload: { id?: string; name?: string; mode?: string; items?: BatchCmdItem[] }): Workflow {
+        const data = this.load();
+        const existing = payload.id ? data.workflows.find(w => w.id === payload.id) : undefined;
+        const id = existing ? existing.id : ('batch' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+        const mode = payload.mode === 'parallel' ? 'parallel' : 'serial';
+        const items = (Array.isArray(payload.items) ? payload.items : [])
+            .filter(it => it && typeof it.cmd === 'string')
+            .map(it => ({ cmd: it.cmd, shell: typeof it.shell === 'string' && it.shell ? it.shell : undefined }));
+        const { nodes, edges } = batchGraph(mode, items);
+        const name = (payload.name || '').trim() || (existing ? existing.name : 'batch');
+        const wf: Workflow = { id, name, kind: 'batch', nodes, edges, updatedAt: Date.now() };
+        const idx = data.workflows.findIndex(w => w.id === id);
+        if (idx >= 0) { data.workflows[idx] = wf; } else { data.workflows.push(wf); }
+        this.save(data);
+        return wf;
     }
 
     public deleteWorkflow(id: string): void {
