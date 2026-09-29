@@ -121,6 +121,23 @@ export const WORKBENCH_PANELS = `
                 </div>
             </div>
         </div>
+        <!-- 通用输入弹窗（webview 中 window.prompt 被禁用，用于 Batch 加组等场景） -->
+        <div id="wbPromptModal" class="modal-overlay" style="display:none">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <span class="modal-title" data-i18n="wb.prompt.title">Input</span>
+                    <button class="modal-close" onclick="wbPromptClose()">×</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:12px;margin-bottom:6px" id="wbPromptText"></p>
+                    <input type="text" id="wbPromptInput" style="width:100%;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:12px;padding:4px 6px;outline:none;" onkeydown="wbPromptKey(event)" autocomplete="off">
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="wbPromptClose()" data-i18n="cmd.cancel">Cancel</button>
+                    <button class="btn btn-primary" onclick="wbPromptOk()" data-i18n="cmd.save">Save</button>
+                </div>
+            </div>
+        </div>
         <div id="launcherMask" class="launcher-mask" style="display:none" onmousedown="if(event.target===this)launcherClose()">
             <div class="launcher">
                 <input type="text" id="launcherInput" data-i18n-placeholder="wb.launcher.placeholder" placeholder="Search... (↑↓ select, Enter run, Esc close)" oninput="launcherRender()" onkeydown="launcherKey(event)" autocomplete="off">

@@ -294,7 +294,6 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'workflowDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteWorkflow(message.id)); break;
             case 'templateSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveCustomTemplate(message.name || 'template', message.nodes || [], message.edges || [], message.id)); break;
             case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteTemplate(message.id)); break;
-            case 'batchSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveBatchGroups(message.groups || [])); break;
             case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
             case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env, source === 'sidebar'); break;
             case 'workflowStop': this._workflowEngine.stop(); break;

@@ -141,11 +141,15 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(html.includes('wfOpenEditor()'), 'open flow editor button');
     // 主编辑区 Flow Editor 面板：画布 / 属性 / 执行监控
     for (const id of ['wfSvg', 'wfPalette',
-        'wfName', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
+        'wfName', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPShell', 'wfPTimeout', 'wfPFail',
         'wfPHttpMethod', 'wfPHttpHeaders', 'wfPHttpBody',
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
+    // shell 选择迁移到节点属性：工具栏不再有运行级下拉，属性面板含"默认"选项
+    assert.ok(!flowHtml.includes('id="wfShell"'), 'toolbar shell dropdown removed from flow editor');
+    assert.ok(flowHtml.includes("wfEditProp('shell',this.value)"), 'node shell selector wired to props');
+    assert.ok(flowHtml.includes('wb.wf.shellDefault'), 'shell default option i18n key');
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
     assert.ok(flowHtml.includes('onclick="wfRun()"'), 'run button');
@@ -246,6 +250,25 @@ test('HTML: batch panel has own shell selector and live log area', () => {
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
     assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
+});
+
+test('JS: batch panel operates on kind=batch workflows (single data domain)', () => {
+    // 批量组 = workflows 中 kind='batch' 的子集；Flow 画布列表过滤掉
+    assert.ok(js.includes("return w.kind === 'batch'"), 'batch list filters kind=batch workflows');
+    assert.ok(js.includes("return w.kind !== 'batch'"), 'flow list excludes batch workflows');
+    // 编辑/增删走统一的 workflowSave / workflowDelete 消息，不再有独立 batchSave
+    assert.ok(js.includes("command: 'workflowSave'"), 'batch edits persist via workflowSave');
+    assert.ok(js.includes("command: 'workflowDelete'"), 'batch group delete via workflowDelete');
+    assert.ok(!js.includes('batchSave'), 'legacy batchSave message removed');
+    // 加组用输入弹窗（window.prompt 在 webview 中被禁用）
+    assert.ok(js.includes('function wbPrompt') && html.includes('id="wbPromptModal"'), 'prompt modal wired');
+    assert.ok(!js.includes('window.prompt'), 'no blocked window.prompt calls');
+    // 清单 ↔ 图 双向转换
+    assert.ok(js.includes('function batchExtract') && js.includes('function batchBuildGraph'), 'list<->graph conversion');
+    assert.ok(js.includes('kind: \'batch\''), 'new groups marked as batch kind');
+    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm']) {
+        assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
+    }
 });
 
 test('JS: workbench behaviors wired (run/stop, template delete confirm, launcher run, counters)', () => {

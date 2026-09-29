@@ -166,7 +166,6 @@ function wfSyncModeUI() {
     ['wfRunBtn', 'wfLinkBtn', 'wfSaveBtn', 'wfClearBtn'].forEach(function (id) {
         var el = wbEl(id); if (el) { el.style.display = edit ? '' : 'none'; }
     });
-    var shell = wbEl('wfShell'); if (shell) { shell.style.display = edit ? '' : 'none'; }
     var name = wbEl('wfName'); if (name) { name.readOnly = !edit; }
     var stop = wbEl('wfStopBtn');
     var back = wbEl('wfBackBtn');
@@ -599,6 +598,11 @@ function wfSyncCmdField(n) {
     wbEl('wfPCmdLabel').style.display = show ? '' : 'none';
     wbEl('wfPCmd').style.display = show ? '' : 'none';
     wbEl('wfPCmdLabel').textContent = t(wfCmdLabelKey(n));
+    /* shell 下拉仅对真实执行 shell 的节点开放：cmd / condition / notify+cmd（节点级覆盖，随工作流持久化） */
+    var isShellNode = n.tag === 'cmd' || n.tag === 'condition' || (n.tag === 'notify' && (n.notifyType || 'text') === 'cmd');
+    wbEl('wfPShellLabel').style.display = isShellNode ? '' : 'none';
+    wbEl('wfPShell').style.display = isShellNode ? '' : 'none';
+    if (isShellNode) { wbEl('wfPShell').value = n.shell || ''; }
 }
 /* ---- ref 节点：引用各页签已保存命令 ---- */
 var WF_GIT_OPS = ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch'];
@@ -981,10 +985,10 @@ function wfRun() {
     WF.runId = null; // 宿主创建实例后经 runPhase 消息回填
     wfPrepareRun();
     wfSyncModeUI();
+    /* shell 选择已随节点属性持久化（wfPShell）：运行级 shell 由宿主用全局默认兜底，节点级覆盖优先 */
     vscode.postMessage({
         command: 'workflowRun',
-        workflow: wfCurrentWorkflowObj(),
-        shell: wbEl('wfShell').value
+        workflow: wfCurrentWorkflowObj()
     });
 }
 /* 侧边栏（Batch 等）发起的运行：载入工作流并切换到执行详情模式 */

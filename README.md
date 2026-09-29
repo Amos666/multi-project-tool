@@ -1,6 +1,6 @@
 # Multi-Project Tool
 
-A VSCode extension for managing multiple projects with unified Git operations, per-project command batching (**ProjectsCmd**), one-click workspace-root quick commands (**ShortCutCmd**), Python text transforms (**Pyt**), and a visual workflow engine (**Flow**).
+A VSCode extension for managing multiple projects with unified Git operations, per-project command batching (**ProjectsCmd**), one-click workspace-root quick commands (**ShortCutCmd**), Python text transforms (**Pyt**), lightweight command group runs (**Batch**) and a visual workflow engine (**Flow**).
 
 ![Version](https://img.shields.io/badge/version-1.0.7-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![VSCode](https://img.shields.io/badge/VSCode-^1.120.0-37AAFF)
 
@@ -13,7 +13,8 @@ A VSCode extension for managing multiple projects with unified Git operations, p
 - **ShortCutCmd** — one-click quick commands that run once in the workspace root directory, ideal for frequently used scripts
 - **Command cancel + running indicator** — every command row (ProjectsCmd / ShortCutCmd / Pyt) has a cancel button that terminates the running process tree; while executing, the whole row background pulses with a translucent blue tint (text stays high-contrast via text shadow) and returns to normal when the run finishes or is cancelled
 - **Shell-typed commands** — every command is stored with its shell type (Git Bash / CMD / PowerShell / WSL); the shell selector filters the command list by type, and newly created commands are stamped with the currently selected type. Commands created before shell typing exist are treated as Git Bash
-- **Flow (visual workflows)** — build, run and monitor node-based workflows (commands, conditions, forks, manual confirm, notifications) in a dedicated main-editor Flow Editor panel
+- **Flow (visual workflows)** — build, run and monitor node-based workflows (commands, conditions, forks, manual confirm, notifications) in a dedicated main-editor Flow Editor panel; command / condition / notify nodes carry a per-node Shell property persisted with the workflow
+- **Batch command groups** — lightweight editable command lists (inline edit, drag-to-reorder, serial/parallel mode) that run through the same workflow engine; groups and canvas flows share one storage domain
 - **Multi-line script support** with shared context variables across lines
 - **Per-line execution log** in `$ command => executed result: output` format
 - **Project list collapse/expand** to maximize working area
@@ -174,10 +175,21 @@ Python-based text transformation utilities. Requires `python` on PATH (see Prere
 - Command rows support the same **run/cancel + executing blink** interaction as the other tabs; cancelling kills the `python` child process
 - Transform logs (success / failure / cancel) are kept host-side and restored after webview reload
 
+### Batch Tab
+Lightweight command-group runner for "just a list of commands" scenarios — no canvas, no node wiring. Every group is a **list-style workflow** stored in the same domain as Flow workflows (`kind: 'batch'` in `workbench.json`); legacy standalone batch-group data is migrated automatically on first load.
+
+- **Group management** — group dropdown to switch, rename inline, add via input modal, delete with confirmation (all groups can be deleted; an empty state is shown). Two starter groups (*Java Build*, *Quick Check*) are seeded for new workspaces
+- **List editing** — inline command inputs, drag & drop reordering, add/remove rows; every edit rebuilds the underlying node graph (chain for serial, fork/join for parallel) and persists immediately through the same save path as Flow
+- **Mode switch** — **Serial** runs commands one after another; **Parallel** runs them concurrently (fork/join), switchable at any time
+- **Run feedback in place** — each row shows a live status pill (⏳ pending / ↻ running / ✓ success / ✗ failed / ↓ skipped) and per-row duration, plus a real-time execution log below; no need to open the Flow Editor
+- **Run-level shell** — the panel's shell selector (Git Bash / CMD / PowerShell / WSL) applies to all commands in the group
+- **Convert to Flow** — one click sends the group's node graph to the Flow Editor canvas for advanced editing (branches, conditions, notifications...); batch runs and Flow runs share the same history
+
 ### Flow Tab (Workflow Editor)
 Visual workflow canvas opened in a dedicated main-editor panel (the sidebar Flow tab keeps only the list and entry buttons).
 
 - **Node palette** — start (scheduled), command (shell), condition, fork/join (parallel branches), confirm (manual approval), notify, ref (reference saved commands from ProjectsCmd / ShortCutCmd / Pyt / Git), vscode (execute any VSCode command registered by other extensions)
+- **Per-node shell** — command, condition and notify(command) nodes expose a **Shell** selector in their properties panel (Git Bash / CMD / PowerShell / WSL, default = inherit the run-level shell). The choice is **persisted with the workflow**, so a node set to PowerShell today still runs under PowerShell after reopening. Nodes without an explicit shell inherit: Flow runs use the global default shell (Set tab), Batch runs use the batch panel's selector
 - **Run monitoring** — live node states, logs with filter, failed/skipped counters, duration; run detail is a read-only replay
 - **Background runs** — switching to another flow while a run is active does not stop it: running and paused runs stay in the **RUNNING** group, and the canvas remains fully editable for other flows. Clicking the run in the RUNNING group returns to its monitor view
 - **Node actions bar** — floats above the target node: confirm nodes offer continue/cancel/pause; failed-paused nodes offer resume (with command editing before retry) or cancel
@@ -188,6 +200,8 @@ Visual workflow canvas opened in a dedicated main-editor panel (the sidebar Flow
 
 Summary of the most recent changes:
 
+- **Batch tab rebuilt on the workflow data domain** — batch groups are no longer a separate data structure: each group is stored as a `kind: 'batch'` workflow in `workbench.json`, right alongside canvas workflows (legacy `batchGroups` data is migrated automatically on first load and the old field is dropped). All group edits — add/reorder commands, rename, serial↔parallel switch — rebuild the underlying node graph and save through the exact same path as the Flow Editor; batch runs, the run engine and history are unchanged and shared with Flow. The Flow sidebar list hides `batch` workflows (they belong to the Batch panel), and the Quick Launcher still lists them. Also fixed: the **+ group** button never worked because native `prompt()` is blocked inside webviews — replaced with a custom input modal (Enter/Esc supported); deleting a group now asks for confirmation, and deleting the last group is allowed
+- **Per-node shell for Flow** — the Flow Editor toolbar's run-level shell dropdown has been removed; **command / condition / notify(command)** nodes now carry their own **Shell** property in the properties panel (Git Bash / CMD / PowerShell / WSL, default = inherit run-level), persisted with the workflow. This also fixes a hidden defect: the old toolbar choice was never saved, so a workflow run with PowerShell today silently fell back to the default shell after reopening the panel. Nodes without an explicit shell fall back to the global default shell (Flow runs) or the batch panel's selector (Batch runs); existing workflows need no migration
 - **Project row quick actions (new)** — every project row on the Git / ProjectsCmd tabs now has configurable buttons on its right side that run a command in that project's directory. Two defaults are seeded on first run: *Open Folder* (Windows Explorer) and *GitHub* (opens the project's `origin` remote, normalized to an `https://` browse URL, in the browser). Manage the list in the Set tab's *Project Row Commands* editor — alias / command / hover tip per entry, add-edit-delete with immediate persistence and instant button refresh, insertion order preserved. Placeholders `${projectPath}`, `${projectName}`, `${projectBranch}`, `${projectRemoteUrl}` plus global `${var}` parameters are substituted per project; execution output and result go to the Logs panel
 - **VSCode command node (new)** — the Flow node palette gains a **VSCode Command** node type that invokes any command registered by other extensions via `vscode.commands.executeCommand`, so workflows can drive other plugins' features (run task providers, format documents, trigger testing tools, open views, etc.). The node's Command ID field offers autocomplete from all currently registered command IDs; arguments accept a JSON array (spread as multiple parameters, e.g. `["src/main.ts", true]`) or plain text (single string parameter), with `${var}` substitution from common parameters. A missing/throwing command fails the node and honors the node's fail policy (stop / skip / retry once); command return values are serialized into the workflow log
 - **Enhanced executing blink** — the executing indicator now pulses the **entire row background** with a ~1/3-opacity translucent blue tint (previously only a barely-visible edge tint), so it is clearly noticeable. Text readability is preserved during the pulse: the alias and preview text switch to the high-contrast text color with a dark text shadow, and the row border glows in sync. The style restores automatically on completion or cancellation
@@ -226,6 +240,7 @@ Workspace-level data (per workspace folder, under `.multi-project-tool/`):
 | `config.json` | Settings, ProjectsCmd command tree, project row quick actions, environment variables |
 | `shortcutCommands.json` | ShortCutCmd command tree |
 | `customPythonTxt.json` | Python text-transform command tree |
+| `workbench.json` | Workbench data: Flow workflows and Batch groups (`kind: 'batch'`, auto-migrated from the legacy `batchGroups` field), templates, run history, checklist, hidden tabs |
 
 ## Usage Example
 
@@ -251,6 +266,7 @@ Workspace-level data (per workspace folder, under `.multi-project-tool/`):
    ```
    Save → click ▶. The script runs once in `my-workspace/` (the workspace root) — no project selection needed.
 6. **Project row buttons** — every project row has quick-action buttons on its right (defaults: *Open Folder*, *GitHub*). Hover a button to see its tip (e.g. `GitHub — Open this project GitHub repository page in browser`); click it and the command runs in that project's directory — e.g. the *GitHub* button on the `backend` row opens `https://github.com/your-org/backend`. Add your own buttons in the **Set tab → Project Row Commands** editor.
+7. **Batch Tab** — pick the *Quick Check* group → edit commands inline (or drag to reorder) → switch mode to **Parallel** → click ▶. Each row gets a live status pill and duration while the log streams below; click *To Flow* afterwards to keep editing the group as a canvas workflow.
 
 ## Troubleshooting
 

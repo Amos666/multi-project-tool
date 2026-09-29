@@ -18,12 +18,6 @@ export const FLOW_EDITOR_BODY = `
                 <button class="wf-btn" id="wfSaveBtn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></button>
                 <button class="wf-btn danger" id="wfClearBtn" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.3 4.5V3h3.4v1.5"/><path d="M4.5 4.5l.8 8.5h5.4l.8-8.5"/><path d="M6.8 7v3.5M9.2 7v3.5"/></svg></button>
                 <input type="text" id="wfName" value="workflow" style="width:150px;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:11px;padding:3px 6px;outline:none;">
-                <select id="wfShell" title="Shell">
-                    <option value="git-bash">Git Bash</option>
-                    <option value="cmd">CMD</option>
-                    <option value="powershell">PowerShell</option>
-                    <option value="wsl">WSL</option>
-                </select>
                 <span class="wf-hint" id="wfHint"></span>
             </div>
             <div class="wf-svg-wrap" id="wfSvgWrap">
@@ -85,6 +79,14 @@ export const FLOW_EDITOR_BODY = `
                 </select>
                 <label id="wfPSchedValueLabel" style="display:none">Value</label>
                 <input type="text" id="wfPSchedValue" style="display:none" oninput="wfEditProp('scheduleValue',this.value)">
+                <label id="wfPShellLabel" data-i18n="wb.wf.shell" style="display:none">Shell</label>
+                <select id="wfPShell" style="display:none" onchange="wfEditProp('shell',this.value)">
+                    <option value="" data-i18n="wb.wf.shellDefault">Default (run-level)</option>
+                    <option value="git-bash">Git Bash</option>
+                    <option value="cmd">CMD</option>
+                    <option value="powershell">PowerShell</option>
+                    <option value="wsl">WSL</option>
+                </select>
                 <label data-i18n="wb.wf.timeout">Timeout (sec)</label>
                 <input type="number" id="wfPTimeout" min="1" max="36000" oninput="wfEditProp('timeout',Number(this.value)||300)">
                 <label data-i18n="wb.wf.failPolicy">Fail Policy</label>
