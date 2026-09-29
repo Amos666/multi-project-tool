@@ -141,6 +141,25 @@ async function runOnce(workflow, options) {
         assert.ok(done.duration < 4000, 'killed before sleep finished');
     });
 
+    await testAsync('engine: node-level shell overrides run-level; missing shell falls back', async () => {
+        // a 指定不存在的 shell（覆盖生效 → spawn 失败）；b 未指定（回退运行级 git-bash → 成功）
+        const wf = {
+            id: 'w', name: 'w', updatedAt: 1,
+            nodes: [
+                node('a', 'echo hi', 'cmd', { shell: 'no-such-shell-bin', failPolicy: 'skip' }),
+                node('b', 'echo fallback-ok > fb.txt')
+            ],
+            edges: [{ from: 'a', to: 'b' }]
+        };
+        const o = opts();
+        const { done, states, events } = await runOnce(wf, o);
+        assert.strictEqual(states.a, 'failed', 'node shell override takes precedence over run-level');
+        assert.strictEqual(states.b, 'success', 'missing node shell falls back to run-level');
+        assert.ok(fs.existsSync(path.join(o.cwd, 'fb.txt')), 'fallback node executed via run-level shell');
+        assert.ok(events.some(e => e.type === 'log' && e.level === 'err' && /spawn|no-such-shell-bin|ENOENT/i.test(e.text)), 'spawn failure logged');
+        assert.strictEqual(done.result, 'failed');
+    });
+
     await testAsync('engine: ${var} substituted, single-brace literal untouched', async () => {
         const wf = {
             id: 'w', name: 'w', updatedAt: 1,

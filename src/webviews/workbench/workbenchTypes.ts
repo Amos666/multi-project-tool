@@ -25,6 +25,8 @@ export interface WfNode {
     failPolicy: WfFailPolicy;
     /** 仅 notify 节点：文本弹窗 / 命令行 / HTTP 请求 */
     notifyType?: 'text' | 'cmd' | 'http';
+    /** 仅真实执行 shell 的节点（cmd / condition / notify+cmd）：指定解释器；缺省 = 继承运行级 shell（Batch 面板选择或全局默认） */
+    shell?: string;
     /** 仅 notify+http：请求方法，默认 GET */
     httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     /** 仅 notify+http：请求头（JSON 对象字符串） */

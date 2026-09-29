@@ -141,11 +141,15 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(html.includes('wfOpenEditor()'), 'open flow editor button');
     // 主编辑区 Flow Editor 面板：画布 / 属性 / 执行监控
     for (const id of ['wfSvg', 'wfPalette',
-        'wfName', 'wfShell', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPTimeout', 'wfPFail',
+        'wfName', 'wfPropsForm', 'wfPName', 'wfPCmd', 'wfPNotifyType', 'wfPShell', 'wfPTimeout', 'wfPFail',
         'wfPHttpMethod', 'wfPHttpHeaders', 'wfPHttpBody',
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
+    // shell 选择迁移到节点属性：工具栏不再有运行级下拉，属性面板含"默认"选项
+    assert.ok(!flowHtml.includes('id="wfShell"'), 'toolbar shell dropdown removed from flow editor');
+    assert.ok(flowHtml.includes("wfEditProp('shell',this.value)"), 'node shell selector wired to props');
+    assert.ok(flowHtml.includes('wb.wf.shellDefault'), 'shell default option i18n key');
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
     assert.ok(flowHtml.includes('onclick="wfRun()"'), 'run button');

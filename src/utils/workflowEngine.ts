@@ -503,10 +503,10 @@ export class WorkflowEngine {
         return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
     }
 
-    /** 按 Shell 类型写临时脚本文件并 spawn，支持超时 kill。返回是否成功（exit code 0） */
+    /** 按 Shell 类型写临时脚本文件并 spawn，支持超时 kill。返回是否成功（exit code 0）；节点级 shell 覆盖运行级 */
     private execShell(node: WfNode, command: string, options: WorkflowEngineOptions, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void): Promise<boolean> {
         return new Promise(resolve => {
-            const shell = options.shell;
+            const shell = node.shell || options.shell;
             const stamp = Date.now() + '_' + Math.random().toString(36).slice(2);
             const tmpSh = path.join(os.tmpdir(), `mpt_wf_${stamp}.sh`);
             const tmpCmd = path.join(os.tmpdir(), `mpt_wf_${stamp}.cmd`);
