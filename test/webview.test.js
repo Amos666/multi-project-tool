@@ -271,6 +271,9 @@ test('HTML: batch panel has per-command shell controls and live log area', () =>
     // Apply Shell 下拉与运行级 shell 均已删除：shell 下沉到每条命令（行内下拉），选项只含具体类型
     assert.ok(!html.includes('id="batchShell"'), 'run-level shell selector removed from batch controls');
     assert.ok(!html.includes('id="batchShellAll"'), 'apply-shell dropdown removed from batch controls');
+    // 工具栏名称输入框已删除：重命名走 Rename 按钮弹窗
+    assert.ok(!html.includes('id="batchGroupName"'), 'inline group name input removed from batch controls');
+    assert.ok(html.includes('onclick="batchRenameGroup()"'), 'rename button wired');
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
     assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
@@ -295,8 +298,10 @@ test('JS: batch panel operates on kind=batch workflows (single data domain)', ()
     assert.ok(js.includes("var cur = sel || wbDefaultShell();"), 'unstamped legacy commands display default shell');
     assert.ok(!js.includes('wb.batch.shellDefault') && !js.includes('wb.batch.shellAll'), 'shell default/apply-all i18n gone from webview');
     assert.ok(!js.includes("wbEl('batchShell')"), 'run message no longer reads run-level shell');
-    // 加组用输入弹窗（window.prompt 在 webview 中被禁用）
+    // 加组/重命名组均用输入弹窗（window.prompt 在 webview 中被禁用）
     assert.ok(js.includes('function wbPrompt') && html.includes('id="wbPromptModal"'), 'prompt modal wired');
+    assert.ok(js.includes("wbPrompt(t('wb.batch.namePh'), wf.name"), 'group rename via prompt modal with current name');
+    assert.ok(!js.includes("wbEl('batchGroupName')"), 'rename no longer reads inline input');
     assert.ok(!js.includes('window.prompt'), 'no blocked window.prompt calls');
     // 图 → 清单反推仍在 webview（渲染用）；清单 → 图收敛到宿主 saveBatch
     assert.ok(js.includes('function batchExtract'), 'graph->list extraction stays in webview');

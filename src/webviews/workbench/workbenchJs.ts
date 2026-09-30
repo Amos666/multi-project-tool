@@ -385,7 +385,6 @@ function renderBatchGroups() {
     var cur = batchCurrent();
     var x = cur ? batchExtract(cur) : { mode: 'serial', items: [] };
     wbEl('batchMode').value = x.mode;
-    wbEl('batchGroupName').value = cur ? batchLabel(cur.name) : '';
     renderBatchList();
 }
 function renderBatchList() {
@@ -416,14 +415,18 @@ function batchModeChange() {
     if (x.mode === mode) { return; }
     batchPostSave(wf, mode, x.items);
 }
+/* 重命名走输入弹窗：工具栏不再常驻名称输入框，点击 Rename 弹窗确认后保存 */
 function batchRenameGroup() {
     var wf = batchCurrent();
-    var name = (wbEl('batchGroupName').value || '').trim();
-    if (!wf || !name) { return; }
-    wf.name = name;
-    wf.updatedAt = Date.now();
-    vscode.postMessage({ command: 'workflowSave', workflow: wf });
-    renderBatchGroups();
+    if (!wf) { return; }
+    wbPrompt(t('wb.batch.namePh'), wf.name, function (name) {
+        name = (name || '').trim();
+        if (!name || name === wf.name) { return; }
+        wf.name = name;
+        wf.updatedAt = Date.now();
+        vscode.postMessage({ command: 'workflowSave', workflow: wf });
+        renderBatchGroups();
+    });
 }
 /* 原生 prompt API 在 webview 中被禁用，改用输入弹窗 */
 function batchAddGroup() {

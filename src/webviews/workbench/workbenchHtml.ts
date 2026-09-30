@@ -75,7 +75,6 @@ export const WORKBENCH_PANELS = `
                             <option value="parallel" data-i18n="wb.batch.parallel">Parallel</option>
                         </select>
                     </label>
-                    <input type="text" id="batchGroupName" data-i18n-placeholder="wb.batch.namePh" placeholder="Group name" style="width:110px">
                     <button class="wf-btn" onclick="batchRenameGroup()" data-i18n="wb.batch.rename">Rename</button>
                     <button class="wf-btn" onclick="batchAddGroup()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.group">Group</span></button>
                     <button class="wf-btn danger" onclick="batchDeleteGroup()" data-i18n="cmd.delete">Delete</button>
