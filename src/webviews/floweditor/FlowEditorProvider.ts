@@ -149,6 +149,7 @@ ${WORKBENCH_CSS}
 }
 .wf-splitter:hover::after, .wf-splitter.dragging::after { background-color: var(--brand-primary); }
 .wf-splitter.dragging { cursor: row-resize; }
+.wf-btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
 body.wf-resizing { cursor: row-resize; user-select: none; }
 body.wf-resizing .wf-svg-wrap { pointer-events: none; }
     </style>

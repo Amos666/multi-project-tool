@@ -307,6 +307,9 @@ function batchClearLog() {
 
 /* ==================== Batch（清单式工作流：kind='batch' 的 Workflow，与 Flow 同一数据域） ==================== */
 WB.batchRunning = false;
+/* Set 页签默认 shell：宿主经 workbenchData 消息下发。命令创建时读取盖章，保存后即为具体类型；
+   未盖章的旧命令显示该默认值（运行时宿主同样以其兜底，无歧义） */
+function wbDefaultShell() { return (WB.data && WB.data.defaultShell) || 'git-bash'; }
 /* Batch 面板展示的工作流列表（workflows 中 kind='batch' 的子集，Flow 画布列表将其过滤掉） */
 function batchFlows() {
     return (WB.data.workflows || []).filter(function (w) { return w.kind === 'batch'; });
@@ -365,9 +368,10 @@ function batchPostSave(wf, mode, items) {
     });
 }
 function batchShellOptions(sel) {
-    var shells = [['', t('wb.batch.shellDefault')], ['git-bash', 'Git Bash'], ['cmd', 'CMD'], ['powershell', 'PowerShell'], ['wsl', 'WSL']];
+    var shells = [['git-bash', 'Git Bash'], ['cmd', 'CMD'], ['powershell', 'PowerShell'], ['wsl', 'WSL']];
+    var cur = sel || wbDefaultShell();
     return shells.map(function (p) {
-        return '<option value="' + p[0] + '"' + (p[0] === sel ? ' selected' : '') + '>' + wbEsc(p[1]) + '</option>';
+        return '<option value="' + p[0] + '"' + (p[0] === cur ? ' selected' : '') + '>' + wbEsc(p[1]) + '</option>';
     }).join('');
 }
 function renderBatchGroups() {
@@ -397,7 +401,7 @@ function renderBatchList() {
         return '<li draggable="true" data-bidx="' + i + '" ondragstart="batchDragStart(event,' + i + ')" ondragover="batchDragOver(event)" ondragleave="batchDragLeave(event)" ondrop="batchDrop(event,' + i + ')">' +
             '<span class="batch-handle">≡</span><span class="batch-idx">' + (i + 1) + '.</span>' +
             '<input class="batch-cmd-input" value="' + wbEsc(it.cmd) + '" onchange="batchEditCmd(' + i + ', this.value)">' +
-            '<select class="batch-shell-sel' + (it.shell ? ' custom' : '') + '" onchange="batchEditShell(' + i + ', this.value)" title="' + wbEsc(t('wb.wf.shell')) + '">' + batchShellOptions(it.shell) + '</select>' +
+            '<select class="batch-shell-sel' + (it.shell && it.shell !== wbDefaultShell() ? ' custom' : '') + '" onchange="batchEditShell(' + i + ', this.value)" title="' + wbEsc(t('wb.wf.shell')) + '">' + batchShellOptions(it.shell) + '</select>' +
             '<span class="batch-status" id="bstat-' + i + '">⏳</span>' +
             '<span class="batch-dur" id="bdur-' + i + '">--</span>' +
             '<span class="batch-rm" onclick="batchRemoveCmd(' + i + ')">✕</span></li>';
@@ -444,7 +448,7 @@ function batchAddCmd() {
     var wf = batchCurrent();
     if (!wf) { return; }
     var x = batchExtract(wf);
-    x.items.push({ cmd: 'echo hello', shell: '' });
+    x.items.push({ cmd: 'echo hello', shell: wbDefaultShell() });
     batchPostSave(wf, x.mode, x.items);
 }
 function batchEditCmd(i, val) {
@@ -461,18 +465,7 @@ function batchEditShell(i, val) {
     if (!wf) { return; }
     var x = batchExtract(wf);
     if (!x.items[i]) { return; }
-    x.items[i].shell = val || '';
-    batchPostSave(wf, x.mode, x.items);
-}
-/* 统一设置整组命令的 shell（下拉选择后立即复位，便于重复应用） */
-function batchApplyShellAll(val) {
-    var sel = wbEl('batchShellAll');
-    if (sel) { sel.value = ''; }
-    var wf = batchCurrent();
-    if (!wf) { return; }
-    var x = batchExtract(wf);
-    if (!x.items.length) { return; }
-    x.items.forEach(function (it) { it.shell = val || ''; });
+    x.items[i].shell = val;
     batchPostSave(wf, x.mode, x.items);
 }
 function batchRemoveCmd(i) {

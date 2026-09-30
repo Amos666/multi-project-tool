@@ -75,15 +75,6 @@ export const WORKBENCH_PANELS = `
                             <option value="parallel" data-i18n="wb.batch.parallel">Parallel</option>
                         </select>
                     </label>
-                    <label><span data-i18n="wb.batch.shellAll">Apply Shell</span>
-                        <select id="batchShellAll" onchange="batchApplyShellAll(this.value)" data-i18n-title="wb.batch.shellAllHint" title="Set shell for every command in this group">
-                            <option value="" data-i18n="wb.batch.shellDefault">Default</option>
-                            <option value="git-bash">Git Bash</option>
-                            <option value="cmd">CMD</option>
-                            <option value="powershell">PowerShell</option>
-                            <option value="wsl">WSL</option>
-                        </select>
-                    </label>
                     <input type="text" id="batchGroupName" data-i18n-placeholder="wb.batch.namePh" placeholder="Group name" style="width:110px">
                     <button class="wf-btn" onclick="batchRenameGroup()" data-i18n="wb.batch.rename">Rename</button>
                     <button class="wf-btn" onclick="batchAddGroup()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.group">Group</span></button>

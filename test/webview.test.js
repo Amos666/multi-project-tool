@@ -146,10 +146,14 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
-    // shell 选择迁移到节点属性：工具栏不再有运行级下拉，属性面板含"默认"选项
+    // shell 完全节点属性化：无"默认（运行级）"选项，创建时盖章 Set 页签默认值，保存即为具体类型
     assert.ok(!flowHtml.includes('id="wfShell"'), 'toolbar shell dropdown removed from flow editor');
     assert.ok(flowHtml.includes("wfEditProp('shell',this.value)"), 'node shell selector wired to props');
-    assert.ok(flowHtml.includes('wb.wf.shellDefault'), 'shell default option i18n key');
+    assert.ok(!flowHtml.includes('wb.wf.shellDefault'), 'default (run-level) shell option removed');
+    assert.ok(flowHtml.includes('value="git-bash"') && flowHtml.includes('value="wsl"'), 'concrete shell options only');
+    assert.ok(flowJs.includes('wfDefaultShell()'), 'flow nodes stamp Set-tab default at creation');
+    assert.ok(flowJs.includes("n.shell || wfDefaultShell()"), 'legacy unstamped nodes display default shell');
+    assert.ok(!translations.en['wb.wf.shellDefault'] && !translations.zh['wb.wf.shellDefault'], 'shellDefault i18n key removed');
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
     assert.ok(flowHtml.includes('onclick="wfRun()"'), 'run button');
@@ -159,6 +163,16 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(flowHtml.includes("wfEditProp('httpMethod',this.value)") && flowHtml.includes("wfEditProp('httpHeaders',this.value)") && flowHtml.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
     assert.ok(flowHtml.includes('value="POST"') && flowHtml.includes('value="DELETE"'), 'http method choices');
     assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(flowHtml), 'flow toolbar uses SVG icons, not emoji');
+});
+
+test('HTML+JS: flow editor renames via prompt modal, no inline name input', () => {
+    // 工具栏不再常驻名称输入框：Rename 按钮展示当前名称，点击弹窗改名，确认后持久化
+    assert.ok(!flowHtml.includes('<input type="text" id="wfName"'), 'toolbar name input removed');
+    assert.ok(flowHtml.includes('id="wfRenameBtn"') && flowHtml.includes('onclick="wfRename()"'), 'rename button wired');
+    assert.ok(flowHtml.includes('id="wbPromptModal"'), 'prompt modal available in flow editor panel');
+    assert.ok(flowJs.includes('function wfRename') && flowJs.includes('function wfSetName'), 'rename flow implemented');
+    assert.ok(flowJs.includes('name: WF.name'), 'name tracked in WF state');
+    assert.ok(flowJs.includes('renameBtn.disabled = !edit'), 'rename disabled outside edit mode');
 });
 
 test('JS: notify node property label switches by notifyType', () => {
@@ -244,12 +258,12 @@ test('HTML+JS: start node (scheduled start) and confirm node (manual approval)',
 });
 
 test('HTML: batch panel has per-command shell controls and live log area', () => {
-    for (const id of ['batchGroupSel', 'batchMode', 'batchShellAll', 'batchList', 'batchStatus', 'batchOutput']) {
+    for (const id of ['batchGroupSel', 'batchMode', 'batchList', 'batchStatus', 'batchOutput']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing batch element: ' + id);
     }
-    // 运行级 shell 下拉已删除：shell 下沉到每条命令（行内下拉）+ 整组统一设置
+    // Apply Shell 下拉与运行级 shell 均已删除：shell 下沉到每条命令（行内下拉），选项只含具体类型
     assert.ok(!html.includes('id="batchShell"'), 'run-level shell selector removed from batch controls');
-    assert.ok(html.includes('batchApplyShellAll(this.value)'), 'apply-shell-to-all wired');
+    assert.ok(!html.includes('id="batchShellAll"'), 'apply-shell dropdown removed from batch controls');
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
     assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');
@@ -265,10 +279,14 @@ test('JS: batch panel operates on kind=batch workflows (single data domain)', ()
     assert.ok(js.includes("command: 'workflowDelete'"), 'batch group delete via workflowDelete');
     assert.ok(!js.includes('function batchBuildGraph') && !js.includes('function batchSync'), 'webview no longer builds graphs locally');
     assert.ok(mvpSrcCache.includes("case 'batchSave':") && mvpSrcCache.includes('saveBatch(message)'), 'host routes batchSave to store');
-    // 每条命令的 shell：行内下拉 + 整组统一设置；batchExtract 从节点属性读取 shell
-    assert.ok(js.includes('function batchEditShell') && js.includes('function batchApplyShellAll'), 'per-command shell editors');
+    // 每条命令的 shell：行内下拉（只含具体类型，新命令盖章 Set 页签默认值）；batchExtract 从节点属性读取 shell
+    assert.ok(js.includes('function batchEditShell') && !js.includes('function batchApplyShellAll'), 'per-command shell editor, apply-all removed');
     assert.ok(js.includes('batch-shell-sel'), 'row shell select rendered');
     assert.ok(js.includes('shell: n.shell'), 'batchExtract reads shell from node');
+    assert.ok(js.includes('function wbDefaultShell') && js.includes("(WB.data && WB.data.defaultShell)"), 'default shell helper reads Set-tab value');
+    assert.ok(js.includes("{ cmd: 'echo hello', shell: wbDefaultShell() }"), 'new commands stamp default shell at creation');
+    assert.ok(js.includes("var cur = sel || wbDefaultShell();"), 'unstamped legacy commands display default shell');
+    assert.ok(!js.includes('wb.batch.shellDefault') && !js.includes('wb.batch.shellAll'), 'shell default/apply-all i18n gone from webview');
     assert.ok(!js.includes("wbEl('batchShell')"), 'run message no longer reads run-level shell');
     // 加组用输入弹窗（window.prompt 在 webview 中被禁用）
     assert.ok(js.includes('function wbPrompt') && html.includes('id="wbPromptModal"'), 'prompt modal wired');
@@ -276,7 +294,7 @@ test('JS: batch panel operates on kind=batch workflows (single data domain)', ()
     // 图 → 清单反推仍在 webview（渲染用）；清单 → 图收敛到宿主 saveBatch
     assert.ok(js.includes('function batchExtract'), 'graph->list extraction stays in webview');
     assert.ok(js.includes('kind: \'batch\''), 'new groups marked as batch kind');
-    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm', 'wb.batch.shellAll', 'wb.batch.shellDefault']) {
+    for (const k of ['wb.prompt.title', 'wb.batch.deleteGroupConfirm', 'wb.wf.namePh']) {
         assert.ok(translations.en[k] && translations.zh[k], 'i18n missing: ' + k);
     }
 });
