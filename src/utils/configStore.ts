@@ -21,7 +21,8 @@ export interface WorkspaceConfig {
         concurrency: number;
         commandTimeout: number;
         language: string;
-        /** 项目行按钮命令；undefined 表示尚未初始化（老配置/新工作区），由宿主按语言播种默认命令 */
+        /** @deprecated 项目行按钮命令已改为插件级全局存储（context.globalState），跨工作区共享。
+         *  此字段仅供 loadSettings 读取旧工作区数据做一次性迁移，新代码不再写入 */
         projectRowCommands?: ProjectRowCommand[];
     };
     customCommandTree: CommandTreeNode[];

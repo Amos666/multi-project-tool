@@ -9,7 +9,8 @@ const suites = [
     'shortcutStore.test.js',
     'workbenchStore.test.js',
     'workflowEngine.test.js',
-    'webview.test.js'
+    'webview.test.js',
+    'prc.test.js'
 ];
 
 let allOk = true;
