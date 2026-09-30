@@ -793,10 +793,13 @@ function wfDeleteSelected() {
 function wfAddNode(tag) {
     if (WF.running || WF.mode !== 'edit') { return; }
     var id = wbId('n');
+    /* 涉及命令执行的节点（cmd / condition / notify）创建时读取 Set 页签默认 shell 盖章，保存后即为具体类型 */
+    var shellTags = { cmd: 1, condition: 1, notify: 1 };
     WF.nodes.push({
         id: id, label: t('wb.node.' + tag), tag: tag,
         x: wfSnap(260 + Math.random() * 240), y: wfSnap(80 + Math.random() * 240),
         cmd: tag === 'cmd' ? 'echo hello' : '', timeout: 300, failPolicy: 'stop',
+        shell: shellTags[tag] ? wfDefaultShell() : undefined,
         notifyType: tag === 'notify' ? 'text' : undefined,
         refTab: tag === 'ref' ? 'cmd' : undefined, refCommandId: tag === 'ref' ? '' : undefined,
         vscodeCommandId: tag === 'vscode' ? '' : undefined,
@@ -805,6 +808,8 @@ function wfAddNode(tag) {
     wfDraw();
     wfSelectNode(id);
 }
+/* Set 页签默认 shell（宿主经 workbenchData 消息下发），节点创建时读取；未盖章的旧节点显示/回退均取此值 */
+function wfDefaultShell() { return (WB.data && WB.data.defaultShell) || 'git-bash'; }
 
 /* ==================== 工作流存取 ==================== */
 function wfCurrentWorkflowObj() {

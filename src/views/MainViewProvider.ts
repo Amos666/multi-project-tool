@@ -4701,7 +4701,8 @@ window.addEventListener('message', event => {
     private getWorkbenchData() {
         const store = WorkbenchStore.getInstance();
         const data = store.load();
-        return { ...data, templates: store.allTemplates() };
+        /* defaultShell：webview 侧创建命令/节点时读取 Set 页签默认 shell 盖章（不落盘，仅随消息下发） */
+        return { ...data, templates: store.allTemplates(), defaultShell: this._currentShell };
     }
 
     private postWorkbenchData(): void {

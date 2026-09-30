@@ -307,6 +307,8 @@ function batchClearLog() {
 
 /* ==================== Batch（清单式工作流：kind='batch' 的 Workflow，与 Flow 同一数据域） ==================== */
 WB.batchRunning = false;
+/* Set 页签默认 shell：宿主经 workbenchData 消息下发，创建命令时读取盖章，保存后即为具体类型 */
+function wbDefaultShell() { return (WB.data && WB.data.defaultShell) || 'git-bash'; }
 /* Batch 面板展示的工作流列表（workflows 中 kind='batch' 的子集，Flow 画布列表将其过滤掉） */
 function batchFlows() {
     return (WB.data.workflows || []).filter(function (w) { return w.kind === 'batch'; });
@@ -351,12 +353,14 @@ function batchExtract(wf) {
     return {
         mode: fork ? 'parallel' : 'serial',
         commands: ordered.map(function (n) { return n.cmd; }),
+        shells: ordered.map(function (n) { return n.shell; }),
         ids: ordered.map(function (n) { return n.id; })
     };
 }
-/* 清单 → 工作流图：serial = 链式；parallel = fork/join（与宿主迁移逻辑一致） */
-function batchBuildGraph(mode, commands) {
+/* 清单 → 工作流图：serial = 链式；parallel = fork/join（与宿主迁移逻辑一致）；shell 在创建时取默认值，已有值原样保留 */
+function batchBuildGraph(mode, commands, shells) {
     var nodes = [], edges = [], ids = [];
+    var shellOf = function (i) { return (shells && shells[i]) || wbDefaultShell(); };
     if (mode === 'parallel') {
         var forkId = wbId('bn');
         var joinId = wbId('bn');
@@ -364,7 +368,7 @@ function batchBuildGraph(mode, commands) {
         commands.forEach(function (c, i) {
             var nid = wbId('bn');
             ids.push(nid);
-            nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 260, y: 40 + i * 90, cmd: c, timeout: 300, failPolicy: 'stop' });
+            nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 260, y: 40 + i * 90, cmd: c, shell: shellOf(i), timeout: 300, failPolicy: 'stop' });
             edges.push({ from: forkId, to: nid });
             edges.push({ from: nid, to: joinId });
         });
@@ -374,7 +378,7 @@ function batchBuildGraph(mode, commands) {
         commands.forEach(function (c, i) {
             var nid = wbId('bn');
             ids.push(nid);
-            nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 40 + i * 150, y: 200, cmd: c, timeout: 300, failPolicy: 'stop' });
+            nodes.push({ id: nid, label: c.slice(0, 20) || ('cmd ' + (i + 1)), tag: 'cmd', x: 40 + i * 150, y: 200, cmd: c, shell: shellOf(i), timeout: 300, failPolicy: 'stop' });
             if (prev) { edges.push({ from: prev, to: nid }); }
             prev = nid;
         });
@@ -382,8 +386,8 @@ function batchBuildGraph(mode, commands) {
     return { nodes: nodes, edges: edges, ids: ids };
 }
 /* 按（可能被修改的）清单重建工作流图并持久化（复用 workflowSave，与 Flow 编辑器同一条保存路径） */
-function batchSync(wf, mode, commands) {
-    var g = batchBuildGraph(mode, commands);
+function batchSync(wf, mode, commands, shells) {
+    var g = batchBuildGraph(mode, commands, shells);
     wf.nodes = g.nodes;
     wf.edges = g.edges;
     wf.updatedAt = Date.now();
@@ -400,7 +404,6 @@ function renderBatchGroups() {
     var cur = batchCurrent();
     var x = cur ? batchExtract(cur) : { mode: 'serial', commands: [] };
     wbEl('batchMode').value = x.mode;
-    wbEl('batchGroupName').value = cur ? batchLabel(cur.name) : '';
     renderBatchList();
 }
 function renderBatchList() {
@@ -428,16 +431,20 @@ function batchModeChange() {
     var mode = wbEl('batchMode').value;
     var x = batchExtract(wf);
     if (x.mode === mode) { return; }
-    batchSync(wf, mode, x.commands);
+    batchSync(wf, mode, x.commands, x.shells);
 }
+/* 点击 Rename 弹出输入框（预填当前组名），确认后保存重命名（webview 中原生 prompt 被禁用） */
 function batchRenameGroup() {
     var wf = batchCurrent();
-    var name = (wbEl('batchGroupName').value || '').trim();
-    if (!wf || !name) { return; }
-    wf.name = name;
-    wf.updatedAt = Date.now();
-    vscode.postMessage({ command: 'workflowSave', workflow: wf });
-    renderBatchGroups();
+    if (!wf) { return; }
+    wbPrompt(t('wb.batch.namePh'), batchLabel(wf.name), function (name) {
+        name = (name || '').trim();
+        if (!name) { return; }
+        wf.name = name;
+        wf.updatedAt = Date.now();
+        vscode.postMessage({ command: 'workflowSave', workflow: wf });
+        renderBatchGroups();
+    });
 }
 /* 原生 prompt API 在 webview 中被禁用，改用输入弹窗 */
 function batchAddGroup() {
@@ -463,7 +470,7 @@ function batchAddCmd() {
     if (!wf) { return; }
     var x = batchExtract(wf);
     x.commands.push('echo hello');
-    batchSync(wf, x.mode, x.commands);
+    batchSync(wf, x.mode, x.commands, x.shells);
     renderBatchList();
 }
 function batchEditCmd(i, val) {
@@ -472,14 +479,15 @@ function batchEditCmd(i, val) {
     var x = batchExtract(wf);
     if (x.commands[i] === undefined) { return; }
     x.commands[i] = val;
-    batchSync(wf, x.mode, x.commands);
+    batchSync(wf, x.mode, x.commands, x.shells);
 }
 function batchRemoveCmd(i) {
     var wf = batchCurrent();
     if (!wf) { return; }
     var x = batchExtract(wf);
     x.commands.splice(i, 1);
-    batchSync(wf, x.mode, x.commands);
+    if (x.shells) { x.shells.splice(i, 1); }
+    batchSync(wf, x.mode, x.commands, x.shells);
     renderBatchList();
 }
 var batchDragIdx = null;
@@ -493,9 +501,11 @@ function batchDrop(e, i) {
     if (!wf || batchDragIdx === null || batchDragIdx === i) { return; }
     var x = batchExtract(wf);
     var item = x.commands.splice(batchDragIdx, 1)[0];
+    var shellItem = x.shells ? x.shells.splice(batchDragIdx, 1)[0] : undefined;
     x.commands.splice(i, 0, item);
+    if (x.shells) { x.shells.splice(i, 0, shellItem); }
     batchDragIdx = null;
-    batchSync(wf, x.mode, x.commands);
+    batchSync(wf, x.mode, x.commands, x.shells);
     renderBatchList();
 }
 function batchRun() {
@@ -510,11 +520,11 @@ function batchRun() {
     wbEl('batchStatus').textContent = t('wb.wf.stRunning');
     batchResetPills();
     batchClearLog();
-    batchAppendOutput('hdr', '━━ ' + batchLabel(wf.name) + ' · ' + (x.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' · ' + wbEl('batchShell').value + ' ━━');
+    /* shell 随各节点保存（创建时盖章的具体类型），运行消息不再携带运行级 shell */
+    batchAppendOutput('hdr', '━━ ' + batchLabel(wf.name) + ' · ' + (x.mode === 'parallel' ? t('wb.batch.parallel') : t('wb.batch.serial')) + ' ━━');
     vscode.postMessage({
         command: 'workflowRun',
-        workflow: wf,
-        shell: wbEl('batchShell').value
+        workflow: wf
     });
 }
 function batchResetPills() {

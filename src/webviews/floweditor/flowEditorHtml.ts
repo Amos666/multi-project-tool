@@ -81,7 +81,6 @@ export const FLOW_EDITOR_BODY = `
                 <input type="text" id="wfPSchedValue" style="display:none" oninput="wfEditProp('scheduleValue',this.value)">
                 <label id="wfPShellLabel" data-i18n="wb.wf.shell" style="display:none">Shell</label>
                 <select id="wfPShell" style="display:none" onchange="wfEditProp('shell',this.value)">
-                    <option value="" data-i18n="wb.wf.shellDefault">Default (run-level)</option>
                     <option value="git-bash">Git Bash</option>
                     <option value="cmd">CMD</option>
                     <option value="powershell">PowerShell</option>
