@@ -8,7 +8,7 @@ var vscode = acquireVsCodeApi();
 var WB = { data: { workflows: [], templates: [], history: [] } };
 var WF = {
     nodes: [], edges: [], states: {}, selected: null, linkMode: false, linkFrom: null,
-    running: false, idSeq: 1, currentId: null, logs: [], logFilter: '', durTimer: null,
+    running: false, idSeq: 1, currentId: null, name: 'workflow', logs: [], logFilter: '', durTimer: null,
     drag: null, counts: { failed: 0, skipped: 0 },
     /* 面板三模式：edit=编辑 / run=执行详情（可 Resume/Cancel）/ history=历史只读回放 */
     mode: 'edit', runPhase: '', runDuration: 0, editSnapshot: null,
@@ -38,6 +38,30 @@ function wbEsc(s) {
 function wbId(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function wbEl(id) { return document.getElementById(id); }
 function wbNow() { return new Date().toTimeString().slice(0, 8); }
+/* 输入弹窗（原生 prompt 在 webview 中被禁用），用于重命名等单值输入 */
+var wbPromptCb = null;
+function wbPrompt(msg, defVal, cb) {
+    wbEl('wbPromptText').textContent = msg;
+    var input = wbEl('wbPromptInput');
+    input.value = defVal || '';
+    wbPromptCb = cb;
+    wbEl('wbPromptModal').style.display = 'flex';
+    setTimeout(function () { input.focus(); input.select(); }, 50);
+}
+function wbPromptOk() {
+    var cb = wbPromptCb;
+    var val = wbEl('wbPromptInput').value;
+    wbPromptClose();
+    if (cb) { cb(val); }
+}
+function wbPromptClose() {
+    wbPromptCb = null;
+    wbEl('wbPromptModal').style.display = 'none';
+}
+function wbPromptKey(ev) {
+    if (ev.key === 'Enter') { wbPromptOk(); }
+    else if (ev.key === 'Escape') { wbPromptClose(); }
+}
 function wbToast(msg, type) {
     var d = document.createElement('div');
     d.textContent = msg;
@@ -98,7 +122,7 @@ function applyTrees(trees) {
 function wfSnapshotEdit() {
     if (WF.editSnapshot) { return; }
     WF.editSnapshot = {
-        currentId: WF.currentId, name: wbEl('wfName').value,
+        currentId: WF.currentId, name: WF.name,
         nodes: WF.nodes, edges: WF.edges, selected: WF.selected,
         templateId: WF.templateId
     };
@@ -115,7 +139,7 @@ function wfRestoreEdit() {
         WF.nodes = s.nodes;
         WF.edges = s.edges;
         WF.selected = s.selected;
-        wbEl('wfName').value = s.name;
+        wfSetName(s.name);
     } else {
         WF.templateId = null;
     }
@@ -166,7 +190,8 @@ function wfSyncModeUI() {
     ['wfRunBtn', 'wfLinkBtn', 'wfSaveBtn', 'wfClearBtn'].forEach(function (id) {
         var el = wbEl(id); if (el) { el.style.display = edit ? '' : 'none'; }
     });
-    var name = wbEl('wfName'); if (name) { name.readOnly = !edit; }
+    /* 重命名按钮仅在编辑模式可点（run/history 模式名称只读展示） */
+    var renameBtn = wbEl('wfRenameBtn'); if (renameBtn) { renameBtn.disabled = !edit; }
     var stop = wbEl('wfStopBtn');
     var back = wbEl('wfBackBtn');
     if (stop) { stop.style.display = (WF.mode === 'run' && WF.runPhase === 'running') ? '' : 'none'; }
@@ -215,7 +240,7 @@ function wfApplyAction(action) {
         WF.nodes = action.nodes || [];
         WF.edges = action.edges || [];
         WF.states = {}; WF.selected = null;
-        wbEl('wfName').value = action.name || 'batch';
+        wfSetName(action.name || 'batch');
         wfDraw();
         wbToast(t('wb.batch.flowGenerated'), 'ok');
     }
@@ -310,7 +335,7 @@ function wfShowRunDetail(run) {
     WF.nodes = run.workflow.nodes;
     WF.edges = run.workflow.edges || [];
     WF.selected = null;
-    wbEl('wfName').value = run.name || 'workflow';
+    wfSetName(run.name || 'workflow');
     wfPrepareRun();
     /* 回放已收集的节点状态与监控表 */
     var startedLabel = new Date(run.startedAt || Date.now()).toTimeString().slice(0, 8);
@@ -602,7 +627,8 @@ function wfSyncCmdField(n) {
     var isShellNode = n.tag === 'cmd' || n.tag === 'condition' || (n.tag === 'notify' && (n.notifyType || 'text') === 'cmd');
     wbEl('wfPShellLabel').style.display = isShellNode ? '' : 'none';
     wbEl('wfPShell').style.display = isShellNode ? '' : 'none';
-    if (isShellNode) { wbEl('wfPShell').value = n.shell || ''; }
+    /* 未盖章的旧节点显示 Set 页签默认值（不写回数据，运行时宿主同样以默认值兜底，无歧义） */
+    if (isShellNode) { wbEl('wfPShell').value = n.shell || wfDefaultShell(); }
 }
 /* ---- ref 节点：引用各页签已保存命令 ---- */
 var WF_GIT_OPS = ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch'];
@@ -812,10 +838,37 @@ function wfAddNode(tag) {
 function wfDefaultShell() { return (WB.data && WB.data.defaultShell) || 'git-bash'; }
 
 /* ==================== 工作流存取 ==================== */
+/* 工具栏不再常驻名称输入框：名称存于 WF.name，经 Rename 弹窗修改 */
+function wfSetName(v) {
+    WF.name = (v || 'workflow').trim() || 'workflow';
+    var el = wbEl('wfName');
+    if (el) { el.textContent = WF.name; el.title = WF.name; }
+}
+/* 点击 Rename 弹窗改名：确认后立即生效；已保存的工作流/模板仅同步名称（不动画布），未保存的新画布随 wfSave 落盘 */
+function wfRename() {
+    if (WF.mode !== 'edit') { wbToast(t('wb.wf.readonlyLock'), 'err'); return; }
+    wbPrompt(t('wb.wf.namePh'), WF.name, function (val) {
+        val = (val || '').trim();
+        if (!val || val === WF.name) { return; }
+        wfSetName(val);
+        if (WF.templateId) {
+            var tpl = (WB.data.templates || []).find(function (x) { return x.id === WF.templateId; });
+            /* 内置模板改名只改本地：保存时才生成覆盖项，避免重命名即产生副本 */
+            if (tpl && !tpl.builtin) {
+                vscode.postMessage({ command: 'templateSave', id: tpl.id, name: val, nodes: tpl.nodes, edges: tpl.edges });
+            }
+        } else if (WF.currentId) {
+            var wf = (WB.data.workflows || []).find(function (w) { return w.id === WF.currentId; });
+            if (wf) {
+                vscode.postMessage({ command: 'workflowSave', workflow: { id: wf.id, name: val, kind: wf.kind, nodes: wf.nodes, edges: wf.edges, updatedAt: Date.now() } });
+            }
+        }
+    });
+}
 function wfCurrentWorkflowObj() {
     return {
         id: WF.currentId || wbId('wf'),
-        name: (wbEl('wfName').value || 'workflow').trim() || 'workflow',
+        name: WF.name,
         nodes: WF.nodes, edges: WF.edges, updatedAt: Date.now()
     };
 }
@@ -824,7 +877,7 @@ function wfSave() {
     if (!WF.nodes.length && !WF.edges.length) { wbToast(t('wb.wf.emptyCanvas'), 'err'); return; }
     if (WF.templateId) {
         /* 当前编辑的是模板（含内置模板被修改）：保存回模板，同 id 覆盖 */
-        var tplName = (wbEl('wfName').value || 'template').trim() || 'template';
+        var tplName = WF.name;
         vscode.postMessage({ command: 'templateSave', id: WF.templateId, name: tplName, nodes: WF.nodes, edges: WF.edges });
     } else {
         var obj = wfCurrentWorkflowObj();
@@ -844,7 +897,7 @@ function wfSelectFlow(id) {
     WF.nodes = JSON.parse(JSON.stringify(wf.nodes || []));
     WF.edges = JSON.parse(JSON.stringify(wf.edges || []));
     WF.states = {}; WF.selected = null;
-    wbEl('wfName').value = wf.name;
+    wfSetName(wf.name);
     wbEl('wfPropsForm').style.display = 'none';
     wbEl('wfPropsEmpty').style.display = '';
     wfDraw();
@@ -855,7 +908,7 @@ function wfNew() {
     WF.currentId = null;
     WF.templateId = null;
     WF.nodes = []; WF.edges = []; WF.states = {}; WF.selected = null;
-    wbEl('wfName').value = 'workflow-' + new Date().toISOString().slice(5, 16).replace(/[-:]/g, '');
+    wfSetName('workflow-' + new Date().toISOString().slice(5, 16).replace(/[-:]/g, ''));
     wbEl('wfPropsForm').style.display = 'none';
     wbEl('wfPropsEmpty').style.display = '';
     wfDraw();
@@ -882,7 +935,7 @@ function wfLoadTemplate(id) {
     WF.edges = JSON.parse(JSON.stringify(tpl.edges || []));
     WF.states = {}; WF.selected = null;
     var label = tpl.builtin ? t(tpl.name) : tpl.name;
-    wbEl('wfName').value = label;
+    wfSetName(label);
     wbEl('wfPropsForm').style.display = 'none';
     wbEl('wfPropsEmpty').style.display = '';
     wfDraw();
@@ -911,7 +964,7 @@ function wfShowHistory(idx) {
     }
     WF.states = {};
     (h.nodes || []).forEach(function (n) { WF.states[n.id] = n.state; });
-    wbEl('wfName').value = h.workflowName || 'workflow';
+    wfSetName(h.workflowName || 'workflow');
     /* 监控表 */
     var time = new Date(h.time).toTimeString().slice(0, 8);
     var tbody = wbEl('wfRunTbody');
@@ -1010,7 +1063,7 @@ function wfOnRunStarted(workflow, runId) {
     WF.nodes = workflow.nodes;
     WF.edges = workflow.edges || [];
     WF.selected = null;
-    wbEl('wfName').value = workflow.name || 'workflow';
+    wfSetName(workflow.name || 'workflow');
     wfPrepareRun();
     wfSyncModeUI();
 }

@@ -146,10 +146,14 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
         'wfRunTbody', 'wfOutput', 'wfLogFilter', 'wfState', 'wfDur', 'wfFailed', 'wfSkipped']) {
         assert.ok(flowHtml.includes('id="' + id + '"'), 'missing workflow element: ' + id);
     }
-    // shell 选择迁移到节点属性：工具栏不再有运行级下拉，属性面板含"默认"选项
+    // shell 完全节点属性化：无"默认（运行级）"选项，创建时盖章 Set 页签默认值，保存即为具体类型
     assert.ok(!flowHtml.includes('id="wfShell"'), 'toolbar shell dropdown removed from flow editor');
     assert.ok(flowHtml.includes("wfEditProp('shell',this.value)"), 'node shell selector wired to props');
-    assert.ok(flowHtml.includes('wb.wf.shellDefault'), 'shell default option i18n key');
+    assert.ok(!flowHtml.includes('wb.wf.shellDefault'), 'default (run-level) shell option removed');
+    assert.ok(flowHtml.includes('value="git-bash"') && flowHtml.includes('value="wsl"'), 'concrete shell options only');
+    assert.ok(flowJs.includes('shellTags[tag] ? wfDefaultShell()'), 'new shell nodes stamp Set-tab default at creation');
+    assert.ok(flowJs.includes("n.shell || wfDefaultShell()"), 'legacy unstamped nodes display default shell');
+    assert.ok(!translations.en['wb.wf.shellDefault'] && !translations.zh['wb.wf.shellDefault'], 'shellDefault i18n key removed');
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');
     assert.ok(flowHtml.includes('onclick="wfRun()"'), 'run button');
@@ -159,6 +163,17 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(flowHtml.includes("wfEditProp('httpMethod',this.value)") && flowHtml.includes("wfEditProp('httpHeaders',this.value)") && flowHtml.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
     assert.ok(flowHtml.includes('value="POST"') && flowHtml.includes('value="DELETE"'), 'http method choices');
     assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(flowHtml), 'flow toolbar uses SVG icons, not emoji');
+});
+
+test('HTML+JS: flow editor renames via prompt modal, no inline name input', () => {
+    // 工具栏不再常驻名称输入框：Rename 按钮展示当前名称，点击弹窗改名，确认后持久化
+    assert.ok(!flowHtml.includes('<input type="text" id="wfName"'), 'toolbar name input removed');
+    assert.ok(flowHtml.includes('id="wfRenameBtn"') && flowHtml.includes('onclick="wfRename()"'), 'rename button wired');
+    assert.ok(flowHtml.includes('id="wbPromptModal"'), 'prompt modal available in flow editor panel');
+    assert.ok(flowJs.includes('function wfRename') && flowJs.includes('function wfSetName'), 'rename flow implemented');
+    assert.ok(flowJs.includes('name: WF.name'), 'name tracked in WF state');
+    assert.ok(flowJs.includes('renameBtn.disabled = !edit'), 'rename disabled outside edit mode');
+    assert.ok(translations.en['wb.wf.namePh'] && translations.zh['wb.wf.namePh'], 'rename prompt i18n');
 });
 
 test('JS: notify node property label switches by notifyType', () => {
@@ -243,10 +258,16 @@ test('HTML+JS: start node (scheduled start) and confirm node (manual approval)',
     }
 });
 
-test('HTML: batch panel has own shell selector and live log area', () => {
-    for (const id of ['batchGroupSel', 'batchMode', 'batchShell', 'batchList', 'batchStatus', 'batchOutput']) {
+test('HTML: batch panel has live log area and no shell selector', () => {
+    for (const id of ['batchGroupSel', 'batchMode', 'batchList', 'batchStatus', 'batchOutput']) {
         assert.ok(html.includes('id="' + id + '"'), 'missing batch element: ' + id);
     }
+    // 无任何 shell 下拉：命令创建时读取 Set 页签默认值盖章，保存即为具体类型
+    assert.ok(!html.includes('id="batchShell"'), 'no shell selector in batch panel');
+    assert.ok(!html.includes('id="batchShellAll"'), 'no apply-shell dropdown in batch panel');
+    assert.ok(js.includes('function wbDefaultShell'), 'default shell helper reads Set-tab value');
+    assert.ok(js.includes("(shells && shells[i]) || wbDefaultShell()"), 'new batch commands stamp default shell at creation');
+    assert.ok(!/command: 'workflowRun'[\s\S]{0,160}\bshell:/.test(js), 'run message carries no run-level shell');
     assert.ok(html.includes('onclick="batchRun()"'), 'batch run');
     assert.ok(html.includes('onclick="batchToFlow()"'), 'batch to flowchart');
     assert.ok(html.includes('onclick="batchClearLog()"'), 'batch log clear');

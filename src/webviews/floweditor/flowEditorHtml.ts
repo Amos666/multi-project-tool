@@ -17,7 +17,7 @@ export const FLOW_EDITOR_BODY = `
                 <button class="wf-btn" id="wfLinkBtn" onclick="wfToggleLink()" data-i18n-title="wb.wf.link" title="Link mode"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 9.8l3.6-3.6"/><path d="M7.4 5.4l1.3-1.3a2.4 2.4 0 0 1 3.4 3.4l-1.3 1.3"/><path d="M8.6 10.6l-1.3 1.3a2.4 2.4 0 0 1-3.4-3.4l1.3-1.3"/></svg></button>
                 <button class="wf-btn" id="wfSaveBtn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h8.5L14 5.5V13H3z"/><path d="M5.5 3v3h4V3"/><path d="M5.5 13v-3.5h5V13"/></svg></button>
                 <button class="wf-btn danger" id="wfClearBtn" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.3 4.5V3h3.4v1.5"/><path d="M4.5 4.5l.8 8.5h5.4l.8-8.5"/><path d="M6.8 7v3.5M9.2 7v3.5"/></svg></button>
-                <input type="text" id="wfName" value="workflow" style="width:150px;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:11px;padding:3px 6px;outline:none;">
+                <button class="wf-btn" id="wfRenameBtn" onclick="wfRename()" data-i18n-title="cmd.rename" title="Rename"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L5.5 12.5 3 13l.5-2.5z"/></svg><span id="wfName" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">workflow</span></button>
                 <span class="wf-hint" id="wfHint"></span>
             </div>
             <div class="wf-svg-wrap" id="wfSvgWrap">
@@ -129,6 +129,23 @@ export const FLOW_EDITOR_BODY = `
                     <span class="wf-btn" style="padding:1px 6px" onclick="wfClearOutput()" data-i18n="log.clear">Clear</span>
                 </div>
                 <div class="wf-output" id="wfOutput"></div>
+            </div>
+        </div>
+    </div>
+    <!-- 重命名弹窗：webview 中原生 prompt 被禁用 -->
+    <div id="wbPromptModal" class="modal-overlay" style="display:none">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span class="modal-title" data-i18n="wb.prompt.title">Input</span>
+                <button class="modal-close" onclick="wbPromptClose()">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:12px;margin-bottom:6px" id="wbPromptText"></p>
+                <input type="text" id="wbPromptInput" style="width:100%;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:12px;padding:4px 6px;outline:none;" onkeydown="wbPromptKey(event)" autocomplete="off">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="wbPromptClose()" data-i18n="cmd.cancel">Cancel</button>
+                <button class="btn btn-primary" onclick="wbPromptOk()" data-i18n="cmd.save">Save</button>
             </div>
         </div>
     </div>
