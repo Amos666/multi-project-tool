@@ -628,7 +628,7 @@ function wfSyncCmdField(n) {
     wbEl('wfPShellLabel').style.display = isShellNode ? '' : 'none';
     wbEl('wfPShell').style.display = isShellNode ? '' : 'none';
     /* 未盖章的旧节点显示 Set 页签默认值（不写回数据，运行时宿主同样以默认值兜底，无歧义） */
-    if (isShellNode) { wbEl('wfPShell').value = n.shell || wfDefaultShell(); }
+    if (isShellNode) { wbEl('wfPShell').value = n.shell || wfDefaultShell(); wfShellSync(n.shell); }
 }
 /* ---- ref 节点：引用各页签已保存命令 ---- */
 var WF_GIT_OPS = ['pull', 'commit', 'push', 'fetch', 'switch-branch', 'create-branch'];
@@ -795,6 +795,7 @@ function wfEditProp(key, val) {
     if (WF.mode === 'edit') {
         n[key] = val;
         if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
+        if (key === 'shell') { wfShellSync(val); }
         wfDraw();
         return;
     }
@@ -803,6 +804,7 @@ function wfEditProp(key, val) {
         if (WF.states[n.id] === 'success') { wbToast(t('wb.wf.cannotEditDoneNode'), 'err'); return; }
         n[key] = val;
         if (key === 'notifyType') { wfSyncNotifyFields(n); wfSyncCmdField(n); }
+        if (key === 'shell') { wfShellSync(val); }
         wfDraw();
     }
 }
@@ -835,6 +837,13 @@ function wfAddNode(tag) {
 }
 /* Set 页签默认 shell（宿主经 workbenchData 消息下发），节点创建时读取；未盖章的旧节点显示/回退均取此值 */
 function wfDefaultShell() { return (WB.data && WB.data.defaultShell) || 'git-bash'; }
+/* shell 下拉样式与 Batch 清单行保持一致：等于 Set 默认为灰色，偏离默认时高亮 */
+function wfShellSync(val) {
+    var sel = wbEl('wfPShell');
+    if (!sel) { return; }
+    var v = (val !== undefined && val !== null) ? val : sel.value;
+    sel.className = (v && v !== wfDefaultShell()) ? 'custom' : '';
+}
 
 /* ==================== 工作流存取 ==================== */
 /* 工具栏不再常驻名称输入框：名称存于 WF.name，经 Rename 弹窗修改 */

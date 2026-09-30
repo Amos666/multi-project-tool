@@ -153,6 +153,13 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(flowHtml.includes('value="git-bash"') && flowHtml.includes('value="wsl"'), 'concrete shell options only');
     assert.ok(flowJs.includes('wfDefaultShell()'), 'flow nodes stamp Set-tab default at creation');
     assert.ok(flowJs.includes("n.shell || wfDefaultShell()"), 'legacy unstamped nodes display default shell');
+    // 宿主必须随 workbenchData 下发 defaultShell，否则创建时永远回退 git-bash
+    assert.ok(mvpSrcCache.includes('templates: store.allTemplates(), defaultShell: this._currentShell'), 'host sends Set-tab default shell with workbench data');
+    // shell 下拉样式与 Batch 清单行一致：等于默认灰、偏离默认高亮
+    assert.ok(flowJs.includes('function wfShellSync'), 'shell select class sync helper exists');
+    assert.ok(flowJs.includes("sel.className = (v && v !== wfDefaultShell()) ? 'custom' : ''"), 'custom class toggled against Set-tab default');
+    const flowProviderSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'webviews', 'floweditor', 'FlowEditorProvider.ts'), 'utf8');
+    assert.ok(flowProviderSrc.includes('select#wfPShell.custom'), 'flow editor shell select highlights deviation like batch rows');
     assert.ok(!translations.en['wb.wf.shellDefault'] && !translations.zh['wb.wf.shellDefault'], 'shellDefault i18n key removed');
     assert.ok(!html.includes('id="wfEnv"'), 'dev/test/prod dropdown removed from flow tab');
     assert.ok(!html.includes('id="batchEnv"'), 'env dropdown removed from batch panel');

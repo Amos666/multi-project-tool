@@ -150,6 +150,9 @@ ${WORKBENCH_CSS}
 .wf-splitter:hover::after, .wf-splitter.dragging::after { background-color: var(--brand-primary); }
 .wf-splitter.dragging { cursor: row-resize; }
 .wf-btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
+/* shell 下拉与 Batch 清单行同款：等于 Set 页签默认为灰色，偏离默认高亮 */
+.wf-props select#wfPShell { color: var(--brand-text-muted); }
+.wf-props select#wfPShell.custom { color: var(--brand-primary); border-color: var(--brand-primary); }
 body.wf-resizing { cursor: row-resize; user-select: none; }
 body.wf-resizing .wf-svg-wrap { pointer-events: none; }
     </style>

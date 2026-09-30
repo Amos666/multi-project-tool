@@ -4761,7 +4761,8 @@ window.addEventListener('message', event => {
     private getWorkbenchData() {
         const store = WorkbenchStore.getInstance();
         const data = store.load();
-        return { ...data, templates: store.allTemplates() };
+        /* defaultShell 随 workbenchData 下发：Batch/Flow 创建命令时盖章 Set 页签默认 shell */
+        return { ...data, templates: store.allTemplates(), defaultShell: this._currentShell };
     }
 
     private postWorkbenchData(): void {
