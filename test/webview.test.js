@@ -115,6 +115,15 @@ test('HTML: delete-category confirmation modal exists', () => {
     assert.ok(html.includes('closeDeleteCategoryModal()'), 'close handler');
 });
 
+test('JS: command deletion goes through the confirm modal (all three tabs share deleteNode)', () => {
+    // deleteNode 是三个 Tab（cmd/shortcut/pyt）命令与分类删除的共用入口：
+    // 命令删除必须走确认弹窗（防误删），空分类仍直接删
+    assert.ok(js.includes("node.type === 'category' && countDescendants(node) === 0"), 'empty category deletes without confirm');
+    assert.ok(js.includes("t('cmd.deleteCommandTitle')"), 'command delete uses its own modal title');
+    assert.ok(js.includes("t('cmd.deleteCommandConfirm')"), 'command delete uses confirm message');
+    assert.ok(html.includes('id="deleteModalTitle"'), 'modal title element has id for dynamic text');
+});
+
 // ---------- workbench tabs (checklist / workflow / batch) ----------
 test('HTML: workbench tab buttons + panels + launcher overlay', () => {
     for (const id of ['tabBtn-checklist', 'tabBtn-workflow', 'tabBtn-batch',
@@ -583,6 +592,7 @@ test('i18n: all tree keys exist in en and zh', () => {
         'cmd.newCategory', 'cmd.editCategory', 'cmd.fillCategoryName',
         'cmd.addCommandHere', 'cmd.addSubCategory', 'cmd.rename',
         'cmd.deleteCategoryTitle', 'cmd.deleteCategoryConfirm',
+        'cmd.deleteCommandTitle', 'cmd.deleteCommandConfirm',
         'pytxt.content', 'project.expand', 'project.collapse'
     ];
     for (const lang of ['en', 'zh']) {

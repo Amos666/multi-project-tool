@@ -36,15 +36,18 @@ function readWsConfig(wsDir) {
     return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 }
 
+// 清除编译产物（out/）模块缓存：ConfigStore 等单例随模块缓存重置，新 provider 才能指向新工作区。
+// 注意按 out 目录路径判断——按项目目录名判断在任意 checkout 路径下都会失效（单例永不重置）。
+const outDir = path.resolve(__dirname, '..', 'out');
+function clearModuleCache() {
+    for (const key of Object.keys(require.cache)) {
+        if (key.startsWith(outDir + path.sep)) { delete require.cache[key]; }
+    }
+}
+
 // ConfigStore 单例缓存 configDir，freshProvider 重置模块缓存让新 provider 指向指定工作区
 function freshProvider(wsDir) {
-    for (const key of Object.keys(require.cache)) {
-        if (key.endsWith('vscodeMock.js') || key.endsWith('harness.js')) { continue; }
-        if (key.includes(path.join('test', 'vscodeMock')) || key.includes(path.join('test', 'harness'))) { continue; }
-        if (key.includes('multi-project-tool') && !key.includes(path.join('test', 'prc.test.js'))) {
-            delete require.cache[key];
-        }
-    }
+    clearModuleCache();
     setWorkspace(wsDir);
     const { MainViewProvider } = require('../out/views/MainViewProvider');
     const provider = new MainViewProvider(Uri.file(wsDir), sharedMemento);
@@ -140,12 +143,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
     // 独立 memento 模拟"另一台机器/全新全局存储"，避免上方场景污染
     const migrateMemento = mockMemento();
-    for (const key of Object.keys(require.cache)) {
-        if (key.includes('multi-project-tool') && !key.includes(path.join('test', 'prc.test.js'))) {
-            if (key.endsWith('vscodeMock.js') || key.endsWith('harness.js')) { continue; }
-            delete require.cache[key];
-        }
-    }
+    clearModuleCache();
     setWorkspace(wsC);
     const { MainViewProvider: MVP2 } = require('../out/views/MainViewProvider');
     const pC = new MVP2(Uri.file(wsC), migrateMemento);

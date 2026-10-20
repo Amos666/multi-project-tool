@@ -1937,7 +1937,7 @@ body {
     <div id="deleteCategoryModal" class="modal-overlay" style="display: none;">
         <div class="modal-dialog">
             <div class="modal-header">
-                <span class="modal-title" data-i18n="cmd.deleteCategoryTitle">Delete Category</span>
+                <span class="modal-title" id="deleteModalTitle" data-i18n="cmd.deleteCategoryTitle">Delete Category</span>
                 <button class="modal-close" onclick="closeDeleteCategoryModal()">×</button>
             </div>
             <div class="modal-body">
@@ -2391,19 +2391,25 @@ function saveEditor(tabId) {
     hideEditor(tabId);
 }
 
-// --- 删除节点（非空分类需确认） ---
+// --- 删除节点（命令与非空分类均弹确认框，防止误删；空分类无内容直接删） ---
 function deleteNode(tabId, nodeId) {
     const tree = getTree(tabId);
     const node = findNode(tree, nodeId);
     if (!node) { return; }
-    if (node.type === 'category' && countDescendants(node) > 0) {
-        pendingDeleteNode = { tabId: tabId, id: nodeId };
-        document.getElementById('deleteCategoryModal').style.display = 'flex';
+    if (node.type === 'category' && countDescendants(node) === 0) {
+        removeNodeById(tree, nodeId);
+        saveTree(tabId);
+        renderCommandTree(tabId);
         return;
     }
-    removeNodeById(tree, nodeId);
-    saveTree(tabId);
-    renderCommandTree(tabId);
+    // 命令（三个 Tab 共用）与非空分类：确认后删除
+    pendingDeleteNode = { tabId: tabId, id: nodeId };
+    const isCategory = node.type === 'category';
+    document.getElementById('deleteModalTitle').textContent = isCategory ? t('cmd.deleteCategoryTitle') : t('cmd.deleteCommandTitle');
+    document.getElementById('deleteCategoryMessage').textContent = isCategory
+        ? t('cmd.deleteCategoryConfirm')
+        : t('cmd.deleteCommandConfirm') + ' "' + (node.name || '') + '"';
+    document.getElementById('deleteCategoryModal').style.display = 'flex';
 }
 
 function closeDeleteCategoryModal() {
