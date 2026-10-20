@@ -74,6 +74,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.rename': 'Rename',
         'cmd.deleteCategoryTitle': 'Delete Category',
         'cmd.deleteCategoryConfirm': 'This category contains commands or sub-categories. Delete it and all its contents?',
+        'cmd.deleteCommandTitle': 'Delete Command',
+        'cmd.deleteCommandConfirm': 'Delete this command?',
 
         // Settings
         'settings.globalParams': 'Global Parameters',
@@ -128,7 +130,6 @@ export const translations: Record<Language, Record<string, string>> = {
         'pytxt.logReady': 'Select text and run Python command to transform',
         'pytxt.tempCmd': 'Temporary Command',
         'pytxt.inputAlias': 'Please enter command alias',
-        'pytxt.confirmDelete': 'Confirm delete this command?',
 
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
@@ -416,6 +417,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'cmd.rename': '重命名',
         'cmd.deleteCategoryTitle': '删除分类',
         'cmd.deleteCategoryConfirm': '该分类下包含命令或子分类，确定删除该分类及其全部内容？',
+        'cmd.deleteCommandTitle': '删除命令',
+        'cmd.deleteCommandConfirm': '确定删除该命令？',
 
         // Settings
         'settings.globalParams': '全局参数',
@@ -470,7 +473,6 @@ export const translations: Record<Language, Record<string, string>> = {
         'pytxt.logReady': '选择文本后运行 Python 命令即可转换',
         'pytxt.tempCmd': '临时命令',
         'pytxt.inputAlias': '请输入命令别名',
-        'pytxt.confirmDelete': '确定删除该命令？',
 
         // Backend messages
         'backend.noGitProjects': 'No Git projects selected',
