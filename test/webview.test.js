@@ -124,6 +124,13 @@ test('JS: command deletion goes through the confirm modal (all three tabs share 
     assert.ok(html.includes('id="deleteModalTitle"'), 'modal title element has id for dynamic text');
 });
 
+test('JS: project row commands editor renders a per-command shell select', () => {
+    // 每条命令自带脚本类型：未设置时显示当前默认值（不写回），选择后随命令持久化
+    assert.ok(js.includes("shellSel.className = 'prc-shell'"), 'shell select rendered per row');
+    assert.ok(js.includes('shellSel.value = c.shell || currentShell'), 'unset shell displays current default');
+    assert.ok(js.includes('row: { alias: alias, command: command, tip: tip, shell: shell }'), 'update message carries shell');
+});
+
 // ---------- workbench tabs (checklist / workflow / batch) ----------
 test('HTML: workbench tab buttons + panels + launcher overlay', () => {
     for (const id of ['tabBtn-checklist', 'tabBtn-workflow', 'tabBtn-batch',
@@ -593,6 +600,7 @@ test('i18n: all tree keys exist in en and zh', () => {
         'cmd.addCommandHere', 'cmd.addSubCategory', 'cmd.rename',
         'cmd.deleteCategoryTitle', 'cmd.deleteCategoryConfirm',
         'cmd.deleteCommandTitle', 'cmd.deleteCommandConfirm',
+        'prc.alias', 'prc.shell',
         'pytxt.content', 'project.expand', 'project.collapse'
     ];
     for (const lang of ['en', 'zh']) {

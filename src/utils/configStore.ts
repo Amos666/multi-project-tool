@@ -9,6 +9,8 @@ export interface ProjectRowCommand {
     alias: string;
     command: string;
     tip: string;
+    /* 命令自带脚本类型：创建时盖默认值，保存后随命令持久化（保证脚本与类型匹配） */
+    shell?: string;
 }
 
 export interface WorkspaceConfig {
