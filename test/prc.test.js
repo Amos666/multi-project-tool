@@ -184,5 +184,45 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         assert.ok(!migrateMemento.get('projectRowCommands').some(c => c.alias === 'LegacyOpen' || c.alias === 'FromSave'), 'first row deleted');
     });
 
+    // ---- 场景 8：per-command shell——新增盖默认值、显式设置保留、更新缺省不丢、改全局默认不影响 ----
+    const shellMemento = mockMemento();
+    clearModuleCache();
+    setWorkspace(wsA);
+    const { MainViewProvider: MVP3 } = require('../out/views/MainViewProvider');
+    const pS = new MVP3(Uri.file(wsA), shellMemento);
+    pS._view = { webview: { postMessage: () => Promise.resolve(), asWebviewUri: (u) => u, cspSource: '' } };
+    await sleep(150);
+
+    await pS.handleWebviewMessage({ command: 'addProjectRowCommand' }, 'panel');
+    test('shell: newly added command is stamped with the current default shell', () => {
+        const rows = shellMemento.get('projectRowCommands');
+        assert.ok(rows.length === 3, 'default rows + one added');
+        assert.ok(rows[2].shell === pS._currentShell, 'stamped shell: ' + JSON.stringify(rows[2]));
+    });
+
+    await pS.handleWebviewMessage({ command: 'updateProjectRowCommand', index: 2, row: { alias: 'PS', command: 'Get-Date', tip: '', shell: 'powershell' } }, 'panel');
+    test('shell: explicit shell saved with the command', () => {
+        const rows = shellMemento.get('projectRowCommands');
+        assert.ok(rows[2].shell === 'powershell', 'explicit shell persisted: ' + JSON.stringify(rows[2]));
+    });
+
+    await pS.handleWebviewMessage({ command: 'updateProjectRowCommand', index: 2, row: { alias: 'PS2', command: 'Get-Date', tip: '' } }, 'panel');
+    test('shell: update without shell keeps the previously saved value', () => {
+        const rows = shellMemento.get('projectRowCommands');
+        assert.ok(rows[2].shell === 'powershell', 'shell preserved: ' + JSON.stringify(rows[2]));
+    });
+
+    await pS.handleWebviewMessage({
+        command: 'saveSettings',
+        settings: {
+            defaultShell: 'wsl',
+            projectRowCommands: shellMemento.get('projectRowCommands')
+        }
+    }, 'panel');
+    test('shell: changing the default shell does not affect saved command shells', () => {
+        const rows = shellMemento.get('projectRowCommands');
+        assert.ok(rows[2].shell === 'powershell', 'saved shell untouched after default change');
+    });
+
     summary('prc global-state suite');
 })().catch(e => { console.error(e); process.exitCode = 1; });

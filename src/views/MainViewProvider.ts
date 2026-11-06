@@ -1067,6 +1067,7 @@ body {
     margin-bottom: 4px;
 }
 .prc-item .prc-alias { width: 90px; flex: none; }
+.prc-item .prc-shell { width: 96px; flex: none; }
 .prc-item .prc-command { flex: 1; min-width: 0; }
 .prc-item .prc-tip { flex: 1; min-width: 0; }
 
@@ -3216,7 +3217,7 @@ function updateEnvVariables() {
     });
 }
 
-/* ---- Set Tab：项目行命令列表编辑器（别名 / 命令 / 描述 tips，增删改即时持久化） ---- */
+/* ---- Set Tab：项目行命令列表编辑器（别名 / 脚本类型 / 命令 / 描述 tips，增删改即时持久化） ---- */
 function renderProjectRowCommands() {
     const list = document.getElementById('projectRowCommandList');
     if (!list) { return; }
@@ -3230,15 +3231,24 @@ function renderProjectRowCommands() {
         aliasInput.className = 'prc-alias';
         aliasInput.value = c.alias;
         aliasInput.placeholder = t('prc.alias');
-        aliasInput.onchange = function() { updateProjectRowCommand(i, this.value, cmdInput.value, tipInput.value); };
+        aliasInput.onchange = function() { updateProjectRowCommand(i, this.value, cmdInput.value, tipInput.value, shellSel.value); };
         item.appendChild(aliasInput);
+
+        // 每条命令自带脚本类型：未设置时显示当前默认值，选择后随命令持久化（改默认不影响已存命令）
+        const shellSel = document.createElement('select');
+        shellSel.className = 'prc-shell';
+        shellSel.title = t('prc.shell');
+        shellSel.innerHTML = '<option value="git-bash">Git Bash</option><option value="cmd">CMD</option><option value="powershell">PowerShell</option><option value="wsl">WSL</option>';
+        shellSel.value = c.shell || currentShell;
+        shellSel.onchange = function() { updateProjectRowCommand(i, aliasInput.value, cmdInput.value, tipInput.value, this.value); };
+        item.appendChild(shellSel);
 
         const cmdInput = document.createElement('input');
         cmdInput.type = 'text';
         cmdInput.className = 'prc-command';
         cmdInput.value = c.command;
         cmdInput.placeholder = t('prc.command');
-        cmdInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, this.value, tipInput.value); };
+        cmdInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, this.value, tipInput.value, shellSel.value); };
         item.appendChild(cmdInput);
 
         const tipInput = document.createElement('input');
@@ -3246,7 +3256,7 @@ function renderProjectRowCommands() {
         tipInput.className = 'prc-tip';
         tipInput.value = c.tip;
         tipInput.placeholder = t('prc.tip');
-        tipInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, cmdInput.value, this.value); };
+        tipInput.onchange = function() { updateProjectRowCommand(i, aliasInput.value, cmdInput.value, this.value, shellSel.value); };
         item.appendChild(tipInput);
 
         const delBtn = document.createElement('button');
@@ -3261,9 +3271,9 @@ function renderProjectRowCommands() {
 
 function addProjectRowCommand() { vscode.postMessage({ command: 'addProjectRowCommand' }); }
 
-function updateProjectRowCommand(index, alias, command, tip) {
+function updateProjectRowCommand(index, alias, command, tip, shell) {
     // 注意：数据对象必须用 row 键。若也叫 command 会覆盖外层消息类型字符串，导致宿主 switch 无法路由（内容无法保存）
-    vscode.postMessage({ command: 'updateProjectRowCommand', index: index, row: { alias: alias, command: command, tip: tip } });
+    vscode.postMessage({ command: 'updateProjectRowCommand', index: index, row: { alias: alias, command: command, tip: tip, shell: shell } });
 }
 
 function deleteProjectRowCommand(index) { vscode.postMessage({ command: 'deleteProjectRowCommand', index: index }); }
@@ -4511,7 +4521,8 @@ window.addEventListener('message', event => {
                     id: typeof c.id === 'string' && c.id ? c.id : this.newProjectRowCommandId(),
                     alias: c.alias.trim(),
                     command: c.command,
-                    tip: typeof c.tip === 'string' ? c.tip : ''
+                    tip: typeof c.tip === 'string' ? c.tip : '',
+                    shell: typeof c.shell === 'string' && VALID_SHELLS.includes(c.shell) ? c.shell : undefined
                 }));
             this.saveProjectRowCommands();
         }
@@ -4523,7 +4534,8 @@ window.addEventListener('message', event => {
     /* ============ Projects view 项目行动态按钮命令 ============ */
 
     private handleAddProjectRowCommand(): void {
-        this._projectRowCommands.push({ id: this.newProjectRowCommandId(), alias: '', command: '', tip: '' });
+        // 新增命令时盖当前默认 shell（保存后即为具体类型，后续改默认不影响已存命令）
+        this._projectRowCommands.push({ id: this.newProjectRowCommandId(), alias: '', command: '', tip: '', shell: this._currentShell });
         this.saveProjectRowCommands();
         this.updateWebview();
     }
@@ -4535,7 +4547,9 @@ window.addEventListener('message', event => {
             id: cur.id,
             alias: typeof command.alias === 'string' ? command.alias : cur.alias,
             command: typeof command.command === 'string' ? command.command : cur.command,
-            tip: typeof command.tip === 'string' ? command.tip : cur.tip
+            tip: typeof command.tip === 'string' ? command.tip : cur.tip,
+            // 消息未带 shell 或值非法时保留原值（旧数据无 shell → 运行时回退默认）
+            shell: typeof command.shell === 'string' && VALID_SHELLS.includes(command.shell) ? command.shell : cur.shell
         };
         this.saveProjectRowCommands();
         this.updateWebview();
@@ -4564,7 +4578,8 @@ window.addEventListener('message', event => {
             this.addLog('✗ ' + t('backend.prcNoCommand', this._language), 'error', project.name);
             return;
         }
-        const runShell = this._currentShell;
+        // 命令自带的 shell 优先（创建时盖章、随命令持久化）；旧数据无 shell 回退全局默认
+        const runShell = cfg.shell && VALID_SHELLS.includes(cfg.shell) ? cfg.shell : this._currentShell;
         const shellLabel = this.getShellLabel(runShell);
         this.addLog('▶ [' + shellLabel + '] ' + cfg.alias + ' — ' + project.name + ' (' + project.path + ')', 'info', project.name);
 
