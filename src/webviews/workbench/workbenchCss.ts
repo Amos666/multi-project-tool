@@ -31,13 +31,13 @@ export const WORKBENCH_CSS = `
 .wb-add-row input[type="text"] {
     flex: 1; background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    padding: 5px 8px; font-size: 12px; outline: none;
+    padding: 5px 8px; font-size: 12px;
 }
 .wb-add-row input[type="text"]:focus { border-color: var(--brand-primary); }
 .wb-add-row select {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    font-size: 11px; padding: 2px 4px; outline: none;
+    font-size: 11px; padding: 2px 4px;
 }
 .wb-progress-wrap { padding: 8px 10px; border-top: 1px solid var(--brand-border-subtle); }
 .wb-progress-text { font-size: 11px; color: var(--brand-text-muted); margin-bottom: 4px; }
@@ -87,7 +87,7 @@ export const WORKBENCH_CSS = `
 .wf-toolbar select {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    font-size: 11px; padding: 2px 4px; outline: none;
+    font-size: 11px; padding: 2px 4px;
 }
 .wf-hint { margin-left: auto; font-size: 10px; color: var(--brand-text-muted); }
 /* 面板模式徽标（执行详情 / 只读回放 / 失败暂停） */
@@ -120,7 +120,7 @@ export const WORKBENCH_CSS = `
 .wf-props input, .wf-props select, .wf-props textarea {
     width: 100%; background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    padding: 4px 6px; font-size: 12px; outline: none;
+    padding: 4px 6px; font-size: 12px;
 }
 .wf-props input:focus, .wf-props select:focus, .wf-props textarea:focus { border-color: var(--brand-primary); }
 .wf-props textarea { resize: vertical; font-family: var(--mono-font, monospace); font-size: 11px; }
@@ -188,7 +188,7 @@ export const WORKBENCH_CSS = `
 .wf-node-actions {
     position: absolute; z-index: 5; display: flex; align-items: center; gap: 6px;
     padding: 4px 8px; border-radius: var(--radius-md); white-space: nowrap;
-    background-color: var(--brand-surface-raised); border: 1px solid #e0af68;
+    background-color: var(--brand-surface-raised); border: 1px solid var(--state-warning);
     box-shadow: var(--shadow-md); font-size: 11px; color: var(--brand-text);
     animation: wfConfirmPulse 1.2s ease-in-out infinite alternate;
 }
@@ -196,7 +196,7 @@ export const WORKBENCH_CSS = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; max-width: 320px;
 }
 .wf-node-actions .wf-btn { padding: 2px 7px; }
-@keyframes wfConfirmPulse { from { border-color: rgba(224, 175, 104, 0.5); } to { border-color: #e0af68; } }
+@keyframes wfConfirmPulse { from { border-color: color-mix(in srgb, var(--state-warning) 50%, transparent); } to { border-color: var(--state-warning); } }
 .wf-monitor-body { flex: 1; display: flex; min-height: 0; }
 .wf-run-table-wrap { width: 46%; overflow-y: auto; border-right: 1px solid var(--brand-border-subtle); }
 .wf-run-table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -231,7 +231,7 @@ export const WORKBENCH_CSS = `
 .batch-controls select, .batch-controls input[type="text"] {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    font-size: 12px; padding: 4px 6px; outline: none;
+    font-size: 12px; padding: 4px 6px;
 }
 .batch-list { list-style: none; margin: 10px; padding: 0; border: 1px solid var(--brand-border); border-radius: var(--radius-md); overflow: hidden; }
 .batch-list li {
@@ -245,7 +245,7 @@ export const WORKBENCH_CSS = `
 .batch-list .batch-idx { color: var(--brand-text-muted); font-size: 11px; width: 16px; flex: none; }
 .batch-list .batch-cmd { flex: 1; font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-list .batch-cmd-input {
-    flex: 1; background: transparent; border: none; outline: none;
+    flex: 1; background: transparent; border: none;
     color: var(--brand-text); font-family: var(--font-mono); font-size: 12px;
     border-bottom: 1px solid var(--brand-border);
 }
@@ -253,7 +253,7 @@ export const WORKBENCH_CSS = `
     flex: none; width: 92px;
     background-color: var(--brand-surface-raised); color: var(--brand-text-muted);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
-    font-size: 11px; padding: 2px 4px; outline: none;
+    font-size: 11px; padding: 2px 4px;
 }
 .batch-list .batch-shell-sel.custom { color: var(--brand-primary); border-color: var(--brand-primary); }
 .batch-list .batch-status {
@@ -287,7 +287,7 @@ export const WORKBENCH_CSS = `
 }
 .launcher input {
     background: transparent; border: none; border-bottom: 1px solid var(--brand-border);
-    color: var(--brand-text); font-size: 14px; padding: 12px 16px; outline: none; width: 100%;
+    color: var(--brand-text); font-size: 14px; padding: 12px 16px; width: 100%;
 }
 .launcher-list { overflow-y: auto; padding: 4px 0; }
 .launcher-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 12px; }

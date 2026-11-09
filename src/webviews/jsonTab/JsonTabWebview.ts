@@ -22,7 +22,7 @@ export class JsonTabWebview {
             this.getWebviewOptions()
         );
 
-        this._panel.webview.html = this.getWebviewContent();
+        this._panel.webview.html = this.getWebviewContent(this._panel.webview.cspSource);
 
         // 监听webview消息
         this._panel.webview.onDidReceiveMessage(
@@ -62,17 +62,25 @@ export class JsonTabWebview {
         };
     }
 
-    private getWebviewContent(): string {
+    private getWebviewContent(cspSource: string): string {
         return `
             <!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <!-- CSP：资源全部内联，仅允许 ${cspSource} 与内联脚本/样式（无任何外部网络请求） -->
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} data:; font-src ${cspSource};">
                 <title>JSON Settings</title>
                 <style>
+                    /* 焦点可见性：键盘焦点显式轮廓；尊重系统减动效设置 */
+                    :focus { outline: none; }
+                    :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+                    @media (prefers-reduced-motion: reduce) {
+                        *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+                    }
                     body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-family: var(--vscode-font-family);
                         margin: 0;
                         padding: 20px;
                         background-color: var(--vscode-editor-background);

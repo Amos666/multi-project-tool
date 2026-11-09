@@ -121,7 +121,7 @@ export const WORKBENCH_PANELS = `
                 </div>
                 <div class="modal-body">
                     <p style="font-size:12px;margin-bottom:6px" id="wbPromptText"></p>
-                    <input type="text" id="wbPromptInput" style="width:100%;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:12px;padding:4px 6px;outline:none;" onkeydown="wbPromptKey(event)" autocomplete="off">
+                    <input type="text" id="wbPromptInput" style="width:100%;background-color:var(--brand-surface-raised);color:var(--brand-text);border:1px solid var(--brand-border);border-radius:var(--radius-sm);font-size:12px;padding:4px 6px;" onkeydown="wbPromptKey(event)" autocomplete="off">
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="wbPromptClose()" data-i18n="cmd.cancel">Cancel</button>

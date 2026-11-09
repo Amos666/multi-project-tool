@@ -333,12 +333,15 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         const htmlBody = this.getHtmlBody();
         const js = this.getJavaScript();
         const i18nScript = `<script>const i18nTranslations = ${JSON.stringify(translations)}; let currentLang = '${this._language}'; function t(key) { return i18nTranslations[currentLang]?.[key] || i18nTranslations.en?.[key] || key; } function applyTranslations() { document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); }); document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); }); document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); }); }</script>`;
+        /* CSP：资源全部内联，仅允许 ${cspSource} 与内联脚本/样式（无任何外部网络请求） */
+        const csp = this._view?.webview?.cspSource ?? '';
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp} 'unsafe-inline'; img-src ${csp} data:; font-src ${csp};">
     <title>Multi Project Tools</title>
     <style>${css}</style>
 </head>
@@ -348,25 +351,31 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     private getCss(): string {
         return `
+/* 焦点可见性：键盘焦点显式轮廓，鼠标焦点交由控件自身反馈；尊重系统减动效设置 */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
 :root {
-    /* 与 VS Code 主题色板协调的深色基调（Tokyo Night 调优版） */
-    --brand-background: #16161e;
-    --brand-surface: #1a1b26;
-    --brand-surface-raised: #24283b;
-    --brand-surface-hover: #2f3347;
-    --brand-border: #2f3347;
-    --brand-border-subtle: #1f2233;
-    --brand-text: #c0caf5;
-    --brand-text-secondary: #a9b1d6;
-    --brand-text-muted: #565f89;
-    --brand-text-inverse: #16161e;
-    --brand-primary: #7dcfff;
-    --brand-primary-hover: #89dceb;
-    --brand-primary-subtle: rgba(125, 207, 255, 0.08);
-    --state-success: #9ece6a;
-    --state-warning: #e0af68;
-    --state-error: #f7768e;
-    --state-info: #7aa2f7;
+    /* 视觉令牌全部映射 VS Code 主题语义变量：Light / Dark / High Contrast（含 HC Light）自动适配，无硬编码颜色 */
+    --brand-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --brand-surface: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+    --brand-surface-raised: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+    --brand-surface-hover: var(--vscode-list-hoverBackground);
+    --brand-border: var(--vscode-panel-border, var(--vscode-widget-border));
+    --brand-border-subtle: var(--vscode-widget-border, var(--vscode-panel-border));
+    --brand-text: var(--vscode-sideBar-foreground, var(--vscode-editor-foreground));
+    --brand-text-secondary: var(--vscode-descriptionForeground);
+    --brand-text-muted: color-mix(in srgb, var(--vscode-foreground, var(--brand-text)) 55%, transparent);
+    --brand-text-inverse: var(--vscode-button-foreground);
+    --brand-primary: var(--vscode-button-background);
+    --brand-primary-hover: var(--vscode-button-hoverBackground);
+    --brand-primary-subtle: color-mix(in srgb, var(--vscode-button-background) 8%, transparent);
+    --state-success: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen));
+    --state-warning: var(--vscode-editorWarning-foreground);
+    --state-error: var(--vscode-errorForeground);
+    --state-info: var(--vscode-notificationsInfoIcon-foreground);
     /* 圆角系统：遵循 VS Code 的克制风格 */
     --radius-sm: 4px;
     --radius-md: 6px;
@@ -376,13 +385,13 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     --space-sm: 8px;
     --space-md: 12px;
     --space-lg: 16px;
-    /* 阴影：轻量、低对比，符合 VS Code 风格 */
+    /* 阴影：轻量、低对比（黑色透明度叠加），符合 VS Code 风格 */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-    /* 字体栈：优先 VS Code 内置字体，回退到系统字体 */
-    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Segoe WPC', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
-    --font-mono: 'Cascadia Code', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+    /* 字体：继承 VS Code 主题字体设置 */
+    --font-ui: var(--vscode-font-family);
+    --font-mono: var(--vscode-editor-font-family, var(--vscode-font-family));
 }
 
 body {
@@ -548,7 +557,7 @@ body {
     transition: border-color 0.15s ease;
 }
 
-.git-branch-selector:focus-within { border-color: var(--brand-primary); }
+.git-branch-selector:focus-within { border-color: var(--vscode-focusBorder); }
 
 .branch-input {
     flex: 1;
@@ -557,7 +566,6 @@ body {
     background: transparent;
     color: var(--brand-text);
     font-size: 11px;
-    outline: none;
     cursor: pointer;
     width: 100%;
     box-sizing: border-box;
@@ -635,7 +643,7 @@ body {
 }
 
 .shell-selector:hover { border-color: var(--brand-border); }
-.shell-selector:focus { border-color: var(--brand-primary); outline: none; }
+.shell-selector:focus { border-color: var(--vscode-focusBorder); }
 
 .add-cmd-btn {
     padding: 5px 12px;
@@ -687,8 +695,7 @@ body {
 }
 
 .form-group input:focus, .form-group textarea:focus {
-    border-color: var(--brand-primary);
-    outline: none;
+    border-color: var(--vscode-focusBorder);
 }
 
 .form-group textarea { height: 72px; resize: vertical; }
@@ -1050,7 +1057,7 @@ body {
     transition: border-color 0.15s ease;
 }
 
-.json-editor:focus { border-color: var(--brand-primary); outline: none; }
+.json-editor:focus { border-color: var(--vscode-focusBorder); }
 
 .env-variable-list { margin-bottom: 10px; }
 
@@ -1094,7 +1101,7 @@ body {
     transition: border-color 0.15s ease;
 }
 
-.env-variable-item input:focus { border-color: var(--brand-primary); outline: none; }
+.env-variable-item input:focus { border-color: var(--vscode-focusBorder); }
 .env-variable-item input.key { color: var(--brand-primary); }
 .env-variable-item .separator { color: var(--brand-text-muted); font-size: 11px; }
 
@@ -1133,7 +1140,7 @@ body {
     text-align: right;
 }
 
-.settings-row input[type="number"]:focus { border-color: var(--brand-primary); outline: none; }
+.settings-row input[type="number"]:focus { border-color: var(--vscode-focusBorder); }
 
 .settings-row .unit { font-size: 10px; color: var(--brand-text-muted); margin-left: 4px; }
 
@@ -1511,11 +1518,11 @@ body {
     padding: 8px 10px;
     border: 1px solid var(--brand-border-subtle); border-radius: var(--radius-sm);
     background: var(--brand-background); color: var(--brand-text);
-    font-size: 12px; outline: none;
+    font-size: 12px;
     font-family: var(--font-mono);
     transition: border-color 0.15s ease;
 }
-.modal-input:focus { border-color: var(--brand-primary); }
+.modal-input:focus { border-color: var(--vscode-focusBorder); }
 .modal-footer {
     display: flex; justify-content: flex-end; gap: 8px;
     padding: 12px 16px;

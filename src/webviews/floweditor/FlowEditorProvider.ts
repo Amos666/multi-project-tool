@@ -71,7 +71,7 @@ export class FlowEditorProvider {
         FlowEditorProvider._panel = panel;
         this._ready = false;
 
-        panel.webview.html = this.getHtml();
+        panel.webview.html = this.getHtml(panel.webview.cspSource);
 
         panel.webview.onDidReceiveMessage((message) => {
             if (message && message.command === 'flowEditorReady') {
@@ -100,7 +100,7 @@ export class FlowEditorProvider {
         });
     }
 
-    private getHtml(): string {
+    private getHtml(cspSource: string): string {
         const i18nScript = `<script>const i18nTranslations = ${JSON.stringify(translations)}; let currentLang = '${this._getContext().language}'; function t(key) { return i18nTranslations[currentLang]?.[key] || i18nTranslations.en?.[key] || key; } function applyTranslations() { document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); }); document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); }); document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); }); }</script>`;
 
         return `<!DOCTYPE html>
@@ -108,6 +108,8 @@ export class FlowEditorProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- CSP：资源全部内联，仅允许 ${cspSource} 与内联脚本/样式（无任何外部网络请求） -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} data:; font-src ${cspSource};">
     <title>Flow Editor</title>
     <style>
 ${BASE_THEME_CSS}

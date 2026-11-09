@@ -241,7 +241,8 @@ test('HTML+JS: vscode node (execute commands from other extensions)', () => {
     assert.ok(flowHtml.includes("wfEditProp('vscodeCommandId',this.value)"), 'command id input wired');
     assert.ok(flowHtml.includes('list="wfVscodeCmdList"'), 'command id input backed by datalist');
     // webview JS：palette / 默认值 / 属性联动 / 命令列表拉取与填充
-    assert.ok(flowJs.includes('vscode: \'#73daca\''), 'vscode tag color defined');
+    // 节点类别色引用 VS Code 终端 ANSI 主题变量（官方定义，四套主题自动适配，无硬编码色）
+    assert.ok(flowJs.includes("vscode: 'var(--vscode-terminal-ansiBrightGreen)'"), 'vscode tag color uses theme var');
     assert.ok(flowJs.includes("vscodeCommandId: tag === 'vscode' ? '' : undefined"), 'new vscode node defaults');
     assert.ok(flowJs.includes("'wb.wf.vscodeArgs'"), 'cmd field relabeled as arguments for vscode nodes');
     assert.ok(flowJs.includes('wfRequestCommandList()'), 'selecting a vscode node requests the command list');
