@@ -30,6 +30,7 @@ interface ActiveRun {
     pendingConfirm?: { nodeId: string; text: string } | null;
 }
 import { WORKBENCH_CSS } from '../webviews/workbench/workbenchCss';
+import { CODICON_CSS, codiconFontFace } from '../webviews/shared/baseTheme';
 import { WORKBENCH_TAB_BUTTONS, WORKBENCH_PANELS } from '../webviews/workbench/workbenchHtml';
 import { WORKBENCH_JS } from '../webviews/workbench/workbenchJs';
 import { FlowEditorProvider } from '../webviews/floweditor/FlowEditorProvider';
@@ -335,6 +336,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         const i18nScript = `<script>const i18nTranslations = ${JSON.stringify(translations)}; let currentLang = '${this._language}'; function t(key) { return i18nTranslations[currentLang]?.[key] || i18nTranslations.en?.[key] || key; } function applyTranslations() { document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); }); document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); }); document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); }); }</script>`;
         /* CSP：资源全部内联，仅允许 ${cspSource} 与内联脚本/样式（无任何外部网络请求） */
         const csp = this._view?.webview?.cspSource ?? '';
+        // Codicon 字体经 asWebviewUri 加载（本地 resources/codicon.ttf，无外部网络请求）
+        const fontUri = this._view?.webview
+            ? this._view.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'codicon.ttf')).toString()
+            : '';
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -343,7 +348,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp} 'unsafe-inline'; img-src ${csp} data:; font-src ${csp};">
     <title>Multi Project Tools</title>
-    <style>${css}</style>
+    <style>${codiconFontFace(fontUri)}${css}</style>
 </head>
 <body>${htmlBody}${i18nScript}<script>${js}</script></body>
 </html>`;
@@ -351,6 +356,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     private getCss(): string {
         return `
+/* 全局尺寸模型：与 VS Code workbench 一致的 border-box，保证控件宽度含 padding/border、栅格对齐 */
+*, *::before, *::after { box-sizing: border-box; }
 /* 焦点可见性：键盘焦点显式轮廓，鼠标焦点交由控件自身反馈；尊重系统减动效设置 */
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
@@ -450,13 +457,10 @@ body {
     white-space: nowrap;
 }
 
-.tab-icon, .git-icon, .refresh-icon {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-}
+/* 页签/操作图标（Codicon）：宽高与字号同步，随主题色继承 */
+.tab-icon, .git-icon, .refresh-icon { width: 14px; height: 14px; font-size: 14px; flex-shrink: 0; vertical-align: -2px; }
 
-.git-icon { width: 13px; height: 13px; }
+.git-btn .git-icon { width: 13px; height: 13px; font-size: 13px; }
 
 .tab:hover { color: var(--brand-text-secondary); background-color: rgba(255, 255, 255, 0.02); }
 
@@ -925,7 +929,7 @@ body {
 }
 
 .cat-arrow.open { transform: rotate(90deg); }
-.cat-arrow svg { width: 12px; height: 12px; display: block; }
+.cat-arrow .codicon { width: 12px; height: 12px; font-size: 12px; display: block; }
 
 .cat-icon {
     flex-shrink: 0;
@@ -933,7 +937,7 @@ body {
     align-items: center;
     color: var(--brand-text-secondary);
 }
-.cat-icon svg { width: 14px; height: 14px; display: block; }
+.cat-icon .codicon { width: 14px; height: 14px; font-size: 14px; display: block; }
 
 .cat-name {
     flex: 1;
@@ -956,7 +960,7 @@ body {
     flex-shrink: 0;
 }
 
-.cmd-action-btn svg { width: 13px; height: 13px; display: block; }
+.cmd-action-btn .codicon { width: 13px; height: 13px; font-size: 13px; display: block; }
 .cmd-action-btn.add:hover { color: var(--state-success); border-color: var(--state-success); }
 .cmd-action-btn.add-sub:hover { color: var(--brand-primary); border-color: var(--brand-primary); }
 
@@ -1284,6 +1288,7 @@ body {
 .branch-icon {
     width: 11px;
     height: 11px;
+    font-size: 11px;
     flex-shrink: 0;
     opacity: 0.85;
 }
@@ -1527,37 +1532,39 @@ body {
     display: flex; justify-content: flex-end; gap: 8px;
     padding: 12px 16px;
     border-top: 1px solid var(--brand-border-subtle);
-}` + WORKBENCH_CSS;
+}
+/* 弹窗关闭按钮内的 Codicon 尺寸 */
+.modal-close .codicon { font-size: 13px; }` + CODICON_CSS + WORKBENCH_CSS;
     }
 
     private getHtmlBody(): string {
         return `
     <div class="tab-bar">
         <div class="tab active" id="tabBtn-git" onclick="switchTab('git')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="tab.git">Git</span>
+            <span class="tab-icon codicon codicon-git-branch" aria-hidden="true"></span><span data-i18n="tab.git">Git</span>
         </div>
         <div class="tab" id="tabBtn-custom" onclick="switchTab('custom')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6h12"/><path d="M5 9l1.5 1.5L5 12"/><path d="M8 12h3"/></svg><span data-i18n="tab.custom">ProjectsCmd</span>
+            <span class="tab-icon codicon codicon-terminal" aria-hidden="true"></span><span data-i18n="tab.custom">ProjectsCmd</span>
         </div>
         <div class="tab" id="tabBtn-shortcut" onclick="switchTab('shortcut')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5L9.8 6l4.7.4-3.6 3 1.1 4.6L8 11.5 3.9 14l1.1-4.6-3.6-3L6.2 6z"/></svg><span data-i18n="tab.shortcut">ShortCutCmd</span>
+            <span class="tab-icon codicon codicon-zap" aria-hidden="true"></span><span data-i18n="tab.shortcut">ShortCutCmd</span>
         </div>
         <div class="tab" id="tabBtn-txtcmd" onclick="switchTab('txtcmd')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v11a1 1 0 0 0 1 1h7"/><path d="M4 2c2 0 3 1 3 3v7"/></svg><span data-i18n="tab.txtcmd">Python</span>
+            <span class="tab-icon codicon codicon-file-code" aria-hidden="true"></span><span data-i18n="tab.txtcmd">Python</span>
         </div>
         <div class="tab" id="tabBtn-settings" onclick="switchTab('settings')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M3 8H1M15 8h-2M3.5 3.5L5 5M11 11l1.5 1.5M3.5 12.5L5 11M11 5l1.5-1.5"/></svg><span data-i18n="tab.settings">Set</span>
+            <span class="tab-icon codicon codicon-settings-gear" aria-hidden="true"></span><span data-i18n="tab.settings">Set</span>
         </div>${WORKBENCH_TAB_BUTTONS}
     </div>
 
     <div class="tab-content">
         <div id="tab-git" class="tab-panel active">
             <div class="git-actions">
-                <button class="git-btn pull" onclick="executeGitAction('pull')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M3 12v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/></svg><span data-i18n="git.pull">Pull</span></button>
-                <button class="git-btn commit" onclick="executeGitAction('commit')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M2 8h3.5M10.5 8H14"/></svg><span data-i18n="git.commit">Commit</span></button>
-                <button class="git-btn fetch" onclick="executeGitAction('fetch')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><path d="M5 7l3 3 3-3"/><path d="M2 13h12"/></svg><span data-i18n="git.fetch">Fetch</span></button>
+                <button class="git-btn pull" onclick="executeGitAction('pull')"><span class="git-icon codicon codicon-repo-pull" aria-hidden="true"></span><span data-i18n="git.pull">Pull</span></button>
+                <button class="git-btn commit" onclick="executeGitAction('commit')"><span class="git-icon codicon codicon-git-commit" aria-hidden="true"></span><span data-i18n="git.commit">Commit</span></button>
+                <button class="git-btn fetch" onclick="executeGitAction('fetch')"><span class="git-icon codicon codicon-download" aria-hidden="true"></span><span data-i18n="git.fetch">Fetch</span></button>
                 <div class="git-branch-selector">
-                    <button class="git-btn branch" onclick="executeGitAction('branch')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span data-i18n="git.branch">Branch</span></button>
+                    <button class="git-btn branch" onclick="executeGitAction('branch')"><span class="git-icon codicon codicon-git-branch" aria-hidden="true"></span><span data-i18n="git.branch">Branch</span></button>
                     <div style="position: relative; flex: 1;">
                         <input type="text" id="branchInput" class="branch-input" data-i18n-placeholder="branch.selectPlaceholder" placeholder="Select branch..." onclick="onBranchInputClick(event)" autocomplete="off" oninput="filterBranchList(this.value)">
                         <div class="branch-dropdown" id="branchDropdown">
@@ -1566,7 +1573,7 @@ body {
                         </div>
                     </div>
                 </div>
-                <button class="git-btn push" onclick="executeGitAction('push')"><svg class="git-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12V4"/><path d="M5 7l3-3 3 3"/><path d="M3 12v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1"/></svg><span data-i18n="git.push">Push</span></button>
+                <button class="git-btn push" onclick="executeGitAction('push')"><span class="git-icon codicon codicon-repo-push" aria-hidden="true"></span><span data-i18n="git.push">Push</span></button>
             </div>
 
             <div class="project-list-header">
@@ -1577,8 +1584,8 @@ body {
                         <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" style="cursor: pointer;">
                         <span data-i18n="project.selectAll">Select All</span>
                     </label>
-                    <button class="collapse-btn" id="gitCollapseBtn" onclick="toggleProjectList('projectList', 'gitCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list">▼</button>
-                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><svg class="refresh-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2v3h-3"/></svg></button>
+                    <button class="collapse-btn" id="gitCollapseBtn" onclick="toggleProjectList('projectList', 'gitCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list"><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><span class="refresh-icon codicon codicon-refresh" aria-hidden="true"></span></button>
                 </div>
             </div>
 
@@ -1655,8 +1662,8 @@ body {
                         <input type="checkbox" id="customSelectAllCheckbox" onchange="toggleCustomSelectAll(this.checked)" style="cursor: pointer;">
                         <span data-i18n="project.selectAll">Select All</span>
                     </label>
-                    <button class="collapse-btn" id="customCollapseBtn" onclick="toggleProjectList('customProjectList', 'customCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list">▼</button>
-                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><svg class="refresh-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2v3h-3"/></svg></button>
+                    <button class="collapse-btn" id="customCollapseBtn" onclick="toggleProjectList('customProjectList', 'customCollapseBtn')" data-i18n-title="project.collapse" title="Collapse project list"><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>
+                    <button class="refresh-btn" onclick="refreshProjects()" data-i18n-title="project.refresh" title="Refresh"><span class="refresh-icon codicon codicon-refresh" aria-hidden="true"></span></button>
                 </div>
             </div>
 
@@ -1746,7 +1753,7 @@ body {
         <div id="tab-settings" class="tab-panel">
             <div class="settings-panel">
                 <div class="settings-section">
-                    <h3>🌐 <span data-i18n="settings.language">Language</span></h3>
+                    <h3><span class="codicon codicon-globe" aria-hidden="true"></span> <span data-i18n="settings.language">Language</span></h3>
                     <div class="settings-row">
                         <select class="shell-selector" id="languageSelector" style="width: auto; flex: none;" onchange="changeLanguage(this.value)">
                             <option value="en">English</option>
@@ -1756,7 +1763,7 @@ body {
                 </div>
 
                 <div class="settings-section">
-                    <h3>🧩 <span data-i18n="settings.tabsVisible">Tabs Visible</span></h3>
+                    <h3><span class="codicon codicon-multiple-windows" aria-hidden="true"></span> <span data-i18n="settings.tabsVisible">Tabs Visible</span></h3>
                     <div class="settings-row">
                         <label data-i18n="tab.git">Git</label>
                         <div class="toggle-switch" id="wbTabToggle-git" onclick="wbToggleTab('git')"></div>
@@ -1788,7 +1795,7 @@ body {
                 </div>
 
                 <div class="settings-section">
-                    <h3>📋 <span data-i18n="settings.globalParams">Global Parameters</span></h3>
+                    <h3><span class="codicon codicon-symbol-parameter" aria-hidden="true"></span> <span data-i18n="settings.globalParams">Global Parameters</span></h3>
                     <div class="subtitle" data-i18n="settings.globalParamsDesc">Define global parameters, referenced via ${'${paramName}'}</div>
                     <textarea class="json-editor" id="commonParams" placeholder='{"deployBucket": "my-bucket"}'></textarea>
                     <div class="btn-group" style="margin-top: 10px;">
@@ -1799,21 +1806,21 @@ body {
                 </div>
 
                 <div class="settings-section">
-                    <h3>🔧 <span data-i18n="settings.envVars">Environment Variables</span></h3>
+                    <h3><span class="codicon codicon-variable" aria-hidden="true"></span> <span data-i18n="settings.envVars">Environment Variables</span></h3>
                     <div class="subtitle" data-i18n="settings.envVarsDesc">Injected into Shell environment during command execution</div>
                     <div class="env-variable-list" id="envVariableList"></div>
                     <button class="btn btn-secondary" onclick="addEnvVariable()" data-i18n="settings.addVar">+ Add Variable</button>
                 </div>
 
                 <div class="settings-section">
-                    <h3>📌 <span data-i18n="settings.projectRowCommands">Project Row Commands</span></h3>
+                    <h3><span class="codicon codicon-pin" aria-hidden="true"></span> <span data-i18n="settings.projectRowCommands">Project Row Commands</span></h3>
                     <div class="subtitle" data-i18n="settings.projectRowCommandsDesc">Shown as buttons on each project row (Git &amp; ProjectsCmd)</div>
                     <div class="prc-list" id="projectRowCommandList"></div>
                     <button class="btn btn-secondary" onclick="addProjectRowCommand()" data-i18n="prc.add">+ Add Command</button>
                 </div>
 
                 <div class="settings-section">
-                    <h3>⚙️ <span data-i18n="settings.other">Other Settings</span></h3>
+                    <h3><span class="codicon codicon-settings-gear" aria-hidden="true"></span> <span data-i18n="settings.other">Other Settings</span></h3>
                     <div class="settings-row">
                         <label data-i18n="settings.autoRefresh">Auto Refresh</label>
                         <div class="toggle-switch" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
@@ -1892,11 +1899,11 @@ body {
                 <div class="log-container" id="txtCmdLogContainer">
                     <div class="log-resizer" id="txtCmdLogResizer"></div>
                     <div class="log-header" onclick="toggleTxtCmdLog()">
-                        <span class="log-title">📝 <span data-i18n="pytxt.logTitle">Execution Log</span></span>
+                        <span class="log-title"><span class="codicon codicon-output" aria-hidden="true" style="font-size:11px;vertical-align:-2px"></span> <span data-i18n="pytxt.logTitle">Execution Log</span></span>
                         <span style="display: flex; gap: 6px; align-items: center;">
                             <span class="export-btn" onclick="exportTxtCmdLogs(event)" data-i18n="log.export">Export Log</span>
                             <span class="clear-btn" onclick="clearTxtCmdLogs(event)" data-i18n="log.clear">Clear</span>
-                            <span class="log-toggle-icon" id="txtCmdLogToggle">▼</span>
+                            <span class="log-toggle-icon" id="txtCmdLogToggle"><span class="codicon codicon-chevron-down" aria-hidden="true" style="font-size:11px"></span></span>
                         </span>
                     </div>
                     <div class="log-content" id="txtCmdLogContent">
@@ -1913,7 +1920,7 @@ body {
         <div class="modal-dialog">
             <div class="modal-header">
                 <span class="modal-title" data-i18n="commit.title">Commit Confirmation</span>
-                <button class="modal-close" onclick="closeCommitModal()">×</button>
+                <button class="modal-close" onclick="closeCommitModal()" data-i18n-title="cmd.cancel" title="Cancel"><span class="codicon codicon-close" aria-hidden="true"></span></button>
             </div>
             <div class="modal-body">
                 <label style="font-size: 12px; display: block; margin-bottom: 6px;" data-i18n="commit.message">Commit message (leave empty for default):</label>
@@ -1930,7 +1937,7 @@ body {
         <div class="modal-dialog">
             <div class="modal-header">
                 <span class="modal-title" data-i18n="branch.createConfirm">Create Branch Confirmation</span>
-                <button class="modal-close" onclick="closeCreateBranchModal()">×</button>
+                <button class="modal-close" onclick="closeCreateBranchModal()" data-i18n-title="cmd.cancel" title="Cancel"><span class="codicon codicon-close" aria-hidden="true"></span></button>
             </div>
             <div class="modal-body">
                 <p style="font-size: 12px; margin-bottom: 6px;" id="createBranchMessage"></p>
@@ -1946,7 +1953,7 @@ body {
         <div class="modal-dialog">
             <div class="modal-header">
                 <span class="modal-title" id="deleteModalTitle" data-i18n="cmd.deleteCategoryTitle">Delete Category</span>
-                <button class="modal-close" onclick="closeDeleteCategoryModal()">×</button>
+                <button class="modal-close" onclick="closeDeleteCategoryModal()" data-i18n-title="cmd.cancel" title="Cancel"><span class="codicon codicon-close" aria-hidden="true"></span></button>
             </div>
             <div class="modal-body">
                 <p style="font-size: 12px; margin-bottom: 6px;" id="deleteCategoryMessage" data-i18n="cmd.deleteCategoryConfirm">This category contains commands or sub-categories. Delete it and all its contents?</p>
@@ -2754,7 +2761,7 @@ function updateProjectList() {
 
             const branch = document.createElement('div');
             branch.className = 'project-branch';
-            branch.innerHTML = '<svg class="branch-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 4.5v7"/><path d="M4 6c0 0 0-1.5 4-1.5h2.5"/></svg><span>' + (p.currentBranch || t('project.noBranch')) + '</span>';
+            branch.innerHTML = '<span class="branch-icon codicon codicon-git-branch" aria-hidden="true"></span><span>' + (p.currentBranch || t('project.noBranch')) + '</span>';
             info.appendChild(branch);
 
             item.appendChild(info);
@@ -2828,7 +2835,8 @@ function toggleProjectList(listId, btnId) {
     if (!list || !btn) return;
     const collapsed = list.classList.toggle('collapsed');
     btn.classList.toggle('collapsed', collapsed);
-    btn.textContent = collapsed ? '▶' : '▼';
+    /* 图标固定为 chevron-down，折叠态由 .collapse-btn.collapsed 的 CSS 旋转 -90° 实现 */
+    btn.innerHTML = '<span class="codicon codicon-chevron-down" aria-hidden="true"></span>';
     btn.title = collapsed ? t('project.expand') : t('project.collapse');
 }
 
@@ -2837,16 +2845,16 @@ function updateSelectionWarning() {
     warning.classList.toggle('show', selectedProjectIds.size === 0);
 }
 
-// 与全应用一致的 16x16 描边风格 SVG 图标
+// 与全应用一致的 Codicon 图标（@vscode/codicons 官方字体，主题色随 currentColor 自动适配）
 const TREE_ICONS = {
-    chevron: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>',
-    folder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h2.3a1.5 1.5 0 0 1 1.06.44l.7.7a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.5z"/></svg>',
-    plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
-    folderPlus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6.5v5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h2.3a1.5 1.5 0 0 1 1.06.44l.7.7a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.5z"/><path d="M8 7.5v3.5M6.25 9.25h3.5"/></svg>',
-    pencil: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L6 12l-2.7.7L4 10l7.5-7.5z"/></svg>',
-    trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.5 4.5v-1h3v1"/><path d="M4.5 4.5l.6 8a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8"/></svg>',
-    play: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4.2v7.6L12 8 5.5 4.2z"/></svg>',
-    stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/></svg>'
+    chevron: '<span class="codicon codicon-chevron-right" aria-hidden="true"></span>',
+    folder: '<span class="codicon codicon-folder" aria-hidden="true"></span>',
+    plus: '<span class="codicon codicon-add" aria-hidden="true"></span>',
+    folderPlus: '<span class="codicon codicon-new-folder" aria-hidden="true"></span>',
+    pencil: '<span class="codicon codicon-edit" aria-hidden="true"></span>',
+    trash: '<span class="codicon codicon-trash" aria-hidden="true"></span>',
+    play: '<span class="codicon codicon-play" aria-hidden="true"></span>',
+    stop: '<span class="codicon codicon-debug-stop" aria-hidden="true"></span>'
 };
 
 function getShellLabel(shell) {
@@ -3351,7 +3359,7 @@ function toggleTxtCmdLog() {
     container.style.height = targetH;
     container.style.flex = '0 0 ' + targetH;
     const icon = document.getElementById('txtCmdLogToggle');
-    if (icon) icon.textContent = txtCmdLogExpanded ? '▼' : '▶';
+    if (icon) icon.innerHTML = '<span class="codicon codicon-chevron-' + (txtCmdLogExpanded ? 'down' : 'right') + '" aria-hidden="true" style="font-size:11px"></span>';
 }
 
 function addTxtCmdLogEntry(entry) {

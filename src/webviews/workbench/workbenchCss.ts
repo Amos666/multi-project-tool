@@ -23,10 +23,11 @@ export const WORKBENCH_CSS = `
 .wb-task.done .wb-task-text { text-decoration: line-through; color: var(--brand-text-muted); }
 .wb-task .wb-task-rm {
     display: none; color: var(--brand-text-muted); cursor: pointer;
-    font-size: 12px; padding: 0 4px; flex: none;
+    font-size: 12px; padding: 0 4px; flex: none; align-items: center;
 }
-.wb-task:hover .wb-task-rm { display: inline-block; }
+.wb-task:hover .wb-task-rm { display: inline-flex; }
 .wb-task .wb-task-rm:hover { color: var(--state-error); }
+.wb-task .wb-task-rm .codicon { font-size: 12px; }
 .wb-add-row { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--brand-border-subtle); }
 .wb-add-row input[type="text"] {
     flex: 1; background-color: var(--brand-surface-raised); color: var(--brand-text);
@@ -57,7 +58,7 @@ export const WORKBENCH_CSS = `
     transition: all 0.15s ease; width: calc(100% - 20px);
 }
 .wf-open-btn:hover { background-color: var(--brand-primary); color: var(--brand-text-inverse); }
-.wf-open-btn svg { width: 15px; height: 15px; flex: none; }
+.wf-open-btn svg, .wf-open-btn .codicon { width: 15px; height: 15px; font-size: 15px; flex: none; }
 .wf-side-hint { font-size: 10px; color: var(--brand-text-muted); text-align: center; padding: 0 12px 2px; }
 .wf-main { flex: 1; display: flex; min-height: 0; }
 .wf-left {
@@ -82,8 +83,9 @@ export const WORKBENCH_CSS = `
 .wf-btn.danger:hover { color: var(--state-error); border-color: var(--state-error); }
 .wf-btn.toggled { background-color: var(--brand-primary); color: var(--brand-text-inverse); border-color: var(--brand-primary); }
 .wf-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.wf-btn svg { display: block; width: 13px; height: 13px; }
+.wf-btn svg, .wf-btn .codicon { display: block; width: 13px; height: 13px; font-size: 13px; }
 .wb-icon { vertical-align: -2px; flex: none; }
+.wb-icon.codicon { font-size: 12px; }
 .wf-toolbar select {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
     border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
@@ -146,9 +148,10 @@ export const WORKBENCH_CSS = `
     color: var(--brand-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wf-list-item:hover { background-color: var(--brand-surface-hover); color: var(--brand-text); }
-.wf-list-item .wf-item-rm { display: none; margin-left: auto; color: var(--brand-text-muted); flex: none; padding: 0 2px; }
-.wf-list-item:hover .wf-item-rm { display: inline-block; }
+.wf-list-item .wf-item-rm { display: none; margin-left: auto; color: var(--brand-text-muted); flex: none; padding: 0 2px; align-items: center; cursor: pointer; }
+.wf-list-item:hover .wf-item-rm { display: inline-flex; }
 .wf-list-item .wf-item-rm:hover { color: var(--state-error); }
+.wf-list-item .wf-item-rm .codicon { font-size: 12px; }
 .wf-list-item.dim { color: var(--brand-text-muted); cursor: default; }
 
 /* SVG nodes */
@@ -258,14 +261,17 @@ export const WORKBENCH_CSS = `
 .batch-list .batch-shell-sel.custom { color: var(--brand-primary); border-color: var(--brand-primary); }
 .batch-list .batch-status {
     font-size: 10px; padding: 1px 8px; border-radius: 9px; flex: none;
-    background-color: var(--brand-surface-raised); color: var(--brand-text-muted); min-width: 52px; text-align: center;
+    background-color: var(--brand-surface-raised); color: var(--brand-text-muted); min-width: 52px;
+    display: inline-flex; align-items: center; justify-content: center;
 }
+.batch-list .batch-status .codicon { font-size: 11px; }
 .batch-list .batch-status.running { color: var(--brand-primary); }
 .batch-list .batch-status.success { color: var(--state-success); }
 .batch-list .batch-status.failed { color: var(--state-error); }
 .batch-list .batch-dur { color: var(--brand-text-muted); font-size: 10px; min-width: 40px; text-align: right; flex: none; }
-.batch-list .batch-rm { color: var(--brand-text-muted); cursor: pointer; flex: none; }
+.batch-list .batch-rm { color: var(--brand-text-muted); cursor: pointer; flex: none; display: inline-flex; align-items: center; }
 .batch-list .batch-rm:hover { color: var(--state-error); }
+.batch-list .batch-rm .codicon { font-size: 12px; }
 .batch-actions { display: flex; gap: 8px; padding: 0 10px 10px; flex-wrap: wrap; }
 .batch-log-bar { display: flex; align-items: center; gap: 8px; padding: 2px 10px 6px; font-size: 11px; font-weight: 600; color: var(--brand-text-secondary); }
 .batch-output {

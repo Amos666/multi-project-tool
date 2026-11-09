@@ -44,7 +44,7 @@ test('CSS: unified tree styles exist for both tabs', () => {
         '.tree-children', '.tree-row-draggable', '.tree-row-draggable.dragging',
         '.tree-row-draggable.drop-before', '.tree-row-draggable.drop-after',
         '.tree-row-draggable.drop-inside', '.drag-over-root',
-        '.cmd-action-btn svg', '.cmd-action-btn.add', '.cmd-action-btn.add-sub',
+        '.cmd-action-btn .codicon', '.cmd-action-btn.add', '.cmd-action-btn.add-sub',
         '.editor-title-bar', '.editor-error', '.btn-danger'
     ]) {
         assert.ok(css.includes(sel), 'missing CSS selector: ' + sel);
@@ -185,7 +185,8 @@ test('HTML: workflow canvas, props, monitor with failed/skipped summary', () => 
     assert.ok(flowHtml.includes('wb.wf.notifyTypeHttp'), 'http notify option i18n key');
     assert.ok(flowHtml.includes("wfEditProp('httpMethod',this.value)") && flowHtml.includes("wfEditProp('httpHeaders',this.value)") && flowHtml.includes("wfEditProp('httpBody',this.value)"), 'full http request params wired');
     assert.ok(flowHtml.includes('value="POST"') && flowHtml.includes('value="DELETE"'), 'http method choices');
-    assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(flowHtml), 'flow toolbar uses SVG icons, not emoji');
+    assert.ok(!/class="wf-btn[^"]*"[^>]*>[▶⏹🔗💾🗑]/.test(flowHtml), 'flow toolbar uses Codicon icons, not emoji');
+    assert.ok(flowHtml.includes('codicon codicon-play'), 'flow toolbar uses Codicon glyphs');
 });
 
 test('HTML+JS: flow editor renames via prompt modal, no inline name input', () => {
@@ -485,13 +486,37 @@ test('JS: switching flows during a run releases local lock but keeps background 
     assert.ok(mvpSrcCache.includes('runPhase: this._activeRun ? this._activeRun.phase : \'\''), 'flowEditor init carries active run phase');
 });
 
-test('JS: flow tab icons are unified SVGs, no emoji in toolbar/history/launcher', () => {
-    assert.ok(js.includes('WB_ICON_PATHS') && js.includes('function wbIcon'), 'shared SVG icon set');
-    assert.ok(js.includes('function wfHistIcon'), 'history entries use SVG status icons');
-    for (const emoji of ['✅', '⏹', '❌', '📂', '📦', '⚡', '⌨']) {
+test('JS: flow tab icons are unified Codicons, no emoji in toolbar/history/launcher', () => {
+    assert.ok(js.includes('WB_ICON_GLYPHS') && js.includes('function wbIcon'), 'shared icon set maps to Codicon glyphs');
+    assert.ok(js.includes('codicon-play') && js.includes('codicon-debug-stop') && js.includes('codicon-zap'), 'wbIcon maps to codicon classes');
+    assert.ok(js.includes('function wfHistIcon'), 'history entries use status icons');
+    assert.ok(js.includes('codicon-check') && js.includes('codicon-error'), 'history status icons are codicon glyphs');
+    for (const emoji of ['✅', '⏹', '❌', '📂', '📦', '⚡', '⌨', '✕', '⏳']) {
         assert.ok(js.indexOf(emoji) < 0, 'emoji removed from workbench JS: ' + emoji);
     }
-    assert.ok(!/[▶⏹🔗💾🗑📊📜📋]/.test(html.split('id="tab-workflow"')[1].split('id="tab-batch"')[0]), 'flow tab HTML free of emoji buttons');
+    assert.ok(!/[▶⏹🔗💾🗑📊📜📋⏳✓✗↓↻]/.test(html.split('id="tab-workflow"')[1].split('id="tab-batch"')[0]), 'flow tab HTML free of emoji buttons');
+});
+
+test('Codicon: shared glyph CSS + font loading + global border-box across hosts', () => {
+    const baseTheme = require('../out/webviews/shared/baseTheme');
+    assert.ok(baseTheme.CODICON_CSS.includes('.codicon {'), 'codicon base class defined');
+    assert.ok(baseTheme.CODICON_CSS.includes('.codicon-play:before { content: "\\eb2c" }'), 'glyph codepoints embedded (official codicon.css values)');
+    assert.ok(baseTheme.CODICON_CSS.includes('.codicon-close:before { content: "\\ea76" }'), 'close glyph embedded');
+    assert.ok(baseTheme.BASE_THEME_CSS.includes('*, *::before, *::after { box-sizing: border-box; }'), 'flow editor host gets global border-box');
+    assert.ok(css.includes('.codicon {') && css.includes('codicon-chevron-right'), 'sidebar css embeds codicon subset');
+    assert.ok(css.includes('*, *::before, *::after { box-sizing: border-box; }'), 'sidebar css gets global border-box');
+    // 字体经 asWebviewUri 本地加载（无外部网络请求），CSP 已放开 font-src
+    assert.ok(mvpSrcCache.includes("joinPath(this._extensionUri, 'resources', 'codicon.ttf')"), 'sidebar loads codicon.ttf via asWebviewUri');
+    assert.ok(mvpSrcCache.includes('font-src ${csp}'), 'sidebar CSP allows font-src');
+    assert.ok(!mvpSrcCache.includes('<svg'), 'sidebar host html has no leftover inline svg icons');
+    const flowSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'webviews', 'floweditor', 'FlowEditorProvider.ts'), 'utf8');
+    assert.ok(flowSrc.includes("joinPath(this._extensionUri, 'resources', 'codicon.ttf')") && flowSrc.includes('codiconFontFace('), 'flow editor host injects @font-face via asWebviewUri');
+    const gitSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'webviews', 'gitTab', 'GitTabWebview.ts'), 'utf8');
+    assert.ok(gitSrc.includes('box-sizing: border-box') && gitSrc.includes('codiconFontFace('), 'git tab host gets border-box + codicon font');
+    for (const emoji of ['📥', '📤', '🔄', '📋', '🌿', '💾', '🌳', '⚙️']) {
+        assert.ok(gitSrc.indexOf(emoji) < 0, 'git tab emoji icon removed: ' + emoji);
+    }
+    assert.ok(gitSrc.includes('codicon-repo-pull') && gitSrc.includes('codicon-git-commit'), 'git tab cards use codicon glyphs');
 });
 
 test('HTML: Set tab exposes "Tabs Visible" toggles for all tabs', () => {

@@ -73,6 +73,8 @@ export class JsonTabWebview {
                 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} data:; font-src ${cspSource};">
                 <title>JSON Settings</title>
                 <style>
+                    /* 全局尺寸模型：与 VS Code workbench 一致的 border-box */
+                    *, *::before, *::after { box-sizing: border-box; }
                     /* 焦点可见性：键盘焦点显式轮廓；尊重系统减动效设置 */
                     :focus { outline: none; }
                     :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }

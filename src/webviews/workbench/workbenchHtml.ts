@@ -3,13 +3,13 @@
 /** 追加到 tab-bar 内的三个新 Tab 按钮 */
 export const WORKBENCH_TAB_BUTTONS = `
         <div class="tab" id="tabBtn-checklist" onclick="switchTab('checklist')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2" width="11" height="12" rx="1.5"/><path d="M5 5.5l1 1 2-2"/><path d="M5 9h6"/><path d="M5 11.5h4"/></svg><span data-i18n="tab.checklist">ToDo</span>
+            <span class="tab-icon codicon codicon-checklist" aria-hidden="true"></span><span data-i18n="tab.checklist">ToDo</span>
         </div>
         <div class="tab" id="tabBtn-workflow" onclick="switchTab('workflow')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="6" width="4" height="4" rx="1"/><rect x="10.5" y="2" width="4" height="4" rx="1"/><rect x="10.5" y="10" width="4" height="4" rx="1"/><path d="M5.5 8h2.5M8 8V4h2.5M8 8v4h2.5"/></svg><span data-i18n="tab.workflow">Flow</span>
+            <span class="tab-icon codicon codicon-circuit-board" aria-hidden="true"></span><span data-i18n="tab.workflow">Flow</span>
         </div>
         <div class="tab" id="tabBtn-batch" onclick="switchTab('batch')">
-            <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.5h10"/><path d="M3 8h10"/><path d="M3 12.5h6"/><path d="M12 10.5l1.5 1.5-1.5 1.5"/></svg><span data-i18n="tab.batch">Batch</span>
+            <span class="tab-icon codicon codicon-list-ordered" aria-hidden="true"></span><span data-i18n="tab.batch">Batch</span>
         </div>`;
 
 /** 追加到 tab-content 内的三个新面板 + 快速启动器浮层 */
@@ -30,7 +30,7 @@ export const WORKBENCH_PANELS = `
                         <option value="normal" selected data-i18n="wb.cl.prio.normal">Normal</option>
                         <option value="low" data-i18n="wb.cl.prio.low">Low</option>
                     </select>
-                    <button class="wf-btn primary" onclick="wbAddTask()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+                    <button class="wf-btn primary" onclick="wbAddTask()" data-i18n-title="wb.cl.placeholder" title="Add task"><span class="codicon codicon-add" aria-hidden="true"></span></button>
                 </div>
                 <div class="wb-progress-wrap">
                     <div class="wb-progress-text"><span data-i18n="wb.cl.progress">Progress</span>: <span id="clProgText">0%</span></div>
@@ -43,13 +43,13 @@ export const WORKBENCH_PANELS = `
             <div class="wf-tab">
                 <div class="wf-side">
                     <button class="wf-open-btn" onclick="wfOpenEditor()">
-                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="6" width="4" height="4" rx="1"/><rect x="10.5" y="2" width="4" height="4" rx="1"/><rect x="10.5" y="10" width="4" height="4" rx="1"/><path d="M5.5 8h2.5M8 8V4h2.5M8 8v4h2.5"/></svg>
+                        <span class="codicon codicon-circuit-board" aria-hidden="true"></span>
                         <span data-i18n="wb.wf.openEditor">Open Flow Editor</span>
                     </button>
                     <div class="wf-side-hint" data-i18n="wb.wf.editorHint">The flow chart is edited in the main editor area</div>
                     <div class="wb-section-title" style="padding:8px 8px 2px">
                         <span data-i18n="wb.wf.workflows">Workflows</span>
-                        <span class="wf-btn" style="padding:1px 6px" onclick="wfNew()" data-i18n-title="wb.wf.newFlow" title="New workflow"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></span>
+                        <span class="wf-btn" style="padding:1px 6px" onclick="wfNew()" data-i18n-title="wb.wf.newFlow" title="New workflow"><span class="codicon codicon-add" aria-hidden="true"></span></span>
                     </div>
                     <div id="wfFlowList"></div>
                     <div class="wb-section-title" style="padding:6px 8px 2px" data-i18n="wb.wf.running">Running</div>
@@ -76,15 +76,15 @@ export const WORKBENCH_PANELS = `
                         </select>
                     </label>
                     <button class="wf-btn" onclick="batchRenameGroup()" data-i18n="wb.batch.rename">Rename</button>
-                    <button class="wf-btn" onclick="batchAddGroup()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.group">Group</span></button>
+                    <button class="wf-btn" onclick="batchAddGroup()"><span class="codicon codicon-add" aria-hidden="true"></span> <span data-i18n="wb.batch.group">Group</span></button>
                     <button class="wf-btn danger" onclick="batchDeleteGroup()" data-i18n="cmd.delete">Delete</button>
                 </div>
                 <ul id="batchList" class="batch-list"></ul>
                 <div class="batch-actions">
-                    <button class="wf-btn" onclick="batchAddCmd()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg> <span data-i18n="wb.batch.cmd">Command</span></button>
-                    <button class="wf-btn primary" onclick="batchRun()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5v9l7.5-4.5z"/></svg> <span data-i18n="wb.batch.run">Run All</span></button>
+                    <button class="wf-btn" onclick="batchAddCmd()"><span class="codicon codicon-add" aria-hidden="true"></span> <span data-i18n="wb.batch.cmd">Command</span></button>
+                    <button class="wf-btn primary" onclick="batchRun()"><span class="codicon codicon-play" aria-hidden="true"></span> <span data-i18n="wb.batch.run">Run All</span></button>
                     <button class="wf-btn" onclick="wfStop()" data-i18n="wb.wf.stop">Stop</button>
-                    <button class="wf-btn" onclick="batchToFlow()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="6" width="4" height="4" rx="1"/><rect x="10.5" y="2" width="4" height="4" rx="1"/><rect x="10.5" y="10" width="4" height="4" rx="1"/><path d="M5.5 8h2.5M8 8V4h2.5M8 8v4h2.5"/></svg> <span data-i18n="wb.batch.toFlow">To Flowchart</span></button>
+                    <button class="wf-btn" onclick="batchToFlow()"><span class="codicon codicon-circuit-board" aria-hidden="true"></span> <span data-i18n="wb.batch.toFlow">To Flowchart</span></button>
                 </div>
                 <div class="batch-log-bar">
                     <span><span data-i18n="wb.batch.log">Execution Log</span></span>
@@ -101,7 +101,7 @@ export const WORKBENCH_PANELS = `
             <div class="modal-dialog">
                 <div class="modal-header">
                     <span class="modal-title" data-i18n="wb.confirm.title">Confirm</span>
-                    <button class="modal-close" onclick="wbConfirmClose()">×</button>
+                    <button class="modal-close" onclick="wbConfirmClose()" data-i18n-title="cmd.cancel" title="Cancel"><span class="codicon codicon-close" aria-hidden="true"></span></button>
                 </div>
                 <div class="modal-body">
                     <p style="font-size:12px;margin-bottom:6px" id="wbConfirmText"></p>
@@ -117,7 +117,7 @@ export const WORKBENCH_PANELS = `
             <div class="modal-dialog">
                 <div class="modal-header">
                     <span class="modal-title" data-i18n="wb.prompt.title">Input</span>
-                    <button class="modal-close" onclick="wbPromptClose()">×</button>
+                    <button class="modal-close" onclick="wbPromptClose()" data-i18n-title="cmd.cancel" title="Cancel"><span class="codicon codicon-close" aria-hidden="true"></span></button>
                 </div>
                 <div class="modal-body">
                     <p style="font-size:12px;margin-bottom:6px" id="wbPromptText"></p>

@@ -28,26 +28,24 @@ function wbToast(msg, type) {
     requestAnimationFrame(function () { d.style.opacity = '1'; });
     setTimeout(function () { d.style.opacity = '0'; setTimeout(function () { d.remove(); }, 300); }, 2400);
 }
-/* 统一 SVG 图标（与其他页签一致，不使用 emoji） */
-var WB_ICON_PATHS = {
-    play: '<path d="M5.5 3.5v9l7.5-4.5z"/>',
-    stop: '<rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1"/>',
-    folder: '<path d="M2 4.5h4l1.5 2H14v6H2z"/>',
-    template: '<rect x="2.5" y="3" width="11" height="10" rx="1"/><path d="M2.5 6h11"/><path d="M6 3v3"/>',
-    bolt: '<path d="M8.8 2L4 9h3.2L7.2 14 12 7H8.8z"/>',
-    keyboard: '<rect x="2" y="4.5" width="12" height="7" rx="1"/><path d="M4.5 7h1M7.5 7h1M10.5 7h1M5 9.5h6"/>',
-    arrow: '<path d="M3 8h9M9 5l3 3-3 3"/>'
+/* 统一图标：Codicon 官方字体（@vscode/codicons），与其他页签一致，不使用 emoji */
+var WB_ICON_GLYPHS = {
+    play: 'codicon-play',
+    stop: 'codicon-debug-stop',
+    folder: 'codicon-folder',
+    template: 'codicon-layout',
+    bolt: 'codicon-zap',
+    keyboard: 'codicon-keyboard',
+    arrow: 'codicon-arrow-right'
 };
 function wbIcon(name, color) {
-    var style = color ? ' style="stroke:' + color + '"' : '';
-    return '<svg class="wb-icon"' + style + ' viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">' + (WB_ICON_PATHS[name] || '') + '</svg>';
+    var style = color ? ' style="color:' + color + '"' : '';
+    return '<span class="wb-icon codicon ' + (WB_ICON_GLYPHS[name] || '') + '" aria-hidden="true"' + style + '></span>';
 }
 function wfHistIcon(result) {
     var color = result === 'success' ? 'var(--state-success)' : result === 'stopped' ? 'var(--brand-text-muted)' : 'var(--state-error)';
-    var inner = result === 'success' ? '<path d="M5.3 8.2l1.9 1.9 3.5-4"/>'
-        : result === 'stopped' ? '<rect x="6" y="6" width="4" height="4"/>'
-            : '<path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/>';
-    return '<svg class="wb-icon" style="stroke:' + color + '" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="8" cy="8" r="6.2"/>' + inner + '</svg>';
+    var glyph = result === 'success' ? 'codicon-check' : result === 'stopped' ? 'codicon-debug-stop' : 'codicon-error';
+    return '<span class="wb-icon codicon ' + glyph + '" aria-hidden="true" style="color:' + color + '"></span>';
 }
 
 window.addEventListener('message', function (event) {
@@ -133,7 +131,7 @@ function renderChecklist() {
             html += '<div class="wb-task' + (task.done ? ' done' : '') + '">' +
                 '<input type="checkbox"' + (task.done ? ' checked' : '') + ' onchange="wbToggleTask(\\'' + task.id + '\\', this.checked)">' +
                 '<span class="wb-task-text">' + wbEsc(task.text) + '</span>' +
-                '<span class="wb-task-rm" onclick="wbDeleteTask(\\'' + task.id + '\\')">✕</span></div>';
+                '<span class="wb-task-rm" onclick="wbDeleteTask(\\'' + task.id + '\\')" title="' + wbEsc(t('cmd.delete')) + '"><span class="codicon codicon-close" aria-hidden="true"></span></span></div>';
         });
     });
     box.innerHTML = html;
@@ -192,14 +190,14 @@ function renderFlowList() {
     var html = flows.map(function (wf) {
         return '<div class="wf-list-item" onclick="wfSelectFlow(\\'' + wf.id + '\\')" title="' + wbEsc(wf.name) + '">' +
             '<span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(wf.name) + '</span>' +
-            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteFlow(\\'' + wf.id + '\\')">✕</span></div>';
+            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteFlow(\\'' + wf.id + '\\')" title="' + wbEsc(t('cmd.delete')) + '"><span class="codicon codicon-close" aria-hidden="true"></span></span></div>';
     }).join('');
     /* 模板并入 Workflows 分组（带模板图标），可点击编辑、可删除 */
     html += tpls.map(function (tpl) {
         var label = tpl.builtin ? t(tpl.name) : tpl.name;
         return '<div class="wf-list-item" onclick="wfLoadTemplate(\\'' + tpl.id + '\\')" title="' + wbEsc(label) + '">' +
             wbIcon('template') + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(label) + '</span>' +
-            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteTemplate(\\'' + tpl.id + '\\')">✕</span></div>';
+            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteTemplate(\\'' + tpl.id + '\\')" title="' + wbEsc(t('cmd.delete')) + '"><span class="codicon codicon-close" aria-hidden="true"></span></span></div>';
     }).join('');
     box.innerHTML = html;
 }
@@ -250,7 +248,7 @@ function renderHistoryList() {
         var time = new Date(h.time).toTimeString().slice(0, 8);
         return '<div class="wf-list-item" ondblclick="wfShowHistory(' + i + ')" title="' + wbEsc(h.workflowName) + '">' +
             icon + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(h.workflowName) + ' · ' + (h.duration / 1000).toFixed(1) + 's · ' + time + '</span>' +
-            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteHistory(\\'' + h.id + '\\')">✕</span></div>';
+            '<span class="wf-item-rm" onclick="event.stopPropagation();wfDeleteHistory(\\'' + h.id + '\\')" title="' + wbEsc(t('cmd.delete')) + '"><span class="codicon codicon-close" aria-hidden="true"></span></span></div>';
     }).join('');
 }
 function wfShowHistory(idx) { wfRelay({ type: 'showHistory', idx: idx }); }
@@ -401,9 +399,9 @@ function renderBatchList() {
             '<span class="batch-handle">≡</span><span class="batch-idx">' + (i + 1) + '.</span>' +
             '<input class="batch-cmd-input" value="' + wbEsc(it.cmd) + '" onchange="batchEditCmd(' + i + ', this.value)">' +
             '<select class="batch-shell-sel' + (it.shell && it.shell !== wbDefaultShell() ? ' custom' : '') + '" onchange="batchEditShell(' + i + ', this.value)" title="' + wbEsc(t('wb.wf.shell')) + '">' + batchShellOptions(it.shell) + '</select>' +
-            '<span class="batch-status" id="bstat-' + i + '">⏳</span>' +
+            '<span class="batch-status" id="bstat-' + i + '">' + batchPillHtml('') + '</span>' +
             '<span class="batch-dur" id="bdur-' + i + '">--</span>' +
-            '<span class="batch-rm" onclick="batchRemoveCmd(' + i + ')">✕</span></li>';
+            '<span class="batch-rm" onclick="batchRemoveCmd(' + i + ')" title="' + wbEsc(t('cmd.delete')) + '"><span class="codicon codicon-close" aria-hidden="true"></span></span></li>';
     }).join('');
 }
 function batchSelectGroup() { WB.batchIdx = Number(wbEl('batchGroupSel').value); renderBatchGroups(); }
@@ -512,13 +510,19 @@ function batchRun() {
         workflow: wf
     });
 }
+function batchPillHtml(state) {
+    /* 状态指示图标：等待(表)/运行中(自旋)/成功/失败/待执行 */
+    var glyph = state === 'running' ? 'codicon-loading' : state === 'success' ? 'codicon-check'
+        : state === 'failed' ? 'codicon-error' : state === 'pending' ? 'codicon-arrow-down' : 'codicon-watch';
+    return '<span class="codicon ' + glyph + '" aria-hidden="true"></span>';
+}
 function batchResetPills() {
     var wf = batchCurrent();
     var x = wf ? batchExtract(wf) : { items: [] };
     x.items.forEach(function (_, i) {
         var pill = wbEl('bstat-' + i);
         var dur = wbEl('bdur-' + i);
-        if (pill) { pill.textContent = '⏳'; pill.className = 'batch-status'; }
+        if (pill) { pill.innerHTML = batchPillHtml(''); pill.className = 'batch-status'; }
         if (dur) { dur.textContent = '--'; }
     });
 }
@@ -526,10 +530,8 @@ function batchUpdatePill(idx, state, dur) {
     var pill = wbEl('bstat-' + idx);
     var durEl = wbEl('bdur-' + idx);
     if (!pill) { return; }
-    if (state === 'running') { pill.textContent = '↻'; pill.className = 'batch-status running'; }
-    else if (state === 'success') { pill.textContent = '✓'; pill.className = 'batch-status success'; }
-    else if (state === 'failed') { pill.textContent = '✗'; pill.className = 'batch-status failed'; }
-    else { pill.textContent = '↓'; pill.className = 'batch-status'; }
+    pill.innerHTML = batchPillHtml(state);
+    pill.className = 'batch-status' + (state === 'running' ? ' running' : state === 'success' ? ' success' : state === 'failed' ? ' failed' : '');
     if (dur !== undefined && durEl) { durEl.textContent = (dur / 1000).toFixed(1) + 's'; }
 }
 function batchToFlow() {
