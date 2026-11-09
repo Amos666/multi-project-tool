@@ -171,31 +171,38 @@ export class MainWebview {
 
     private getCss(): string {
         return `
+/* 焦点可见性：键盘焦点显式轮廓，鼠标焦点交由控件自身反馈；尊重系统减动效设置 */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
 :root {
-    --brand-background: #1a1b26;
-    --brand-surface: #24283b;
-    --brand-surface-raised: #2f3347;
-    --brand-surface-hover: #363b54;
-    --brand-border: #3b4261;
-    --brand-border-subtle: #2f3347;
-    --brand-text: #c0caf5;
-    --brand-text-secondary: #a9b1d6;
-    --brand-text-muted: #565f89;
-    --brand-text-inverse: #1a1b26;
-    --brand-primary: #7dcfff;
-    --brand-primary-hover: #89dceb;
-    --brand-primary-subtle: rgba(125, 207, 255, 0.1);
-    --state-success: #9ece6a;
-    --state-warning: #e0af68;
-    --state-error: #f7768e;
-    --state-info: #7aa2f7;
+    /* 视觉令牌全部映射 VS Code 主题语义变量：Light / Dark / High Contrast（含 HC Light）自动适配，无硬编码颜色 */
+    --brand-background: var(--vscode-editor-background);
+    --brand-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    --brand-surface-raised: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    --brand-surface-hover: var(--vscode-list-hoverBackground);
+    --brand-border: var(--vscode-panel-border, var(--vscode-widget-border));
+    --brand-border-subtle: var(--vscode-widget-border, var(--vscode-panel-border));
+    --brand-text: var(--vscode-editor-foreground);
+    --brand-text-secondary: var(--vscode-descriptionForeground);
+    --brand-text-muted: color-mix(in srgb, var(--vscode-foreground, var(--brand-text)) 55%, transparent);
+    --brand-text-inverse: var(--vscode-button-foreground);
+    --brand-primary: var(--vscode-button-background);
+    --brand-primary-hover: var(--vscode-button-hoverBackground);
+    --brand-primary-subtle: color-mix(in srgb, var(--vscode-button-background) 8%, transparent);
+    --state-success: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen));
+    --state-warning: var(--vscode-editorWarning-foreground);
+    --state-error: var(--vscode-errorForeground);
+    --state-info: var(--vscode-notificationsInfoIcon-foreground);
     --radius-sm: 3px;
     --radius-md: 6px;
     --radius-lg: 8px;
 }
 
 body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--vscode-font-family);
     margin: 0;
     padding: 0;
     background-color: var(--brand-background);
@@ -287,11 +294,11 @@ body {
     width: 2px;
 }
 
-.git-btn.pull::before { background-color: #7aa2f7; }
-.git-btn.commit::before { background-color: #9ece6a; }
-.git-btn.change::before { background-color: #e0af68; }
+.git-btn.pull::before { background-color: var(--state-info); }
+.git-btn.commit::before { background-color: var(--state-success); }
+.git-btn.change::before { background-color: var(--state-warning); }
 .git-btn.branch::before { background-color: var(--brand-primary); }
-.git-btn.push::before { background-color: #89dceb; }
+.git-btn.push::before { background-color: var(--state-info); }
 
 .git-btn:hover:not(:disabled) { filter: brightness(1.1); }
 .git-btn:disabled { opacity: 0.5; cursor: not-allowed; }

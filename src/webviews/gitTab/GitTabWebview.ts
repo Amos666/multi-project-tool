@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitTabView } from './GitTabView';
 import { Project, GitOperationResult } from '../../models/project';
 import { GitUtils } from '../../utils/gitUtils';
+import { CODICON_CSS, codiconFontFace } from '../shared/baseTheme';
 
 export class GitTabWebview {
     private _panel: vscode.WebviewPanel | undefined;
@@ -28,7 +29,7 @@ export class GitTabWebview {
             this.getWebviewOptions()
         );
 
-        this._panel.webview.html = this.getWebviewContent();
+        this._panel.webview.html = this.getWebviewContent(this._panel.webview.cspSource);
 
         this._panel.webview.onDidReceiveMessage(
             async (message) => {
@@ -92,17 +93,29 @@ export class GitTabWebview {
         };
     }
 
-    private getWebviewContent(): string {
+    private getWebviewContent(cspSource: string): string {
         return `
             <!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <!-- CSP：资源全部内联，仅允许 ${cspSource} 与内联脚本/样式（无任何外部网络请求） -->
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} data:; font-src ${cspSource};">
                 <title>Git Projects</title>
                 <style>
+                    ${codiconFontFace(this._panel?.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'resources', 'codicon.ttf')).toString() ?? '')}
+                    ${CODICON_CSS}
+                    /* 全局尺寸模型：与 VS Code workbench 一致的 border-box */
+                    *, *::before, *::after { box-sizing: border-box; }
+                    /* 焦点可见性：键盘焦点显式轮廓；尊重系统减动效设置 */
+                    :focus { outline: none; }
+                    :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+                    @media (prefers-reduced-motion: reduce) {
+                        *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+                    }
                     body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-family: var(--vscode-font-family);
                         margin: 0;
                         padding: 0;
                         background-color: var(--vscode-editor-background);
@@ -214,7 +227,6 @@ export class GitTabWebview {
                     }
                     .command-input-group input:focus,
                     .command-input-group select:focus {
-                        outline: none;
                         border-color: var(--vscode-focusBorder);
                     }
                     .command-input-group button {
@@ -348,42 +360,42 @@ export class GitTabWebview {
                         <div class="tab-content" id="tab-git-commands">
                             <div class="git-commands-grid">
                                 <div class="command-card" id="cmd-pull" onclick="executeGitCommand('pull')">
-                                    <div class="command-icon">📥</div>
+                                    <div class="command-icon"><span class="codicon codicon-repo-pull" aria-hidden="true"></span></div>
                                     <div class="command-name">Git Pull</div>
                                     <div class="command-desc">Pull latest changes</div>
                                 </div>
                                 <div class="command-card" id="cmd-push" onclick="executeGitCommand('push')">
-                                    <div class="command-icon">📤</div>
+                                    <div class="command-icon"><span class="codicon codicon-repo-push" aria-hidden="true"></span></div>
                                     <div class="command-name">Git Push</div>
                                     <div class="command-desc">Push local changes</div>
                                 </div>
                                 <div class="command-card" id="cmd-fetch" onclick="executeGitCommand('fetch')">
-                                    <div class="command-icon">🔄</div>
+                                    <div class="command-icon"><span class="codicon codicon-sync" aria-hidden="true"></span></div>
                                     <div class="command-name">Git Fetch</div>
                                     <div class="command-desc">Fetch from remote</div>
                                 </div>
                                 <div class="command-card" id="cmd-status" onclick="executeGitCommand('status')">
-                                    <div class="command-icon">📋</div>
+                                    <div class="command-icon"><span class="codicon codicon-list-flat" aria-hidden="true"></span></div>
                                     <div class="command-name">Status</div>
                                     <div class="command-desc">Check git status</div>
                                 </div>
                                 <div class="command-card" id="cmd-checkout" onclick="showCheckoutDialog()">
-                                    <div class="command-icon">🌿</div>
+                                    <div class="command-icon"><span class="codicon codicon-arrow-swap" aria-hidden="true"></span></div>
                                     <div class="command-name">Checkout</div>
                                     <div class="command-desc">Switch branch</div>
                                 </div>
                                 <div class="command-card" id="cmd-commit" onclick="showCommitDialog()">
-                                    <div class="command-icon">💾</div>
+                                    <div class="command-icon"><span class="codicon codicon-git-commit" aria-hidden="true"></span></div>
                                     <div class="command-name">Commit</div>
                                     <div class="command-desc">Commit changes</div>
                                 </div>
                                 <div class="command-card" id="cmd-branch" onclick="showBranchDialog()">
-                                    <div class="command-icon">🌳</div>
+                                    <div class="command-icon"><span class="codicon codicon-git-branch" aria-hidden="true"></span></div>
                                     <div class="command-name">Branch</div>
                                     <div class="command-desc">Manage branches</div>
                                 </div>
                                 <div class="command-card" id="cmd-custom" onclick="showCustomCommandDialog()">
-                                    <div class="command-icon">⚙️</div>
+                                    <div class="command-icon"><span class="codicon codicon-gear" aria-hidden="true"></span></div>
                                     <div class="command-name">Custom</div>
                                     <div class="command-desc">Custom command</div>
                                 </div>
@@ -412,7 +424,7 @@ export class GitTabWebview {
                         <div class="bottom-header">
                             <h2>Git Projects</h2>
                             <div class="bottom-controls">
-                                <button onclick="refreshProjects()">🔄 Refresh</button>
+                                <button onclick="refreshProjects()"><span class="codicon codicon-refresh" aria-hidden="true"></span> Refresh</button>
                                 <button onclick="selectAllProjects()">Select All</button>
                                 <button onclick="clearSelection()">Clear</button>
                             </div>

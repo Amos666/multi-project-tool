@@ -24,7 +24,8 @@ var WF = {
     bgRunning: false
 };
 var WF_W = 118, WF_H = 44, WF_VB_W = 1000, WF_VB_H = 460;
-var WF_TAG_COLOR = { start: '#48bfe3', cmd: '#7aa2f7', condition: '#e0af68', fork: '#9ece6a', join: '#2ac3de', notify: '#f7768e', confirm: '#ff9e64', ref: '#bb9af7', vscode: '#73daca' };
+/* 节点类别强调色：引用 VS Code 终端 ANSI 主题变量（官方定义，四套主题均有值），经 style 属性生效 */
+var WF_TAG_COLOR = { start: 'var(--vscode-terminal-ansiCyan)', cmd: 'var(--vscode-terminal-ansiBlue)', condition: 'var(--vscode-terminal-ansiYellow)', fork: 'var(--vscode-terminal-ansiGreen)', join: 'var(--vscode-terminal-ansiBrightCyan)', notify: 'var(--vscode-terminal-ansiRed)', confirm: 'var(--vscode-terminal-ansiBrightYellow)', ref: 'var(--vscode-terminal-ansiMagenta)', vscode: 'var(--vscode-terminal-ansiBrightGreen)' };
 /* ref 节点引用的命令树（由宿主推送更新） */
 var customCommandTree = [];
 var pythonTxtCommandTree = [];
@@ -456,7 +457,7 @@ function wfNodeById(id) { return WF.nodes.find(function (n) { return n.id === id
 function wfDraw() {
     var svg = wfSvg();
     if (!svg) { return; }
-    var s = '<defs><marker id="wfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#565f89"/></marker></defs>';
+    var s = '<defs><marker id="wfArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--vscode-descriptionForeground)"/></marker></defs>';
     wfComputeRegions().forEach(function (r) {
         s += '<rect class="wf-region" x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" rx="8"/>' +
             '<text class="wf-region-label" x="' + (r.x + 8) + '" y="' + (r.y + 12) + '">' + wbEsc(t('wb.wf.parallelRegion')) + ' · ' + r.n + '</text>';
@@ -470,7 +471,7 @@ function wfDraw() {
         s += '<path class="' + cls + '" d="' + d + '"/>' +
             '<path class="wf-edge-hit" data-edge="' + i + '" d="' + d + '"><title>' + wbEsc(t('wb.wf.delEdge')) + '</title></path>';
         if (e.condition) {
-            s += '<text x="' + mx + '" y="' + ((y1 + y2) / 2 - 6) + '" font-size="9" text-anchor="middle" fill="' + (e.condition === 'true' ? '#9ece6a' : '#f7768e') + '">' + (e.condition === 'true' ? 'T' : 'F') + '</text>';
+            s += '<text x="' + mx + '" y="' + ((y1 + y2) / 2 - 6) + '" font-size="9" text-anchor="middle" style="fill:' + (e.condition === 'true' ? 'var(--state-success)' : 'var(--state-error)') + '">' + (e.condition === 'true' ? 'T' : 'F') + '</text>';
         }
     });
     WF.nodes.forEach(function (n) {
@@ -478,17 +479,17 @@ function wfDraw() {
         var sel = n.id === WF.selected ? ' selected' : '';
         var src = n.id === WF.linkFrom ? ' link-src' : '';
         var badge = st === 'success' ? '✓' : st === 'failed' ? '✗' : st === 'running' ? '↻' : st === 'skipped' ? '↓' : '';
-        var badgeColor = st === 'success' ? '#9ece6a' : st === 'failed' ? '#f7768e' : st === 'running' ? '#7dcfff' : '#565f89';
+        var badgeColor = st === 'success' ? 'var(--state-success)' : st === 'failed' ? 'var(--state-error)' : st === 'running' ? 'var(--brand-primary)' : 'var(--vscode-descriptionForeground)';
         var cmdText = n.tag === 'cmd' || n.tag === 'condition' || n.tag === 'confirm' ? (n.cmd || '').slice(0, 14)
             : n.tag === 'start' ? wfStartDesc(n).slice(0, 14)
             : n.tag === 'ref' ? (wfRefName(n) || t('wb.wf.refChoose')).slice(0, 14)
             : n.tag === 'vscode' ? (n.vscodeCommandId || t('wb.wf.vscodeCommandId')).slice(0, 14) : '';
         s += '<g class="wf-node ' + st + sel + src + '" data-id="' + n.id + '">' +
             '<rect class="body" x="' + n.x + '" y="' + n.y + '" width="' + WF_W + '" height="' + WF_H + '" rx="6"/>' +
-            '<rect x="' + n.x + '" y="' + n.y + '" width="5" height="' + WF_H + '" rx="2" fill="' + (WF_TAG_COLOR[n.tag] || '#888') + '"/>' +
+            '<rect x="' + n.x + '" y="' + n.y + '" width="5" height="' + WF_H + '" rx="2" style="fill:' + (WF_TAG_COLOR[n.tag] || 'var(--vscode-descriptionForeground)') + '"/>' +
             '<text x="' + (n.x + 14) + '" y="' + (n.y + 18) + '">' + wbEsc(n.label) + '</text>' +
             '<text class="tag" x="' + (n.x + 14) + '" y="' + (n.y + 33) + '">' + wbEsc(wfByLabel(n.tag)) + (cmdText ? ' · ' + wbEsc(cmdText) : '') + '</text>' +
-            '<text x="' + (n.x + WF_W - 16) + '" y="' + (n.y + 16) + '" font-size="11" fill="' + badgeColor + '">' + badge + '</text></g>';
+            '<text x="' + (n.x + WF_W - 16) + '" y="' + (n.y + 16) + '" font-size="11" style="fill:' + badgeColor + '">' + badge + '</text></g>';
     });
     svg.innerHTML = s;
     /* 重绘后保持节点操作条贴在目标节点上方（失败暂停时常驻） */
