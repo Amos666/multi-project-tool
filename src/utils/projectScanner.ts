@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as cp from 'child_process';
 import { Project } from '../models/project';
+import { resolveGitPath } from './gitLocator';
 
 export class ProjectScanner {
     private static instance: ProjectScanner;
@@ -164,19 +165,53 @@ export class ProjectScanner {
         return gitInfo;
     }
 
+    /**
+     * 直接 spawn 已解析的 git 可执行文件（不经 cmd.exe 中转）：
+     * - 扩展宿主 PATH 缺 git 时仍可用（复用 VS Code 内置 git 扩展的解析结果）
+     * - 避免 shell 包装层的启动开销与引号转义问题，Windows 下显著提速
+     * - 超时后强杀并兜底 resolve，保证调用方（分支刷新）不会悬挂
+     */
     private async executeGitCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
+        const gitPath = await resolveGitPath();
+        // 本方法所有子命令均为简单空格分隔参数，不含引号语义
+        const args = ['--no-pager', ...command.split(' ').filter(a => a.length > 0)];
         return new Promise((resolve) => {
-            const timeout = 5000;
-            const proc = cp.exec(`git --no-pager ${command}`, { cwd, encoding: 'utf8', timeout }, (error, stdout, stderr) => {
-                if (error) {
-                    resolve({ success: false, output: stdout.trim(), error: stderr.trim() || error.message });
-                } else {
-                    resolve({ success: true, output: stdout.trim() });
+            let stdout = '';
+            let stderr = '';
+            let settled = false;
+            const finish = (success: boolean, error?: string) => {
+                if (settled) {
+                    return;
                 }
-            });
-            proc.on('error', (err) => {
-                resolve({ success: false, output: '', error: err.message });
-            });
+                settled = true;
+                clearTimeout(timer);
+                const combined = stdout.trim();
+                resolve(success
+                    ? { success: true, output: combined }
+                    : { success: false, output: combined, error: (stderr.trim() || error || 'git failed') });
+            };
+            let timer: NodeJS.Timeout;
+            let proc: cp.ChildProcess;
+            try {
+                proc = cp.spawn(gitPath, args, { cwd, windowsHide: true });
+            } catch (error: any) {
+                resolve({ success: false, output: '', error: error.message || String(error) });
+                return;
+            }
+            timer = setTimeout(() => {
+                try { proc.kill(); } catch { /* already exited */ }
+                finish(false, `git ${command} timed out`);
+            }, 5000);
+            proc.on('error', (err) => finish(false, err.message));
+            if (proc.stdout) {
+                proc.stdout.setEncoding('utf8');
+                proc.stdout.on('data', (d: string) => { stdout += d; });
+            }
+            if (proc.stderr) {
+                proc.stderr.setEncoding('utf8');
+                proc.stderr.on('data', (d: string) => { stderr += d; });
+            }
+            proc.on('close', (code: number | null) => finish(code === 0));
         });
     }
 }

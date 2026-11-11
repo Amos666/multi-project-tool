@@ -139,21 +139,33 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         try {
             const scanDepth = this._settings.projectScanDepth;
             this._projects = await this._projectScanner.scanWorkspace(scanDepth);
-            // 并行获取项目信息，但每个项目有独立超时
-            const infoPromises = this._projects.map(async (project) => {
+            // 有界并发获取项目信息：避免一次拉起全部 git 子进程（Windows 下进程风暴
+            // 会拖慢整体甚至触发超时，导致分支信息丢失显示 No branch）。
+            // getProjectInfo 内部每条 git 命令都有独立超时并保证 resolve，无需外层 race。
+            this._projects = await this.mapLimit(this._projects, 8, async (project) => {
                 try {
-                    return await Promise.race([
-                        this._projectScanner.getProjectInfo(project),
-                        new Promise<Project>((resolve) => setTimeout(() => resolve(project), 15000))
-                    ]);
+                    return await this._projectScanner.getProjectInfo(project);
                 } catch {
                     return project;
                 }
             });
-            this._projects = await Promise.all(infoPromises);
         } catch (error) {
             console.error('Failed to load projects:', error);
         }
+    }
+
+    /** 有界并发版 Promise.all：同一时刻最多 limit 个任务在跑 */
+    private async mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+        const results: R[] = new Array(items.length);
+        let next = 0;
+        const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+            while (next < items.length) {
+                const i = next++;
+                results[i] = await fn(items[i]);
+            }
+        });
+        await Promise.all(workers);
+        return results;
     }
 
     private async loadSettings(): Promise<void> {
@@ -246,6 +258,68 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(
             async (message) => { await this.handleWebviewMessage(message); }
         );
+
+        // 监听各仓库 .git/HEAD 变化（外部终端切分支/提交等），实时刷新分支显示
+        this.watchBranchChanges();
+    }
+
+    /* ---- 分支实时刷新：监听 .git/HEAD 变化，防抖后只重取受影响项目的信息 ---- */
+
+    private _gitHeadWatcher: vscode.FileSystemWatcher | undefined;
+    private _branchRefreshTimer: NodeJS.Timeout | undefined;
+    private _pendingBranchRefresh = new Set<string>();
+
+    private watchBranchChanges(): void {
+        if (this._gitHeadWatcher) {
+            return;
+        }
+        try {
+            this._gitHeadWatcher = vscode.workspace.createFileSystemWatcher('**/.git/HEAD');
+            const onHeadChange = (uri: vscode.Uri) => {
+                // <repo>/.git/HEAD → 取仓库根目录（统一比较大小写与分隔符）
+                const repoRoot = uri.fsPath.replace(/[\\/]HEAD$/, '').replace(/[\\/]\.git$/, '');
+                if (repoRoot) {
+                    this._pendingBranchRefresh.add(repoRoot);
+                    if (this._branchRefreshTimer) {
+                        clearTimeout(this._branchRefreshTimer);
+                    }
+                    this._branchRefreshTimer = setTimeout(() => {
+                        this._branchRefreshTimer = undefined;
+                        void this.refreshPendingBranches();
+                    }, 400);
+                }
+            };
+            this._gitHeadWatcher.onDidChange(onHeadChange);
+            this._gitHeadWatcher.onDidCreate(onHeadChange);
+        } catch {
+            // watcher 不可用时静默降级（手动刷新/页签切换仍会更新分支）
+        }
+    }
+
+    private async refreshPendingBranches(): Promise<void> {
+        if (this._pendingBranchRefresh.size === 0 || this._projects.length === 0) {
+            return;
+        }
+        const roots = Array.from(this._pendingBranchRefresh);
+        this._pendingBranchRefresh.clear();
+        const norm = (s: string) => s.replace(/[\\/]+$/, '').toLowerCase();
+        let changed = false;
+        for (let i = 0; i < this._projects.length; i++) {
+            const project = this._projects[i];
+            if (!roots.some(r => norm(r) === norm(project.path))) {
+                continue;
+            }
+            try {
+                this._projects[i] = await this._projectScanner.getProjectInfo(project);
+                changed = true;
+            } catch {
+                // 单个项目失败忽略，保留原数据
+            }
+        }
+        // 轻量回发：只更新项目列表，不触发整页重渲染
+        if (changed) {
+            this._view?.webview.postMessage({ command: 'updateProjects', projects: this._projects });
+        }
     }
 
     /** 侧边栏 Webview 与主编辑区 Flow Editor 面板共用同一套消息处理 */
@@ -450,17 +524,20 @@ body {
     overflow: hidden;
 }
 
-.tab > span {
+/* 仅对文本标签做截断省略；图标 span 不参与（overflow:hidden 会裁掉字形下缘） */
+.tab > span:not(.tab-icon) {
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* 页签/操作图标（Codicon）：宽高与字号同步，随主题色继承 */
-.tab-icon, .git-icon, .refresh-icon { width: 14px; height: 14px; font-size: 14px; flex-shrink: 0; vertical-align: -2px; }
+/* 页签/操作图标（Codicon 字体）：只定字号，不锁高度、不做负 vertical-align。
+   codicon.ttf 的字形下缘贴基线（descent=0）且恰好占满 1em 行盒——固定高度或
+   向下平移会与行盒边缘重叠，在 overflow:hidden 容器里字形下缘会被裁掉一截 */
+.tab-icon, .git-icon, .refresh-icon { width: 14px; font-size: 14px; flex-shrink: 0; }
 
-.git-btn .git-icon { width: 13px; height: 13px; font-size: 13px; }
+.git-btn .git-icon { width: 13px; font-size: 13px; }
 
 .tab:hover { color: var(--brand-text-secondary); background-color: rgba(255, 255, 255, 0.02); }
 
@@ -844,11 +921,20 @@ body {
     white-space: nowrap;
 }
 
+/* 操作按钮吸附行右缘：行内容过宽出现横向滚动时，按钮始终可见（不被拖到中间） */
 .command-item .actions,
 .category-row .actions {
     display: flex;
     gap: 4px;
     flex-shrink: 0;
+    position: sticky;
+    right: 0;
+    background-color: var(--brand-surface-raised);
+}
+
+.command-item:hover .actions,
+.category-row:hover .actions {
+    background-color: var(--brand-surface-hover);
 }
 
 .cmd-action-btn {
@@ -1308,13 +1394,21 @@ body {
 .change-count.error { color: var(--state-error); background-color: rgba(247, 118, 142, 0.12); }
 
 /* --- Projects view 项目行动态命令按钮（Set Tab Project Row Commands 配置） --- */
+/* 按钮组吸附行右缘 + 不换行：按钮较多时行内容过宽出现横向滚动，按钮始终
+   靠右可见（拖动横向滚动条不会把执行按钮甩到中间/滚出视野） */
 .project-row-actions {
     display: flex;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
     margin-left: 6px;
+    position: sticky;
+    right: 0;
+    background-color: var(--brand-surface);
 }
+
+.project-item:hover .project-row-actions { background-color: var(--brand-surface-hover); }
+.project-item.selected .project-row-actions { background-color: var(--brand-primary-subtle); }
 
 .project-row-btn {
     height: 20px;
@@ -1899,7 +1993,7 @@ body {
                 <div class="log-container" id="txtCmdLogContainer">
                     <div class="log-resizer" id="txtCmdLogResizer"></div>
                     <div class="log-header" onclick="toggleTxtCmdLog()">
-                        <span class="log-title"><span class="codicon codicon-output" aria-hidden="true" style="font-size:11px;vertical-align:-2px"></span> <span data-i18n="pytxt.logTitle">Execution Log</span></span>
+                        <span class="log-title"><span class="codicon codicon-output" aria-hidden="true" style="font-size:11px"></span> <span data-i18n="pytxt.logTitle">Execution Log</span></span>
                         <span style="display: flex; gap: 6px; align-items: center;">
                             <span class="export-btn" onclick="exportTxtCmdLogs(event)" data-i18n="log.export">Export Log</span>
                             <span class="clear-btn" onclick="clearTxtCmdLogs(event)" data-i18n="log.clear">Clear</span>
@@ -3556,7 +3650,11 @@ window.addEventListener('message', event => {
             this._customCommandTree = safeTree;
             await this.saveCommands();
         }
-        this.updateWebview();
+        // 仅同步被修改的命令树：webview 已在本地重渲染，整页 updateWebview 会造成
+        // 全量重发（项目/日志/其余树/workbench）→ 折叠分类等操作出现明显卡顿
+        this._view?.webview.postMessage({ command: 'updateCommandTree', tabId, tree: safeTree });
+        // Flow Editor 面板的 ref 节点引用命令树，需同步
+        this._flowEditor.postMessage({ command: 'updateCommandTree', tabId, tree: safeTree });
     }
 
     private async handleRunPythonTxtCmd(cmd: PythonTxtCommand, runKey?: string): Promise<void> {
@@ -3593,55 +3691,143 @@ window.addEventListener('message', event => {
         }
     }
 
-    private executePythonTransform(input: string, script: string, runKey?: string): Promise<{ success: boolean; output: string; error?: string; cancelled?: boolean }> {
-        return new Promise((resolve) => {
-            const cp = require('child_process');
-            const fs = require('fs');
-            const path = require('path');
-            const os = require('os');
+    /** Python 解释器解析缓存（进程级）：探测一次，后续运行免重复解析 */
+    private static _pythonCmdCache: string | undefined;
 
-            const tmpDir = os.tmpdir();
-            const scriptPath = path.join(tmpDir, `mpt_py_${Date.now()}.py`);
+    /**
+     * 解析可用的 Python 解释器：python → py（Windows）/ python3 → python（其它平台）
+     * 顺序快速探测（每个候选 5s 上限），结果缓存。
+     * 直接 spawn 探测可用性，可绕开 Microsoft Store 别名 stub（非交互场景可能阻塞
+     * 数十秒）与损坏的 PATH 配置，避免"简单命令耗时 30s"类问题。
+     */
+    private async resolvePythonCommand(): Promise<string> {
+        if (MainViewProvider._pythonCmdCache) {
+            return MainViewProvider._pythonCmdCache;
+        }
+        const cp = require('child_process');
+        const candidates = process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python'];
+        for (const cmd of candidates) {
+            const ok = await new Promise<boolean>((resolve) => {
+                let settled = false;
+                const done = (v: boolean) => {
+                    if (!settled) {
+                        settled = true;
+                        resolve(v);
+                    }
+                };
+                try {
+                    const child = cp.spawn(cmd, ['-c', ''], { windowsHide: true, stdio: 'ignore' });
+                    const probeTimer = setTimeout(() => {
+                        try { child.kill(); } catch { /* ignore */ }
+                        done(false);
+                    }, 5000);
+                    child.on('error', () => {
+                        clearTimeout(probeTimer);
+                        done(false);
+                    });
+                    child.on('close', (code: number | null) => {
+                        clearTimeout(probeTimer);
+                        done(code === 0);
+                    });
+                } catch {
+                    done(false);
+                }
+            });
+            if (ok) {
+                MainViewProvider._pythonCmdCache = cmd;
+                return cmd;
+            }
+        }
+        // 全部探测失败：回退默认命令名（让 spawn 报 ENOENT，由调用方提示安装）
+        MainViewProvider._pythonCmdCache = process.platform === 'win32' ? 'python' : 'python3';
+        return MainViewProvider._pythonCmdCache;
+    }
 
+    private async executePythonTransform(input: string, script: string, runKey?: string): Promise<{ success: boolean; output: string; error?: string; cancelled?: boolean }> {
+        const cp = require('child_process');
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const scriptPath = path.join(os.tmpdir(), `mpt_py_${Date.now()}_${Math.random().toString(36).slice(2)}.py`);
+        const pythonCmd = await this.resolvePythonCommand();
+        return await new Promise((resolve) => {
+            let cancelled = false;
+            let timedOut = false;
+            let settled = false;
+            let timer: NodeJS.Timeout | undefined;
+            let child: any;
+            let stdout = '';
+            let stderr = '';
+            const handle = { cancel: () => { cancelled = true; this.killChildTree(child); } };
+            const finish = (result: { success: boolean; output: string; error?: string; cancelled?: boolean }) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                if (runKey) {
+                    this.unregisterCmdRun(runKey, handle);
+                }
+                try { fs.unlinkSync(scriptPath); } catch (error) { /* ignore */ }
+                resolve(result);
+            };
             try {
                 fs.writeFileSync(scriptPath, script, 'utf8');
-
-                const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-                // 取消标记：句柄触发后置位，回调据此返回 cancelled 而非执行失败
-                let cancelled = false;
-                const child = cp.exec(pythonCmd + ' "' + scriptPath + '"', {
-                    encoding: 'utf8',
-                    maxBuffer: 1024 * 1024 * 10,
-                    // 使用 Set Tab 配置的命令超时（默认 300s），与其他命令执行路径一致
-                    timeout: this._commandTimeout * 1000,
+                // 直接 spawn 解释器（不经 cmd.exe 中转）：免去 shell 启动开销，
+                // 避开 cmd 的引号重解析与 Profile 钩子，Windows 下显著提速
+                child = cp.spawn(pythonCmd, [scriptPath], {
+                    windowsHide: true,
                     env: { ...process.env, ...this.getEnvVariables() }
-                }, (error: Error | null, stdout: string, stderr: string) => {
-                    try { fs.unlinkSync(scriptPath); } catch (e) { }
-                    if (runKey) { this.unregisterCmdRun(runKey, handle); }
-                    if (cancelled) {
-                        resolve({ success: false, output: '', error: t('backend.cmdCancelled', this._language), cancelled: true });
-                    } else if (error) {
-                        const errMsg = error.message;
-                        if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
-                            resolve({ success: false, output: '', error: t('backend.pythonNotFound', this._language) });
-                        } else {
-                            resolve({ success: false, output: stdout, error: stderr.trim() || errMsg });
-                        }
-                    } else {
-                        resolve({ success: true, output: stdout });
-                    }
                 });
-
-                const handle = { cancel: () => { cancelled = true; this.killChildTree(child); } };
-                if (runKey) { this.registerCmdRun(runKey, handle); }
-
-                if (child.stdin) {
-                    child.stdin.write(input);
-                    child.stdin.end();
-                }
             } catch (error: any) {
-                resolve({ success: false, output: '', error: error.message });
+                finish({ success: false, output: '', error: error.message || String(error) });
+                return;
             }
+            if (runKey) {
+                this.registerCmdRun(runKey, handle);
+            }
+            // 使用 Set Tab 配置的命令超时（默认 300s），与其他命令执行路径一致
+            timer = setTimeout(() => {
+                timedOut = true;
+                try { this.killChildTree(child); } catch (error) { /* ignore */ }
+            }, this._commandTimeout * 1000);
+            if (child.stdout) {
+                child.stdout.setEncoding('utf8');
+                child.stdout.on('data', (d: string) => { stdout += d; });
+            }
+            if (child.stderr) {
+                child.stderr.setEncoding('utf8');
+                child.stderr.on('data', (d: string) => { stderr += d; });
+            }
+            if (child.stdin) {
+                // 脚本不读 stdin 时管道关闭会产生 EPIPE，吞掉避免未处理异常
+                child.stdin.on('error', () => { /* ignore */ });
+                if (input) {
+                    child.stdin.write(input);
+                }
+                child.stdin.end();
+            }
+            child.on('error', (error: Error) => {
+                const msg = error.message || '';
+                if (msg.includes('ENOENT') || msg.includes('not recognized')) {
+                    finish({ success: false, output: '', error: t('backend.pythonNotFound', this._language) });
+                } else {
+                    finish({ success: false, output: stdout, error: stderr.trim() || msg });
+                }
+            });
+            child.on('close', (code: number | null) => {
+                if (cancelled) {
+                    finish({ success: false, output: '', error: t('backend.cmdCancelled', this._language), cancelled: true });
+                } else if (timedOut) {
+                    finish({ success: false, output: stdout, error: `Command timed out after ${this._commandTimeout}s` });
+                } else if (code !== 0) {
+                    finish({ success: false, output: stdout, error: stderr.trim() || `Exit code: ${code}` });
+                } else {
+                    finish({ success: true, output: stdout });
+                }
+            });
         });
     }
 
@@ -3663,7 +3849,8 @@ window.addEventListener('message', event => {
         if (tabId === 'settings') {
             this.loadSettings();
             this.loadEnvVariables();
-            this.updateWebview();
+            // 页签切换是纯前端动作；进入 Set 页签仅需刷新表单数据源，无需整页重发
+            this.postSettingsData();
         }
     }
 
@@ -3673,18 +3860,18 @@ window.addEventListener('message', event => {
         } else {
             this._selectedProjectIds.add(projectId);
         }
-        this.updateWebview();
+        // webview 已本地更新勾选态：不再整页回发（全量 updateWebview 是点击延迟的根源）
     }
 
     private handleSelectAllProjects(): void {
         this._selectedProjectIds.clear();
         this._projects.forEach(p => { if (p.isGitRepo) this._selectedProjectIds.add(p.id); });
-        this.updateWebview();
+        // webview 已本地更新勾选态
     }
 
     private handleDeselectAllProjects(): void {
         this._selectedProjectIds.clear();
-        this.updateWebview();
+        // webview 已本地更新勾选态
     }
 
     private async handleGitPull(): Promise<void> { await this.executeGitOperation('pull'); }
@@ -3944,11 +4131,13 @@ window.addEventListener('message', event => {
                     const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
                     // 为每条命令注入追踪：输出 "$ command => executed result: output"
                     const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+                    // 执行必须用命令自身的 shell（runShell），否则非 git-bash 命令的
+                    // 追踪脚本会被错误 shell 解释而报错
                     const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
                         if (line.trim()) {
                             this.addLog('│   ' + line, 'info', project.name);
                         }
-                    }, undefined, runKey);
+                    }, runShell, runKey);
                     if (result.cancelled) {
                         cancelled = true;
                         this.addLog('│   ⊘ ' + t('backend.cmdCancelled', this._language), 'error', project.name);
@@ -4006,11 +4195,13 @@ window.addEventListener('message', event => {
         try {
             const resolvedLines = commandLines.map(c => this.resolveCommandVariables(c));
             const tracedCommand = this.injectCommandTracing(resolvedLines, runShell);
+            // 执行必须用命令自身的 shell（runShell），否则非 git-bash 命令的
+            // 追踪脚本会被错误 shell 解释而报错
             const result = await this.executeShellCommand(cwd, tracedCommand, (line: string) => {
                 if (line.trim()) {
                     this.addLog('│   ' + line, 'info');
                 }
-            }, undefined, runKey);
+            }, runShell, runKey);
             if (result.cancelled) {
                 this.addLog('⊘ ' + t('backend.cmdCancelled', this._language) + ' — ' + name, 'error');
             } else if (result.success) {
@@ -4182,8 +4373,12 @@ window.addEventListener('message', event => {
         const tracedLines: string[] = [];
         const os = require('os');
         const path = require('path');
-        const resultFile = path.join(os.tmpdir(), `mpt_result_${Date.now()}.txt`);
-        const resultFileCmd = `%TEMP%\\mpt_result_${Date.now()}.txt`;
+        const stamp = Date.now();
+        const resultFile = path.join(os.tmpdir(), `mpt_result_${stamp}.txt`);
+        const resultFileCmd = `%TEMP%\\mpt_result_${stamp}.txt`;
+        // WSL 内无法直接访问 Windows 路径（C:\... 需映射为 /mnt/c/...），
+        // 结果文件固定用 WSL 侧 /tmp，避免追踪写入失败导致命令报错
+        const resultFileWsl = `/tmp/mpt_result_${stamp}.txt`;
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -4193,13 +4388,19 @@ window.addEventListener('message', event => {
                 continue;
             }
 
-            if (shell === 'git-bash' || shell === 'wsl') {
+            if (shell === 'git-bash') {
                 // bash: printf 不换行输出命令前缀，命令输出重定向到临时文件，再 cat 出来
                 tracedLines.push(`printf '$ ${line} => executed result: '`);
                 tracedLines.push(`${line} > "${resultFile}" 2>&1`);
                 tracedLines.push(`cat "${resultFile}"`);
                 tracedLines.push(`echo`);
                 tracedLines.push(`rm -f "${resultFile}"`);
+            } else if (shell === 'wsl') {
+                tracedLines.push(`printf '$ ${line} => executed result: '`);
+                tracedLines.push(`${line} > "${resultFileWsl}" 2>&1`);
+                tracedLines.push(`cat "${resultFileWsl}"`);
+                tracedLines.push(`echo`);
+                tracedLines.push(`rm -f "${resultFileWsl}"`);
             } else if (shell === 'powershell') {
                 tracedLines.push(`Write-Host -NoNewline '$ ${line} => executed result: '`);
                 tracedLines.push(`${line} > '${resultFile}' 2>&1`);
@@ -4207,8 +4408,9 @@ window.addEventListener('message', event => {
                 tracedLines.push(`Write-Host`);
                 tracedLines.push(`Remove-Item '${resultFile}' -ErrorAction SilentlyContinue`);
             } else if (shell === 'cmd') {
-                // cmd: <nul set /p= 输出不换行的前缀
-                tracedLines.push(`<nul set /p=$ ${line} => executed result: `);
+                // cmd: <nul set /p= 输出不换行的前缀；提示文本整体加引号，
+                // 否则文本中的 > / & 等字符会被 cmd 解析为重定向/连接符导致报错
+                tracedLines.push(`<nul set /p="$ ${line} => executed result: "`);
                 tracedLines.push(`${line} > "${resultFileCmd}" 2>&1`);
                 tracedLines.push(`type "${resultFileCmd}"`);
                 tracedLines.push(`echo.`);
@@ -4237,6 +4439,15 @@ window.addEventListener('message', event => {
         return result;
     }
 
+    /** Windows 路径 → WSL 路径（C:\a\b → /mnt/c/a/b）。非 Windows 盘符路径原样返回 */
+    private toWslPath(winPath: string): string {
+        const m = /^([A-Za-z]):\\\\?(.*)$/.exec(winPath || '');
+        if (!m) {
+            return winPath;
+        }
+        return '/mnt/' + m[1].toLowerCase() + '/' + m[2].replace(/\\/g, '/');
+    }
+
     private async executeShellCommand(cwd: string, command: string, onOutput?: (line: string) => void, shellOverride?: string, runKey?: string): Promise<{ success: boolean; output: string; error?: string; cancelled?: boolean }> {
         return new Promise((resolve) => {
             const timeout = this._commandTimeout * 1000;
@@ -4249,25 +4460,34 @@ window.addEventListener('message', event => {
             const fs = require('fs');
             const os = require('os');
             const path = require('path');
-            const tmpFile = path.join(os.tmpdir(), `mpt_cmd_${Date.now()}_${Math.random().toString(36).slice(2)}.sh`);
+            const stamp = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const tmpFile = path.join(os.tmpdir(), `mpt_cmd_${stamp}.sh`);
+            const tmpPsFile = path.join(os.tmpdir(), `mpt_cmd_${stamp}.ps1`);
             const tmpCmdFile = process.platform === 'win32'
-                ? path.join(os.tmpdir(), `mpt_cmd_${Date.now()}_${Math.random().toString(36).slice(2)}.cmd`)
+                ? path.join(os.tmpdir(), `mpt_cmd_${stamp}.cmd`)
                 : tmpFile;
 
             try {
                 if (shell === 'git-bash' || shell === 'wsl') {
                     fs.writeFileSync(tmpFile, command, 'utf8');
                 } else if (shell === 'cmd') {
-                    // cmd 不支持多行，将换行转为 & 连接
-                    const cmdContent = command.split('\n').filter(l => l.trim()).join(' & ');
+                    // .cmd 脚本本身支持多行：按行写入（避免把多行拼接成单行触发
+                    // cmd 8191 字符行长上限与 & 连接符解析问题）；bash 风格 # 注释行转为 rem
+                    const cmdContent = command.split('\n')
+                        .map(l => l.trim())
+                        .filter(l => l.length > 0)
+                        .map(l => l.startsWith('#') ? 'rem ' + l.slice(1) : l)
+                        .join('\r\n');
                     fs.writeFileSync(tmpCmdFile, `@echo off\r\n${cmdContent}\r\n`, 'utf8');
                 } else if (shell === 'powershell') {
-                    fs.writeFileSync(tmpFile, command, 'utf8');
+                    // powershell -File 只认 .ps1 扩展名，写 .sh 会执行失败
+                    fs.writeFileSync(tmpPsFile, command, 'utf8');
                 }
             } catch (e) {
                 // 写文件失败，回退到旧方式
-                if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
-                if (fs.existsSync(tmpCmdFile)) fs.unlinkSync(tmpCmdFile);
+                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+                try { if (fs.existsSync(tmpCmdFile)) fs.unlinkSync(tmpCmdFile); } catch { /* ignore */ }
+                try { if (fs.existsSync(tmpPsFile)) fs.unlinkSync(tmpPsFile); } catch { /* ignore */ }
                 return this.executeShellCommandLegacy(cwd, command, onOutput, shell).then(resolve);
             }
 
@@ -4281,11 +4501,13 @@ window.addEventListener('message', event => {
                     useShell = false;
                     break;
                 case 'powershell':
-                    shellArgs = ['-ExecutionPolicy', 'Bypass', '-File', tmpFile];
+                    // -NoProfile 跳过用户 Profile 加载，显著缩短 powershell 启动耗时
+                    shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tmpPsFile];
                     useShell = false;
                     break;
                 case 'wsl':
-                    shellArgs = ['-e', 'bash', tmpFile];
+                    // WSL 内 bash 无法读取 C:\... Windows 路径，需转换为 /mnt/c/... 形式
+                    shellArgs = ['-e', 'bash', this.toWslPath(tmpFile)];
                     useShell = false;
                     break;
             }
@@ -4321,17 +4543,20 @@ window.addEventListener('message', event => {
                 cwd,
                 env: { ...process.env, ...this.getEnvVariables() },
                 encoding: 'utf8',
-                shell: useShell
+                shell: useShell,
+                windowsHide: true
             });
 
             // 取消标记：句柄触发后置位，close 回调据此返回 cancelled 而非普通失败
             let cancelled = false;
+            let timedOut = false;
             const handle = { cancel: () => { cancelled = true; this.killChildTree(child); } };
             if (runKey) { this.registerCmdRun(runKey, handle); }
             const cleanupRun = () => { if (runKey) { this.unregisterCmdRun(runKey, handle); } };
 
-            // 设置超时（仅终止进程树；cancelled 标记只用于用户主动取消）
+            // 超时标记：仅终止进程树；close 回调据此返回超时错误而非伪成功
             const timer = setTimeout(() => {
+                timedOut = true;
                 try { this.killChildTree(child); } catch (e) { /* ignore */ }
             }, timeout);
 
@@ -4361,6 +4586,12 @@ window.addEventListener('message', event => {
                 });
             }
 
+            const cleanupTmpFiles = () => {
+                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
+                try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
+                try { if (fs.existsSync(tmpPsFile)) fs.unlinkSync(tmpPsFile); } catch (e) { /* ignore */ }
+            };
+
             child.on('close', (code: number | null) => {
                 clearTimeout(timer);
                 cleanupRun();
@@ -4369,8 +4600,7 @@ window.addEventListener('message', event => {
                 if (stderrBuf.trim() && onOutput) onOutput(stderrBuf.trim());
 
                 // 清理临时文件
-                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
-                try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
+                cleanupTmpFiles();
 
                 const allStdout = collectedStdout.join('').trim();
                 const allStderr = collectedStderr.join('').trim();
@@ -4382,7 +4612,13 @@ window.addEventListener('message', event => {
                         output: allStdout,
                         error: t('backend.cmdCancelled', this._language)
                     });
-                } else if (code !== 0 && code !== null) {
+                } else if (timedOut) {
+                    resolve({
+                        success: false,
+                        output: allStdout,
+                        error: `Command timed out after ${this._commandTimeout}s`
+                    });
+                } else if (code !== 0) {
                     resolve({
                         success: false,
                         output: allStdout,
@@ -4399,8 +4635,7 @@ window.addEventListener('message', event => {
             child.on('error', (error: Error) => {
                 clearTimeout(timer);
                 cleanupRun();
-                try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) { /* ignore */ }
-                try { if (fs.existsSync(tmpCmdFile) && tmpCmdFile !== tmpFile) fs.unlinkSync(tmpCmdFile); } catch (e) { /* ignore */ }
+                cleanupTmpFiles();
 
                 const errMsg = error.message;
                 if (errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
@@ -4542,8 +4777,8 @@ window.addEventListener('message', event => {
             this.saveProjectRowCommands();
         }
         this.saveAllConfig();
-        // 立即刷新 webview：Set Tab 列表与项目行按钮同步更新
-        this.updateWebview();
+        // 立即刷新 Set 表单与项目行按钮（轻量推送，避免整页重渲染）
+        this.postSettingsData();
     }
 
     /* ============ Projects view 项目行动态按钮命令 ============ */
@@ -4552,7 +4787,7 @@ window.addEventListener('message', event => {
         // 新增命令时盖当前默认 shell（保存后即为具体类型，后续改默认不影响已存命令）
         this._projectRowCommands.push({ id: this.newProjectRowCommandId(), alias: '', command: '', tip: '', shell: this._currentShell });
         this.saveProjectRowCommands();
-        this.updateWebview();
+        this.postSettingsData();
     }
 
     private handleUpdateProjectRowCommand(index: number, command: any): void {
@@ -4567,14 +4802,14 @@ window.addEventListener('message', event => {
             shell: typeof command.shell === 'string' && VALID_SHELLS.includes(command.shell) ? command.shell : cur.shell
         };
         this.saveProjectRowCommands();
-        this.updateWebview();
+        this.postSettingsData();
     }
 
     private handleDeleteProjectRowCommand(index: number): void {
         if (index < 0 || index >= this._projectRowCommands.length) { return; }
         this._projectRowCommands.splice(index, 1);
         this.saveProjectRowCommands();
-        this.updateWebview();
+        this.postSettingsData();
     }
 
     /**
@@ -4599,11 +4834,11 @@ window.addEventListener('message', event => {
         this.addLog('▶ [' + shellLabel + '] ' + cfg.alias + ' — ' + project.name + ' (' + project.path + ')', 'info', project.name);
 
         try {
-            // remote URL 仅在命令引用时解析（需要一次 git 调用）
+            // remote URL 仅在命令引用时解析（需要一次 git 调用）；用命令自身 shell 执行，保证语义一致
             const needsRemote = cfg.command.includes('${projectRemoteUrl}');
             let remoteUrl = '';
             if (needsRemote) {
-                remoteUrl = await this.getProjectRemoteUrl(project.path);
+                remoteUrl = await this.getProjectRemoteUrl(project.path, runShell);
                 if (!remoteUrl) {
                     this.addLog('✗ ' + t('backend.prcNoRemote', this._language), 'error', project.name);
                     return;
@@ -4618,9 +4853,11 @@ window.addEventListener('message', event => {
             const commandLines = resolved.split('\n').filter(c => c.trim());
             const finalLines = commandLines.map(c => this.resolveCommandVariables(c));
             const tracedCommand = this.injectCommandTracing(finalLines, runShell);
+            // 关键：执行必须用命令自带的 shell（runShell）——否则 cmd/powershell/wsl 的
+            // 追踪脚本会被错误的 shell 解释（如 bash 执行 <nul set /p=... 直接报错）
             const result = await this.executeShellCommand(project.path, tracedCommand, (line: string) => {
                 if (line.trim()) { this.addLog('│   ' + line, 'info', project.name); }
-            });
+            }, runShell);
             if (result.success) {
                 this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + cfg.alias + ' — ' + project.name, 'success', project.name);
             } else {
@@ -4631,10 +4868,16 @@ window.addEventListener('message', event => {
         }
     }
 
-    /** 读取项目 remote origin 地址并归一化为可浏览的 https URL（ssh/scp 形式 → https，去掉 .git 后缀） */
-    private async getProjectRemoteUrl(projectPath: string): Promise<string> {
+    /** 读取项目 remote origin 地址并归一化为可浏览的 https URL（ssh/scp 形式 → https，去掉 .git 后缀）。
+     *  shell：调用方命令自带的 shell 类型（与命令执行环境保持一致） */
+    private async getProjectRemoteUrl(projectPath: string, shell?: string): Promise<string> {
         try {
-            const result = await this.executeShellCommand(projectPath, 'git remote get-url origin', undefined, this._currentShell);
+            const result = await this.executeShellCommand(
+                projectPath,
+                'git remote get-url origin',
+                undefined,
+                shell && VALID_SHELLS.includes(shell) ? shell : this._currentShell
+            );
             if (!result.success) { return ''; }
             const url = (result.output || '').trim().split(/\r?\n/).pop() || '';
             return this.normalizeGitRemoteUrl(url);
@@ -4671,21 +4914,21 @@ window.addEventListener('message', event => {
     private async handleAddEnvVariable(variable: EnvVariable): Promise<void> {
         this._envVariables.push(variable);
         await this.saveEnvVariables();
-        this.updateWebview();
+        this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
     }
 
     private async handleUpdateEnvVariable(index: number, variable: EnvVariable): Promise<void> {
         if (index >= 0 && index < this._envVariables.length) {
             this._envVariables[index] = variable;
             await this.saveEnvVariables();
-            this.updateWebview();
+            this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
         }
     }
 
     private async handleDeleteEnvVariable(index: number): Promise<void> {
         this._envVariables.splice(index, 1);
         await this.saveEnvVariables();
-        this.updateWebview();
+        this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
     }
 
     private async saveCommands(): Promise<void> {
@@ -4722,7 +4965,8 @@ window.addEventListener('message', event => {
 
     private handleClearLogs(): void {
         this._logs = [];
-        this.updateWebview();
+        // 仅回发日志面板数据
+        this._view?.webview.postMessage({ command: 'updateLogs', logs: this._logs });
     }
 
     private async handleExportLog(content: string, _tabId: string): Promise<void> {
@@ -4790,6 +5034,27 @@ window.addEventListener('message', event => {
             }
         });
         this.postWorkbenchData();
+    }
+
+    /** 轻量刷新：只推送设置表单/PRC 列表/环境变量（Set 页签数据源），
+     *  不整页 updateWebview（后者会连带重发项目/日志/三棵命令树/workbench 数据，
+     *  造成全列表重渲染——点击变慢的根源之一） */
+    private postSettingsData(): void {
+        this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
+        this._view?.webview.postMessage({
+            command: 'updateSettings',
+            settings: {
+                commonParameters: this._settings.commonParameters,
+                autoRefresh: this._autoRefresh,
+                logRetention: this._logRetention,
+                concurrency: this._concurrency,
+                defaultShell: this._currentShell,
+                shortcutShell: this._shortcutShell,
+                commandTimeout: this._commandTimeout,
+                language: this._language,
+                projectRowCommands: this._projectRowCommands
+            }
+        });
     }
 
     /* ================= Workbench（新增 Tab，独立消息前缀，零侵入既有功能） ================= */

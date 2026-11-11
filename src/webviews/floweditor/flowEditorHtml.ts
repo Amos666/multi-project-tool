@@ -125,7 +125,7 @@ export const FLOW_EDITOR_BODY = `
                     <select id="wfLogFilter" onchange="wfApplyLogFilter()">
                         <option value="" data-i18n="wb.wf.allNodes">All nodes</option>
                     </select>
-                    <span class="wf-btn" style="margin-left:auto;padding:1px 6px" onclick="wfExportLog()" data-i18n-title="wb.wf.exportLog" title="Export log"><span class="codicon codicon-export" aria-hidden="true" style="font-size:11px;vertical-align:-2px"></span> <span data-i18n="wb.wf.exportLog">Export</span></span>
+                    <span class="wf-btn" style="margin-left:auto;padding:1px 6px" onclick="wfExportLog()" data-i18n-title="wb.wf.exportLog" title="Export log"><span class="codicon codicon-export" aria-hidden="true" style="font-size:11px"></span> <span data-i18n="wb.wf.exportLog">Export</span></span>
                     <span class="wf-btn" style="padding:1px 6px" onclick="wfClearOutput()" data-i18n="log.clear">Clear</span>
                 </div>
                 <div class="wf-output" id="wfOutput"></div>

@@ -587,9 +587,11 @@ test('JS+CSS: command rows expose cancel button and blink while executing', () =
     assert.ok(mvpSrcCache.includes("case 'cancelCommand':"), 'host routes cancelCommand');
     assert.ok(mvpSrcCache.includes("command: 'cmdRunState'"), 'host pushes run state');
     assert.ok(mvpSrcCache.includes("command: 'cmdRunStateSync'"), 'host syncs active run keys');
-    // 三条执行链路均传入 runKey（cmd 多项目循环 / shortcut / pyt python 子进程）
+    // 三条执行链路均传入 runKey（cmd 多项目循环 / shortcut / pyt python 子进程），
+    // 且 shell 执行器收到命令自身 shell（runShell）而非 undefined —— 修复非 git-bash
+    // 类型命令被默认 shell 解释执行而报错的 bug
     assert.ok(mvpSrcCache.includes("executeShellCommand(project.path, tracedCommand"), 'cmd loop executes shell');
-    assert.ok(mvpSrcCache.includes('undefined, runKey'), 'shell executor receives runKey');
+    assert.ok(mvpSrcCache.includes('}, runShell, runKey)'), 'shell executor receives command shell + runKey');
     assert.ok(mvpSrcCache.includes('this.executePythonTransform(selectedText, cmd.content, runKey)'), 'pyt transform receives runKey');
     // i18n 双语
     for (const k of ['cmd.cancelRun', 'backend.cmdCancelled']) {
@@ -616,6 +618,60 @@ test('JS: message protocol updateCommandTree drives both tabs', () => {
 test('JS: command rows keep run/edit/delete actions', () => {
     assert.ok(/runCommand\(tabId/.test(js) || js.includes("runCommand(tabId, nodeId)") || js.includes('runCommand('), 'run action');
     assert.ok(js.includes("t('cmd.run')") && js.includes("t('cmd.edit')") && js.includes("t('cmd.delete')"), 'row action titles');
+});
+
+// ---------- 五项修复：PRC shell 执行 / Python 速度 / 图标裁切 / 分支刷新 / 点击性能 ----------
+const scannerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'projectScanner.ts'), 'utf8');
+const gitUtilsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'gitUtils.ts'), 'utf8');
+
+test('fix①: PRC executes with its own shell and wsl/powershell/cmd scripts are shell-correct', () => {
+    // PRC 调用链传 runShell（此前漏传导致 cmd/powershell/wsl 命令被默认 shell 执行而报错）
+    assert.ok(mvpSrcCache.includes('getProjectRemoteUrl(project.path, runShell)'), 'remote url uses command shell');
+    assert.ok(mvpSrcCache.includes('}, runShell)'), 'PRC executor receives runShell');
+    // powershell -File 只认 .ps1；启动加 -NoProfile 提速
+    assert.ok(mvpSrcCache.includes('.ps1`'), 'powershell temp script uses .ps1 extension');
+    assert.ok(mvpSrcCache.includes("'-NoProfile', '-ExecutionPolicy', 'Bypass', '-File'"), 'powershell runs with -NoProfile');
+    // WSL：脚本路径转 /mnt/<drive>/...，追踪结果文件用 WSL 侧 /tmp
+    assert.ok(mvpSrcCache.includes('this.toWslPath(tmpFile)'), 'wsl script path converted');
+    assert.ok(mvpSrcCache.includes('resultFileWsl = `/tmp/mpt_result_'), 'wsl result file on wsl-side /tmp');
+    // cmd：多行 .cmd 脚本（不再 join(\' & \')），set /p 提示文本加引号防 > 重定向误解析
+    assert.ok(mvpSrcCache.includes('mpt_cmd_${stamp}.cmd'), 'cmd temp script uses .cmd extension');
+    assert.ok(!mvpSrcCache.includes("join(' & ')"), 'cmd lines no longer joined with &');
+    assert.ok(mvpSrcCache.includes('set /p="$'), 'cmd set /p prompt is quoted');
+    // 超时被杀的命令不再伪报成功
+    assert.ok(mvpSrcCache.includes('timedOut = true'), 'timeout tracked');
+});
+
+test('fix②: python runs via direct spawn with cached interpreter probe', () => {
+    assert.ok(mvpSrcCache.includes('private async resolvePythonCommand()'), 'interpreter resolver exists');
+    assert.ok(mvpSrcCache.includes('_pythonCmdCache'), 'probe result cached at process level');
+    assert.ok(mvpSrcCache.includes('cp.spawn(pythonCmd, [scriptPath]'), 'spawn python directly (no cmd.exe wrapper)');
+    assert.ok(mvpSrcCache.includes("cp.spawn(cmd, ['-c', ''], { windowsHide: true, stdio: 'ignore' })"), 'probe spawns hidden, pipe-free');
+    assert.ok(mvpSrcCache.includes('windowsHide: true'), 'spawn hidden (no console window flash)');
+});
+
+test('fix③: codicon icons not clipped and row action buttons stay pinned right', () => {
+    // codicon 字形下缘贴基线（descent=0）：去掉固定高度与负 vertical-align，标签截断排除图标 span
+    assert.ok(!css.includes('vertical-align: -2px') && !css.includes('vertical-align:-2px'), 'no negative vertical-align on icons');
+    assert.ok(!/\.tab-icon[^}]*height:/.test(css), 'tab icons have no fixed height');
+    assert.ok(css.includes('.tab > span:not(.tab-icon)'), 'text truncation excludes icon spans');
+    // 操作按钮吸附右缘（横向滚动时始终可见）
+    assert.ok(/\.command-item \.actions,[\s\S]{0,220}position: sticky;[\s\S]{0,40}right: 0;/.test(css), 'command actions sticky right');
+    assert.ok(/\.project-row-actions \{[\s\S]{0,400}position: sticky;[\s\S]{0,40}right: 0;/.test(css), 'project row actions sticky right');
+});
+
+test('fix④: branch reading is spawn-based, git located via VS Code git extension, HEAD watched', () => {
+    assert.ok(scannerSrc.includes('resolveGitPath'), 'scanner resolves git via locator');
+    assert.ok(gitUtilsSrc.includes('resolveGitPath'), 'gitUtils resolves git via locator');
+    assert.ok(!scannerSrc.includes('Promise.race'), 'no 15s race silently dropping branch data');
+    assert.ok(mvpSrcCache.includes('mapLimit(this._projects, 8'), 'bounded concurrency for project info');
+    assert.ok(mvpSrcCache.includes("createFileSystemWatcher('**/.git/HEAD')"), '.git/HEAD watcher for real-time branch refresh');
+    assert.ok(mvpSrcCache.includes('refreshPendingBranches()'), 'pending branch refresh handler');
+});
+
+test('fix⑤: granular updates replace full-webview echo on hot paths', () => {
+    assert.ok(mvpSrcCache.includes('private postSettingsData(): void'), 'light settings push helper');
+    assert.ok(mvpSrcCache.includes('webview 已本地更新勾选态'), 'selection toggle no longer echoes full refresh');
 });
 
 // ---------- i18n completeness ----------
@@ -737,15 +793,32 @@ test('i18n: every data-i18n key used in HTML exists in both languages', () => {
         provider.handleCancelCommand('pyt', 'not-running');
     });
 
-    await testAsync('host: updateWebview posts updateCommandTree for both tabs', async () => {
+    await testAsync('host: saveCommandTree granularly syncs only the modified tab', async () => {
         const posted = [];
         provider._view = { webview: { postMessage: (m) => posted.push(m), cspSource: 'vscode-resource:' } };
         await provider.handleSaveCommandTree('cmd', [{ id: 'a', type: 'command', name: 'A', content: 'x' }]);
         const treeMsgs = posted.filter(m => m.command === 'updateCommandTree');
-        const tabs = new Set(treeMsgs.map(m => m.tabId));
-        assert.ok(tabs.has('cmd'), 'posts cmd tree');
-        assert.ok(tabs.has('pyt'), 'posts pyt tree');
-        assert.ok(tabs.has('shortcut'), 'posts shortcut tree');
+        // 只回发被修改的树：整页 updateWebview 会连带重发项目/日志/其余树/workbench，
+        // 全列表重渲染是点击延迟的根源
+        assert.deepStrictEqual(treeMsgs.map(m => m.tabId), ['cmd'], 'posts only the modified tab tree');
+        assert.ok(!posted.some(m => m.command === 'updateProjects' || m.command === 'updateLogs' || m.command === 'updateWorkbenchData' || m.command === 'updateSettings'), 'no full-refresh echo');
+        provider._view = undefined;
+    });
+
+    await testAsync('fix⑤: selection toggles no longer echo full refresh (click latency fix)', async () => {
+        const posted = [];
+        provider._view = { webview: { postMessage: (m) => posted.push(m), cspSource: 'vscode-resource:' } };
+        provider._projects = [{ id: 'p1', name: 'P1', path: '/x/P1', isGitRepo: true, currentBranch: 'main' }];
+        provider.handleToggleProjectSelection('p1');
+        assert.strictEqual(posted.length, 0, 'toggle triggers no echo');
+        provider.handleSelectAllProjects();
+        assert.strictEqual(posted.length, 0, 'select all triggers no echo');
+        provider.handleDeselectAllProjects();
+        assert.strictEqual(posted.length, 0, 'deselect all triggers no echo');
+        // 后端状态仍正确维护（供命令执行使用）
+        assert.strictEqual(provider._selectedProjectIds.size, 0, 'backend selection state maintained');
+        provider.handleToggleProjectSelection('p1');
+        assert.ok(provider._selectedProjectIds.has('p1'), 'toggle updates backend state');
         provider._view = undefined;
     });
 
