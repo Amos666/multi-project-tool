@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import { Project, GitOperationResult } from '../models/project';
 import { LogManager } from './logManager';
+import { resolveGitPath } from './gitLocator';
 
 const logManager = LogManager.getInstance();
 
@@ -202,17 +203,67 @@ export class GitUtils {
         }
     }
 
+    /**
+     * git 命令执行：直接 spawn 已解析的 git 可执行文件（复用 VS Code 内置 git 扩展
+     * 的解析结果，宿主 PATH 缺 git 时依然可用），跳过 cmd.exe 中转以提升 Windows
+     * 下的执行速度并规避引号转义问题；命令含 shell 元字符（| && > 等）时回退
+     * shell 执行以保留原有语义。
+     */
     private static async executeGitCommand(cwd: string, command: string): Promise<{ success: boolean; output: string; error?: string }> {
-        return new Promise((resolve) => {
-            cp.exec(`git --no-pager ${command}`, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 10, timeout: 30000 }, (error, stdout, stderr) => {
-                // git 常把进度/远端信息写到 stderr,成功时也需并入输出以便日志展示完整详情
-                const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
-                if (error) {
-                    resolve({ success: false, output: combined, error: stderr.trim() || error.message });
-                } else {
-                    resolve({ success: true, output: combined });
-                }
+        const gitPath = await resolveGitPath();
+        const hasMeta = /[|&<>]/.test(command);
+        if (hasMeta) {
+            // 含管道/重定向等元字符的自定义命令：沿用 shell 执行语义
+            return new Promise((resolve) => {
+                cp.exec(`"${gitPath}" --no-pager ${command}`, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 10, timeout: 30000, windowsHide: true }, (error, stdout, stderr) => {
+                    const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+                    if (error) {
+                        resolve({ success: false, output: combined, error: stderr.trim() || error.message });
+                    } else {
+                        resolve({ success: true, output: combined });
+                    }
+                });
             });
+        }
+        const args = ['--no-pager', ...tokenizeCommand(command)];
+        return new Promise((resolve) => {
+            let stdout = '';
+            let stderr = '';
+            let settled = false;
+            let timer: NodeJS.Timeout;
+            const finish = (success: boolean, error?: string) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timer);
+                const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+                // git 常把进度/远端信息写到 stderr,成功时也需并入输出以便日志展示完整详情
+                resolve(success
+                    ? { success: true, output: combined }
+                    : { success: false, output: combined, error: stderr.trim() || error || `Exit code` });
+            };
+            let proc: cp.ChildProcess;
+            try {
+                proc = cp.spawn(gitPath, args, { cwd, windowsHide: true });
+            } catch (error: any) {
+                resolve({ success: false, output: '', error: error.message || String(error) });
+                return;
+            }
+            timer = setTimeout(() => {
+                try { proc.kill(); } catch { /* already exited */ }
+                finish(false, `git command timed out`);
+            }, 30000);
+            proc.on('error', (err) => finish(false, err.message));
+            if (proc.stdout) {
+                proc.stdout.setEncoding('utf8');
+                proc.stdout.on('data', (d: string) => { stdout += d; });
+            }
+            if (proc.stderr) {
+                proc.stderr.setEncoding('utf8');
+                proc.stderr.on('data', (d: string) => { stderr += d; });
+            }
+            proc.on('close', (code: number | null) => finish(code === 0));
         });
     }
 
@@ -342,4 +393,32 @@ export class GitUtils {
 
         return results;
     }
+}
+
+/**
+ * 简单命令行分词：按空白切分，双引号内的空白保留（如 commit -m "fix: a b"）。
+ * 仅供无 shell 元字符的命令使用。
+ */
+function tokenizeCommand(command: string): string[] {
+    const out: string[] = [];
+    let cur = '';
+    let inQuote = false;
+    for (const ch of command) {
+        if (ch === '"') {
+            inQuote = !inQuote;
+            continue;
+        }
+        if (!inQuote && /\s/.test(ch)) {
+            if (cur) {
+                out.push(cur);
+                cur = '';
+            }
+            continue;
+        }
+        cur += ch;
+    }
+    if (cur) {
+        out.push(cur);
+    }
+    return out;
 }

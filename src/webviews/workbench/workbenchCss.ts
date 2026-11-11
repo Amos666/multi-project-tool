@@ -58,7 +58,7 @@ export const WORKBENCH_CSS = `
     transition: all 0.15s ease; width: calc(100% - 20px);
 }
 .wf-open-btn:hover { background-color: var(--brand-primary); color: var(--brand-text-inverse); }
-.wf-open-btn svg, .wf-open-btn .codicon { width: 15px; height: 15px; font-size: 15px; flex: none; }
+.wf-open-btn svg, .wf-open-btn .codicon { width: 15px; font-size: 15px; flex: none; }
 .wf-side-hint { font-size: 10px; color: var(--brand-text-muted); text-align: center; padding: 0 12px 2px; }
 .wf-main { flex: 1; display: flex; min-height: 0; }
 .wf-left {
@@ -83,8 +83,10 @@ export const WORKBENCH_CSS = `
 .wf-btn.danger:hover { color: var(--state-error); border-color: var(--state-error); }
 .wf-btn.toggled { background-color: var(--brand-primary); color: var(--brand-text-inverse); border-color: var(--brand-primary); }
 .wf-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.wf-btn svg, .wf-btn .codicon { display: block; width: 13px; height: 13px; font-size: 13px; }
-.wb-icon { vertical-align: -2px; flex: none; }
+.wf-btn svg, .wf-btn .codicon { display: block; width: 13px; font-size: 13px; }
+/* wb-icon 不做负 vertical-align：codicon 字形下缘贴基线（descent=0），
+   向下平移会在 overflow:hidden 容器内裁掉字形下缘 */
+.wb-icon { flex: none; }
 .wb-icon.codicon { font-size: 12px; }
 .wf-toolbar select {
     background-color: var(--brand-surface-raised); color: var(--brand-text);
