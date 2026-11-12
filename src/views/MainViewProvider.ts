@@ -8,6 +8,7 @@ import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore'
 import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
+import { resolveBashPath } from '../utils/gitLocator';
 import { WorkbenchStore } from '../utils/workbenchStore';
 import { WorkflowEngine, WorkflowEngineEvent, WorkflowEngineEventEnvelope } from '../utils/workflowEngine';
 import { Workflow, RunHistoryEntry, RunResult, HistoryNodeResult, WfLogEntry } from '../webviews/workbench/workbenchTypes';
@@ -58,6 +59,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _projects: Project[] = [];
     /** 全量加载进行中标志：期间分支局部刷新挂起，避免发布"无分支"中间态 */
     private _loadingProjects = false;
+    /** git-bash 的 bash.exe 绝对路径（构造时异步预解析，之后同步可用；回退 'bash'） */
+    private _bashPath = 'bash';
     private _selectedProjectIds: Set<string> = new Set();
     private _logs: LogEntry[] = [];
     private _txtCmdLogs: LogEntry[] = [];
@@ -97,6 +100,9 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     constructor(private readonly _extensionUri: vscode.Uri, private readonly _globalState?: vscode.Memento) {
         this._projectScanner = ProjectScanner.getInstance();
+        // 预解析 Git Bash 的 bash.exe 绝对路径（进程级缓存）：避免执行时 PATH 裸 bash
+        // 命中 Windows 的 WSL 启动器导致每次点击数秒延迟
+        void resolveBashPath().then(p => { this._bashPath = p; });
         this._flowEditor = new FlowEditorProvider(
             _extensionUri,
             () => ({
@@ -4628,7 +4634,9 @@ window.addEventListener('message', event => {
             let commandName: string;
             switch (shell) {
                 case 'git-bash':
-                    commandName = 'bash';  // PATH 中是 bash 或 bash.exe
+                    // 确定性定位 Git Bash 的 bash.exe：PATH 中的裸 bash 在 Windows 上
+                    // 极易命中 System32 的 WSL 启动器（每次执行拉起整个 WSL，数秒延迟）
+                    commandName = this._bashPath || 'bash';
                     break;
                 case 'cmd':
                     commandName = process.env.ComSpec || 'cmd.exe';
@@ -5227,16 +5235,18 @@ window.addEventListener('message', event => {
         // 告知面板新运行的 runId（面板事件按 runId 过滤，避免污染其他运行详情视图）
         this._flowEditor.postMessage({ command: 'runPhase', phase: 'running', runId: this._activeRun.id, engineBusy: true });
         this.postRunState();
-        await this._workflowEngine.run(workflow, this.buildRunOptions(folders[0].uri.fsPath, runShell, runEnv), (event) => this.onRunEvent(this._activeRun!, event));
+        await this._workflowEngine.run(workflow, await this.buildRunOptions(folders[0].uri.fsPath, runShell, runEnv), (event) => this.onRunEvent(this._activeRun!, event));
     }
 
-    private buildRunOptions(cwd: string, shell: string, env: string): any {
+    private async buildRunOptions(cwd: string, shell: string, env: string): Promise<any> {
         return {
             cwd,
             shell,
             env,
             commonParameters: this._settings.commonParameters,
             envVariables: this.getEnvVariables(),
+            // git-bash 确定性定位 bash.exe（PATH 裸 bash 在 Windows 可能命中 WSL 启动器，数秒延迟）
+            bashPath: await resolveBashPath(),
             // 工作流 Fork/Join 的并行度由画布设计决定，不受批量执行的 Concurrency 设置约束
             maxParallel: 32,
             runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log),
@@ -5376,7 +5386,7 @@ window.addEventListener('message', event => {
         // 面板跟随切换到续跑实例的执行详情（面板正监控该实例时为幂等操作，视图不重建）
         this._flowEditor.postMessage({ command: 'openRunDetail', run: this.buildRunDetail(inst) });
         const resumeStates = { ...inst.states };
-        await engine.run(inst.workflow, this.buildRunOptions(folders[0].uri.fsPath, inst.shell, inst.env), (event) => this.onRunEvent(inst, event), resumeStates);
+        await engine.run(inst.workflow, await this.buildRunOptions(folders[0].uri.fsPath, inst.shell, inst.env), (event) => this.onRunEvent(inst, event), resumeStates);
     }
 
     /** 停止引擎当前运行：runId 指定时仅当其为活动运行才停止（失败暂停实例的终局走 workflowCancel） */

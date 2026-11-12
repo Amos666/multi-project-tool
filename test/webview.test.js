@@ -664,7 +664,9 @@ test('fix④: branch reading is spawn-based, git located via VS Code git extensi
     assert.ok(scannerSrc.includes('resolveGitPath'), 'scanner resolves git via locator');
     assert.ok(gitUtilsSrc.includes('resolveGitPath'), 'gitUtils resolves git via locator');
     assert.ok(!scannerSrc.includes('Promise.race'), 'no 15s race silently dropping branch data');
-    assert.ok(mvpSrcCache.includes('mapLimit(this._projects, 8'), 'bounded concurrency for project info');
+    assert.ok(mvpSrcCache.includes('mapLimit(scanned, 8'), 'bounded concurrency for project info');
+    assert.ok(mvpSrcCache.includes('this._projects = enriched'), 'branch-less scan result never published mid-load (no-branch flicker fix)');
+    assert.ok(mvpSrcCache.includes('updateProjectsPartial'), 'partial project refresh message');
     assert.ok(mvpSrcCache.includes("createFileSystemWatcher('**/.git/HEAD')"), '.git/HEAD watcher for real-time branch refresh');
     assert.ok(mvpSrcCache.includes('refreshPendingBranches()'), 'pending branch refresh handler');
 });
@@ -673,6 +675,65 @@ test('fix⑤: granular updates replace full-webview echo on hot paths', () => {
     assert.ok(mvpSrcCache.includes('private postSettingsData(): void'), 'light settings push helper');
     assert.ok(mvpSrcCache.includes('webview 已本地更新勾选态'), 'selection toggle no longer echoes full refresh');
 });
+
+// ---------- round 2: resume/cancel affordances, per-content h-scroll, no-branch flicker, exec latency ----------
+const gitLocatorSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'gitLocator.ts'), 'utf8');
+const engineSrcCache = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'workflowEngine.ts'), 'utf8');
+const wbJsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'webviews', 'workbench', 'workbenchJs.ts'), 'utf8');
+const flowHtmlSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'webviews', 'floweditor', 'flowEditorHtml.ts'), 'utf8');
+
+test('r2-g1: failed-paused resume/cancel reachable from toolbar, sidebar and follow-switch', () => {
+    // 面板工具栏常驻 Resume/Cancel（failed-paused 时显示，由 wfSyncModeUI 控制）
+    assert.ok(flowHtmlSrc.includes('wfResumeBarBtn') && flowHtmlSrc.includes('wfCancelBarBtn'), 'toolbar resume/cancel buttons exist');
+    assert.ok(flowJs.includes("resumeBar.style.display = failedPaused ? '' : 'none'"), 'toolbar resume shown during failed-paused');
+    // 侧边栏"正在运行"每项直接 Resume/Cancel/Stop（不打开面板也可操作）
+    assert.ok(wbJsSrc.includes('function wfResumeRun(') && wbJsSrc.includes('function wfCancelRunById(') && wbJsSrc.includes('function wfStopRun('), 'sidebar per-run resume/cancel/stop actions');
+    // 宿主：Resume 后推送 openRunDetail 让面板跟随切换；workflowStop 支持 runId 定位
+    assert.ok(mvpSrcCache.includes("command: 'openRunDetail'"), 'host posts openRunDetail on resume');
+    assert.ok(flowJs.includes("m.command === 'openRunDetail'"), 'panel handles openRunDetail');
+    assert.ok(mvpSrcCache.includes('private handleWorkflowStop(runId?: string)'), 'workflowStop accepts runId');
+    assert.ok(mvpSrcCache.includes("case 'workflowStop': this.handleWorkflowStop(message.runId)"), 'workflowStop routes runId');
+});
+
+test('r2-g2: command list h-scroll confined to command content preview', () => {
+    // 列表级横向滚动禁用；命令内容预览自身成为滚动容器（别名/徽章/按钮固定）
+    assert.ok(/\.command-list \{[\s\S]{0,400}overflow-x: hidden;/.test(css), 'list-level horizontal scroll disabled');
+    assert.ok(/\.command-item \.cmd-content-preview \{[\s\S]{0,400}overflow-x: auto;/.test(css), 'preview itself scrolls horizontally');
+    // 拖拽平移 + 拖拽后吞掉 click 防误触编辑
+    assert.ok(mvpSrcCache.includes("closest('.cmd-content-preview')"), 'drag-to-scroll on preview');
+    assert.ok(mvpSrcCache.includes('const swallow'), 'click suppressed after drag');
+});
+
+test('r2-g3: no-branch flicker eliminated via one-shot publish + partial refresh', () => {
+    // loadProjects：enrich 完成后一次性赋值，扫描中间态不发布
+    assert.ok(mvpSrcCache.includes('const scanned = await this._projectScanner.scanWorkspace'), 'scan into local var');
+    assert.ok(mvpSrcCache.includes('this._projects = enriched'), 'one-shot assignment after enrichment');
+    assert.ok(mvpSrcCache.includes('this._loadingProjects'), 'loading flag suspends branch refresh');
+    // git 操作后局部刷新受影响项目（不再全量重扫描+整页重发）
+    assert.ok(mvpSrcCache.includes('private async refreshProjectsByPaths'), 'targeted project refresh helper');
+    const gitOpStart = mvpSrcCache.indexOf('private async executeGitOperation');
+    const gitOpTail = mvpSrcCache.slice(gitOpStart, mvpSrcCache.indexOf('private async', gitOpStart + 10));
+    assert.ok(gitOpTail.includes('refreshProjectsByPaths(selectedProjects.map(p => p.path))'), 'git ops refresh only affected projects');
+    assert.ok(!gitOpTail.includes('await this.loadProjects();'), 'no full reload after git ops (explicit refresh button keeps it)');
+    // 前端行级修补：按 data-project-id 就地更新，不重建列表
+    assert.ok(mvpSrcCache.includes("case 'updateProjectsPartial': patchProjects(message.projects || [])"), 'partial patch message handled');
+    assert.ok(mvpSrcCache.includes('item.dataset.projectId = p.id'), 'row carries data-project-id anchor');
+    assert.ok(mvpSrcCache.includes("'.project-item[data-project-id=\"' + p.id + '\"]'"), 'patch targets row by id');
+});
+
+test('r2-g4: git-bash resolved deterministically (no WSL bash fallback latency)', () => {
+    // bash.exe 定位器：从 git.exe 推导 + 常见位置探测 + 回退
+    assert.ok(gitLocatorSrc.includes('export async function resolveBashPath'), 'bash locator exists');
+    assert.ok(gitLocatorSrc.includes("path.join(root, 'bin', 'bash.exe')"), 'derive bash.exe from git root');
+    // 宿主：构造时预解析，executeShellCommand 与引擎均使用注入路径
+    assert.ok(mvpSrcCache.includes('void resolveBashPath().then(p => { this._bashPath = p; })'), 'bash path pre-resolved at construction');
+    assert.ok(mvpSrcCache.includes("commandName = this._bashPath || 'bash'"), 'execShellCommand uses resolved bash');
+    assert.ok(mvpSrcCache.includes('bashPath: await resolveBashPath()'), 'engine options carry bashPath');
+    assert.ok(engineSrcCache.includes('options.bashPath || \'bash\''), 'engine git-bash uses injected bash path');
+    // powershell 启动跳过用户 Profile
+    assert.ok(engineSrcCache.includes("'-NoProfile'"), 'engine powershell skips profile');
+});
+
 
 // ---------- i18n completeness ----------
 test('i18n: all tree keys exist in en and zh', () => {

@@ -18,6 +18,8 @@ export interface WorkflowEngineOptions {
     envVariables: Record<string, string>;
     /** 并行上限 */
     maxParallel: number;
+    /** git-bash 的 bash.exe 绝对路径（宿主解析后注入；PATH 中的裸 bash 在 Windows 上可能命中 WSL 启动器导致数秒延迟） */
+    bashPath?: string;
     /** ref 节点执行器：由宿主提供，按 (tab, commandId) 执行各页签已保存命令，返回成败；param 承载节点参数（如 git 分支名/提交信息） */
     runRef?: (tab: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void, param?: string) => Promise<boolean>;
     /** vscode 节点执行器：由宿主提供，执行任意插件注册的 VSCode 命令（vscode.commands.executeCommand）；argsText 为参数原文（JSON 数组或纯文本，已完成变量替换） */
@@ -517,7 +519,7 @@ export class WorkflowEngine {
             try {
                 if (shell === 'git-bash' || shell === 'wsl') {
                     fs.writeFileSync(tmpSh, command, 'utf8');
-                    bin = 'bash';
+                    bin = shell === 'git-bash' ? (options.bashPath || 'bash') : 'bash';
                     args = shell === 'wsl' ? [] : [tmpSh];
                 } else if (shell === 'cmd') {
                     const cmdContent = command.split('\n').filter(l => l.trim()).join(' & ');
@@ -526,8 +528,9 @@ export class WorkflowEngine {
                     args = ['/c', tmpCmd];
                 } else if (shell === 'powershell') {
                     fs.writeFileSync(tmpPs, command, 'utf8');
+                    // -NoProfile 跳过用户 profile 加载（每次节点执行可省数百 ms~数秒）
                     bin = 'powershell.exe';
-                    args = ['-ExecutionPolicy', 'Bypass', '-File', tmpPs];
+                    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tmpPs];
                 } else {
                     fs.writeFileSync(tmpSh, command, 'utf8');
                     bin = shell;
