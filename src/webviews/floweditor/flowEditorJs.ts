@@ -103,6 +103,8 @@ window.addEventListener('message', function (event) {
     else if (m.command === 'workflowEvent') { wfOnEvent(m.event); }
     else if (m.command === 'workflowRunStarted') { wfOnRunStarted(m.workflow, m.runId); }
     else if (m.command === 'runPhase') { wfOnRunPhase(m.phase, m.durationMs, m.runId, m.engineBusy); }
+    /* 宿主推送运行详情（如侧边栏直接 Resume 时让面板跟随切换到该运行的执行详情） */
+    else if (m.command === 'openRunDetail') { wfShowRunDetail(m.run); }
     else if (m.command === 'flowEditorAction') { wfApplyAction(m.action); }
     else if (m.command === 'vscodeCommandList') { wfFillCommandList(m.commands); }
 });
@@ -196,6 +198,12 @@ function wfSyncModeUI() {
     var stop = wbEl('wfStopBtn');
     var back = wbEl('wfBackBtn');
     if (stop) { stop.style.display = (WF.mode === 'run' && WF.runPhase === 'running') ? '' : 'none'; }
+    /* 失败暂停：工具栏常驻 Resume/Cancel（与节点上方浮动操作条等价，入口更醒目） */
+    var failedPaused = (WF.mode === 'run' && WF.runPhase === 'failed-paused');
+    var resumeBar = wbEl('wfResumeBarBtn');
+    var cancelBar = wbEl('wfCancelBarBtn');
+    if (resumeBar) { resumeBar.style.display = failedPaused ? '' : 'none'; }
+    if (cancelBar) { cancelBar.style.display = failedPaused ? '' : 'none'; }
     /* Resume/Cancel 按钮移至画布节点上方操作条，由 wfShowNodeActions/wfHideNodeActions 管理 */
     if (back) { back.style.display = edit ? 'none' : ''; }
     var badge = wbEl('wfModeBadge');

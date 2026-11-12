@@ -229,10 +229,23 @@ function renderRunningList() {
     box.innerHTML = runs.map(function (r) {
         var failedPaused = r.phase === 'failed-paused';
         var phaseLabel = failedPaused ? t('wb.wf.failedPaused') : t('wb.wf.stRunning');
+        /* 每项常驻操作：失败暂停 → Resume/Cancel；运行中 → Stop（引擎同一时刻仅一个运行） */
+        var actions = '';
+        if (failedPaused) {
+            actions = '<span class="wf-run-act" onclick="event.stopPropagation();wfResumeRun(\\'' + r.id + '\\')" title="' + wbEsc(t('wb.wf.resume')) + '"><span class="codicon codicon-play" aria-hidden="true" style="color:var(--state-success)"></span></span>' +
+                '<span class="wf-run-act" onclick="event.stopPropagation();wfCancelRunById(\\'' + r.id + '\\')" title="' + wbEsc(t('wb.wf.cancelRun')) + '"><span class="codicon codicon-debug-stop" aria-hidden="true" style="color:var(--state-error)"></span></span>';
+        } else {
+            actions = '<span class="wf-run-act" onclick="event.stopPropagation();wfStopRun(\\'' + r.id + '\\')" title="' + wbEsc(t('wb.wf.stop')) + '"><span class="codicon codicon-debug-stop" aria-hidden="true" style="color:var(--brand-text-muted)"></span></span>';
+        }
         return '<div class="wf-list-item" onclick="wfOpenRun(\\'' + r.id + '\\')" title="' + wbEsc(r.name) + '">' +
-            (failedPaused ? errIcon : runIcon) + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(r.name) + ' · ' + wbEsc(phaseLabel) + '</span></div>';
+            (failedPaused ? errIcon : runIcon) + ' <span style="overflow:hidden;text-overflow:ellipsis">' + wbEsc(r.name) + ' · ' + wbEsc(phaseLabel) + '</span>' +
+            '<span class="wf-run-acts">' + actions + '</span></div>';
     }).join('');
 }
+/* 侧边栏直接续跑/取消/停止：无需打开面板，宿主按 runId 定位实例 */
+function wfResumeRun(runId) { vscode.postMessage({ command: 'workflowResume', runId: runId }); }
+function wfCancelRunById(runId) { vscode.postMessage({ command: 'workflowCancel', runId: runId }); }
+function wfStopRun(runId) { vscode.postMessage({ command: 'workflowStop', runId: runId }); }
 function wfOpenRun(runId) { wfRelay({ type: 'openRun', runId: runId }); }
 /* ---- 历史记录：双击只读查看详情 / 单项删除 / 全部清空 ---- */
 function renderHistoryList() {

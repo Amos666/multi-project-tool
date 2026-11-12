@@ -155,6 +155,11 @@ export const WORKBENCH_CSS = `
 .wf-list-item .wf-item-rm:hover { color: var(--state-error); }
 .wf-list-item .wf-item-rm .codicon { font-size: 12px; }
 .wf-list-item.dim { color: var(--brand-text-muted); cursor: default; }
+/* "正在运行"每项常驻操作（失败暂停 Resume/Cancel · 运行中 Stop）：靠右固定，不随文字截断 */
+.wf-list-item .wf-run-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.wf-list-item .wf-run-act { display: inline-flex; align-items: center; padding: 1px 2px; border-radius: var(--radius-sm); cursor: pointer; color: var(--brand-text-muted); }
+.wf-list-item .wf-run-act:hover { background-color: var(--brand-surface-hover); color: var(--brand-text); }
+.wf-list-item .wf-run-act .codicon { font-size: 12px; flex: none; }
 
 /* SVG nodes */
 .wf-node rect.body { fill: var(--brand-surface-raised); stroke: var(--brand-border); stroke-width: 1.5; cursor: grab; }

@@ -14,6 +14,9 @@ export const FLOW_EDITOR_BODY = `
                 <span class="wf-mode-badge" id="wfModeBadge" style="display:none"></span>
                 <button class="wf-btn primary" id="wfRunBtn" onclick="wfRun()" data-i18n-title="wb.wf.run" title="Run"><span class="codicon codicon-play" aria-hidden="true"></span></button>
                 <button class="wf-btn" id="wfStopBtn" onclick="wfStop()" data-i18n-title="wb.wf.stop" title="Stop"><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
+                <!-- 失败暂停：工具栏常驻 Resume/Cancel（与节点上方浮动操作条等价，入口更醒目） -->
+                <button class="wf-btn primary" id="wfResumeBarBtn" style="display:none" onclick="wfResume()" data-i18n-title="wb.wf.resume" title="Resume"><span class="codicon codicon-play" aria-hidden="true"></span><span data-i18n="wb.wf.resume">Resume</span></button>
+                <button class="wf-btn danger" id="wfCancelBarBtn" style="display:none" onclick="wfCancelRun()" data-i18n-title="wb.wf.cancelRun" title="Cancel"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span data-i18n="wb.wf.cancelRun">Cancel</span></button>
                 <button class="wf-btn" id="wfLinkBtn" onclick="wfToggleLink()" data-i18n-title="wb.wf.link" title="Link mode"><span class="codicon codicon-link" aria-hidden="true"></span></button>
                 <button class="wf-btn" id="wfSaveBtn" onclick="wfSave()" data-i18n-title="wb.wf.save" title="Save"><span class="codicon codicon-save" aria-hidden="true"></span></button>
                 <button class="wf-btn danger" id="wfClearBtn" onclick="wfClear()" data-i18n-title="wb.wf.clear" title="Clear canvas"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
