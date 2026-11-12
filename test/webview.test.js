@@ -634,8 +634,8 @@ test('fix①: PRC executes with its own shell and wsl/powershell/cmd scripts are
     // WSL：脚本路径转 /mnt/<drive>/...，追踪结果文件用 WSL 侧 /tmp
     assert.ok(mvpSrcCache.includes('this.toWslPath(tmpFile)'), 'wsl script path converted');
     assert.ok(mvpSrcCache.includes('resultFileWsl = `/tmp/mpt_result_'), 'wsl result file on wsl-side /tmp');
-    // cmd：多行 .cmd 脚本（不再 join(\' & \')），set /p 提示文本加引号防 > 重定向误解析
-    assert.ok(mvpSrcCache.includes('mpt_cmd_${stamp}.cmd'), 'cmd temp script uses .cmd extension');
+    // cmd：多行临时脚本（不再 join(\' & \')），set /p 提示文本加引号防 > 重定向误解析；扩展名可配置（默认 cmd）
+    assert.ok(mvpSrcCache.includes('mpt_cmd_${stamp}.${this._cmdScriptExt}'), 'cmd temp script uses configurable extension');
     assert.ok(!mvpSrcCache.includes("join(' & ')"), 'cmd lines no longer joined with &');
     assert.ok(mvpSrcCache.includes('set /p="$'), 'cmd set /p prompt is quoted');
     // 超时被杀的命令不再伪报成功
@@ -732,6 +732,29 @@ test('r2-g4: git-bash resolved deterministically (no WSL bash fallback latency)'
     assert.ok(engineSrcCache.includes('options.bashPath || \'bash\''), 'engine git-bash uses injected bash path');
     // powershell 启动跳过用户 Profile
     assert.ok(engineSrcCache.includes("'-NoProfile'"), 'engine powershell skips profile');
+});
+
+// ---------- round 3: corporate security policy blocks .cmd temp scripts ----------
+const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+test('r3: cmd temp script extension is configurable (settings.json only) with block hint', () => {
+    // settings.json 配置项（非界面）：默认 cmd、白名单枚举
+    const prop = pkgJson.contributes.configuration.properties['multi-project-tool.cmdScriptExtension'];
+    assert.ok(prop, 'package.json exposes multi-project-tool.cmdScriptExtension');
+    assert.strictEqual(prop.default, 'cmd', 'default extension stays cmd');
+    assert.ok(Array.isArray(prop.enum) && prop.enum.includes('cmd') && prop.enum.includes('bat'), 'enum limits to cmd/bat');
+    // 宿主：读取配置 + 合法性校验 + 动态后缀（不再硬编码 .cmd）
+    assert.ok(mvpSrcCache.includes("getConfiguration('multi-project-tool').get<string>('cmdScriptExtension'"), 'host reads the setting');
+    assert.ok(mvpSrcCache.includes('/^[A-Za-z0-9]{1,8}$/.test(raw'), 'extension sanitized (1-8 alphanumerics)');
+    assert.ok(mvpSrcCache.includes('`mpt_cmd_${stamp}.${this._cmdScriptExt}`'), 'temp cmd script uses configurable extension');
+    assert.ok(mvpSrcCache.includes('cmdScriptExt: this._cmdScriptExt'), 'engine options carry cmdScriptExt');
+    assert.ok(engineSrcCache.includes("options.cmdScriptExt || 'cmd'"), 'engine uses configurable extension');
+    assert.ok(mvpSrcCache.includes("affectsConfiguration('multi-project-tool.cmdScriptExtension')"), 'live reload on settings change');
+    // 安全拦截提示：检测特征 + 指引（改扩展名 / 换 git-bash）
+    assert.ok(engineSrcCache.includes('SECURITY_BLOCK_PATTERN'), 'block detection pattern');
+    assert.ok(engineSrcCache.includes('multi-project-tool.cmdScriptExtension') && engineSrcCache.includes('git-bash'), 'hint points to setting and git-bash alternative');
+    assert.ok(mvpSrcCache.includes('detectSecurityBlock(allStdout'), 'host detects block from output');
+    assert.ok(engineSrcCache.includes('detectSecurityBlock(allOutput)'), 'engine detects block from output');
 });
 
 

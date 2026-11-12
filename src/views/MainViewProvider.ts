@@ -9,8 +9,8 @@ import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
 import { resolveBashPath } from '../utils/gitLocator';
+import { WorkflowEngine, WorkflowEngineEvent, WorkflowEngineEventEnvelope, detectSecurityBlock, cmdScriptBlockHint } from '../utils/workflowEngine';
 import { WorkbenchStore } from '../utils/workbenchStore';
-import { WorkflowEngine, WorkflowEngineEvent, WorkflowEngineEventEnvelope } from '../utils/workflowEngine';
 import { Workflow, RunHistoryEntry, RunResult, HistoryNodeResult, WfLogEntry } from '../webviews/workbench/workbenchTypes';
 
 /** 进行中的运行实例：跟踪状态/日志，支撑"正在运行"分组与失败续跑 */
@@ -61,6 +61,8 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     private _loadingProjects = false;
     /** git-bash 的 bash.exe 绝对路径（构造时异步预解析，之后同步可用；回退 'bash'） */
     private _bashPath = 'bash';
+    /** cmd 临时脚本扩展名（默认 'cmd'；仅 settings.json 可改，界面不暴露——公司安全策略禁止执行 .cmd 时可改为 'bat'） */
+    private _cmdScriptExt = 'cmd';
     private _selectedProjectIds: Set<string> = new Set();
     private _logs: LogEntry[] = [];
     private _txtCmdLogs: LogEntry[] = [];
@@ -103,6 +105,12 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         // 预解析 Git Bash 的 bash.exe 绝对路径（进程级缓存）：避免执行时 PATH 裸 bash
         // 命中 Windows 的 WSL 启动器导致每次点击数秒延迟
         void resolveBashPath().then(p => { this._bashPath = p; });
+        // settings.json 修改 cmd 临时脚本扩展名后即时生效（无需重载窗口）
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('multi-project-tool.cmdScriptExtension')) {
+                this.loadCmdScriptExt();
+            }
+        });
         this._flowEditor = new FlowEditorProvider(
             _extensionUri,
             () => ({
@@ -205,6 +213,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         this._concurrency = config.settings.concurrency;
         this._commandTimeout = config.settings.commandTimeout;
         this._language = (config.settings.language as Language) || 'en';
+        this.loadCmdScriptExt();
         // 项目行按钮命令：插件级全局存储（context.globalState），所有工作区共享一份配置
         const stored = this._globalState
             ? this._globalState.get<ProjectRowCommand[]>(MainViewProvider.PRC_STATE_KEY)
@@ -221,6 +230,18 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             // 全新安装：按当前语言播种两条默认命令（打开目录 / 打开 GitHub 页面）
             this._projectRowCommands = this.defaultProjectRowCommands();
             this.saveProjectRowCommands();
+        }
+    }
+
+    /** 读取 cmd 临时脚本扩展名（仅 settings.json 配置，界面不暴露）：
+     *  公司安全策略禁止执行 .cmd 脚本时可改为 'bat'，命令本身不受影响 */
+    private loadCmdScriptExt(): void {
+        try {
+            const raw = vscode.workspace.getConfiguration('multi-project-tool').get<string>('cmdScriptExtension', 'cmd');
+            // 合法性校验：1-8 位字母/数字，防止把任意字符拼进文件名或路径
+            this._cmdScriptExt = /^[A-Za-z0-9]{1,8}$/.test(raw || '') ? (raw as string).toLowerCase() : 'cmd';
+        } catch {
+            this._cmdScriptExt = 'cmd';
         }
     }
 
@@ -4575,7 +4596,7 @@ window.addEventListener('message', event => {
             const tmpFile = path.join(os.tmpdir(), `mpt_cmd_${stamp}.sh`);
             const tmpPsFile = path.join(os.tmpdir(), `mpt_cmd_${stamp}.ps1`);
             const tmpCmdFile = process.platform === 'win32'
-                ? path.join(os.tmpdir(), `mpt_cmd_${stamp}.cmd`)
+                ? path.join(os.tmpdir(), `mpt_cmd_${stamp}.${this._cmdScriptExt}`)
                 : tmpFile;
 
             try {
@@ -4732,10 +4753,16 @@ window.addEventListener('message', event => {
                         error: `Command timed out after ${this._commandTimeout}s`
                     });
                 } else if (code !== 0) {
+                    // cmd 临时脚本被公司安全策略拦截时给出配置指引（并附在 error 中）
+                    let blockHint = '';
+                    if (shell === 'cmd' && detectSecurityBlock(allStdout + '\n' + allStderr)) {
+                        blockHint = cmdScriptBlockHint(this._cmdScriptExt);
+                        if (onOutput) { onOutput(blockHint); }
+                    }
                     resolve({
                         success: false,
                         output: allStdout,
-                        error: allStderr || `Exit code: ${code}`
+                        error: (allStderr || `Exit code: ${code}`) + (blockHint ? '\n' + blockHint : '')
                     });
                 } else {
                     resolve({
@@ -5247,6 +5274,8 @@ window.addEventListener('message', event => {
             envVariables: this.getEnvVariables(),
             // git-bash 确定性定位 bash.exe（PATH 裸 bash 在 Windows 可能命中 WSL 启动器，数秒延迟）
             bashPath: await resolveBashPath(),
+            // cmd 临时脚本扩展名（settings.json 的 multi-project-tool.cmdScriptExtension，安全策略拦截 .cmd 时可改 bat）
+            cmdScriptExt: this._cmdScriptExt,
             // 工作流 Fork/Join 的并行度由画布设计决定，不受批量执行的 Concurrency 设置约束
             maxParallel: 32,
             runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log),

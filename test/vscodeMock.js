@@ -11,7 +11,10 @@ const vscodeMock = {
     workspace: {
         get workspaceFolders() { return state.workspaceFolders; },
         onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
-        onDidSaveTextDocument: () => ({ dispose() {} })
+        onDidSaveTextDocument: () => ({ dispose() {} }),
+        onDidChangeConfiguration: () => ({ dispose() {} }),
+        getConfiguration: () => ({ get: (_key, defaultValue) => defaultValue }),
+        createFileSystemWatcher: () => ({ onDidChange() {}, onDidCreate() {}, onDidDelete() {}, dispose() {} })
     },
     window: {
         activeTextEditor: undefined,
