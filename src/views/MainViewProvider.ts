@@ -8,6 +8,7 @@ import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore'
 import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
+import { resolveBashPath } from '../utils/gitLocator';
 import { WorkbenchStore } from '../utils/workbenchStore';
 import { WorkflowEngine, WorkflowEngineEvent, WorkflowEngineEventEnvelope } from '../utils/workflowEngine';
 import { Workflow, RunHistoryEntry, RunResult, HistoryNodeResult, WfLogEntry } from '../webviews/workbench/workbenchTypes';
@@ -56,6 +57,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     private _view: vscode.WebviewView | undefined;
     private _projects: Project[] = [];
+    /** 全量加载进行中标志：期间分支局部刷新挂起，避免发布"无分支"中间态 */
+    private _loadingProjects = false;
+    /** git-bash 的 bash.exe 绝对路径（构造时异步预解析，之后同步可用；回退 'bash'） */
+    private _bashPath = 'bash';
     private _selectedProjectIds: Set<string> = new Set();
     private _logs: LogEntry[] = [];
     private _txtCmdLogs: LogEntry[] = [];
@@ -95,6 +100,9 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
 
     constructor(private readonly _extensionUri: vscode.Uri, private readonly _globalState?: vscode.Memento) {
         this._projectScanner = ProjectScanner.getInstance();
+        // 预解析 Git Bash 的 bash.exe 绝对路径（进程级缓存）：避免执行时 PATH 裸 bash
+        // 命中 Windows 的 WSL 启动器导致每次点击数秒延迟
+        void resolveBashPath().then(p => { this._bashPath = p; });
         this._flowEditor = new FlowEditorProvider(
             _extensionUri,
             () => ({
@@ -136,21 +144,33 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async loadProjects(): Promise<void> {
+        // 全量加载标志：加载期间分支 watcher 触发的局部刷新直接跳过
+        //（加载完成后会对残留的 pending 根目录补一次局部刷新）
+        this._loadingProjects = true;
         try {
             const scanDepth = this._settings.projectScanDepth;
-            this._projects = await this._projectScanner.scanWorkspace(scanDepth);
+            const scanned = await this._projectScanner.scanWorkspace(scanDepth);
             // 有界并发获取项目信息：避免一次拉起全部 git 子进程（Windows 下进程风暴
             // 会拖慢整体甚至触发超时，导致分支信息丢失显示 No branch）。
             // getProjectInfo 内部每条 git 命令都有独立超时并保证 resolve，无需外层 race。
-            this._projects = await this.mapLimit(this._projects, 8, async (project) => {
+            const enriched = await this.mapLimit(scanned, 8, async (project) => {
                 try {
                     return await this._projectScanner.getProjectInfo(project);
                 } catch {
                     return project;
                 }
             });
+            // 全部信息就绪后一次性生效：enrich 期间 this._projects 保留旧数据（含分支），
+            // 避免扫描出的"无分支"中间态被分支刷新/watcher 发布到前端（No branch 闪烁根源）
+            this._projects = enriched;
         } catch (error) {
             console.error('Failed to load projects:', error);
+        } finally {
+            this._loadingProjects = false;
+            // 加载期间 .git/HEAD 又变化的仓库：补一次局部刷新拿到最新分支
+            if (this._pendingBranchRefresh.size > 0) {
+                void this.refreshPendingBranches();
+            }
         }
     }
 
@@ -300,25 +320,44 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
         if (this._pendingBranchRefresh.size === 0 || this._projects.length === 0) {
             return;
         }
+        // 全量加载进行中：跳过（loadProjects 完成后会补刷 pending 根目录）
+        if (this._loadingProjects) {
+            return;
+        }
         const roots = Array.from(this._pendingBranchRefresh);
         this._pendingBranchRefresh.clear();
+        // 局部刷新：只重取受影响项目并就地更新前端行，其余行不动（避免整表重渲染/闪烁）
+        await this.refreshProjectsByPaths(roots, true);
+    }
+
+    /** 局部刷新：只重取给定路径项目的 git 信息并就地更新（不整页重渲染）。
+     *  git 操作（pull/commit/switch 等）完成后调用——无需全量重扫描整个工作区。 */
+    private async refreshProjectsByPaths(paths: string[], skipWhileLoading = false): Promise<void> {
+        if (!paths.length || this._projects.length === 0) {
+            return;
+        }
+        if (skipWhileLoading && this._loadingProjects) {
+            return;
+        }
         const norm = (s: string) => s.replace(/[\\/]+$/, '').toLowerCase();
-        let changed = false;
+        const wanted = new Set(paths.map(norm));
+        const changed: Project[] = [];
         for (let i = 0; i < this._projects.length; i++) {
             const project = this._projects[i];
-            if (!roots.some(r => norm(r) === norm(project.path))) {
+            if (!wanted.has(norm(project.path))) {
                 continue;
             }
             try {
-                this._projects[i] = await this._projectScanner.getProjectInfo(project);
-                changed = true;
+                const updated = await this._projectScanner.getProjectInfo(project);
+                this._projects[i] = updated;
+                changed.push(updated);
             } catch {
                 // 单个项目失败忽略，保留原数据
             }
         }
-        // 轻量回发：只更新项目列表，不触发整页重渲染
-        if (changed) {
-            this._view?.webview.postMessage({ command: 'updateProjects', projects: this._projects });
+        // 局部回发：前端按 id 就地修补对应行（分支/变更数），列表不重建
+        if (changed.length) {
+            this._view?.webview.postMessage({ command: 'updateProjectsPartial', projects: changed });
         }
     }
 
@@ -373,7 +412,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             case 'templateDelete': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().deleteTemplate(message.id)); break;
             case 'workbenchTabsSave': this.handleWorkbenchChange(() => WorkbenchStore.getInstance().saveHiddenTabs(message.hiddenTabs || [])); break;
             case 'workflowRun': await this.handleWorkflowRun(message.workflow, message.shell, message.env, source === 'sidebar'); break;
-            case 'workflowStop': this._workflowEngine.stop(); break;
+            case 'workflowStop': this.handleWorkflowStop(message.runId); break;
             case 'workflowConfirm':
                 this._workflowEngine.respondConfirm(!!message.approved);
                 if (this._activeRun) { this._activeRun.pendingConfirm = null; }
@@ -803,6 +842,9 @@ body {
 .command-list {
     flex: 0 0 120px;
     overflow-y: auto;
+    /* 横向滚动收敛到命令内容预览区（.cmd-content-preview 自身滚动）：
+       列表级横向滚动会整行平移（别名/徽章/按钮跟着走），明确禁掉 */
+    overflow-x: hidden;
     padding: 8px;
     background-color: var(--brand-surface);
     border-bottom: 1px solid var(--brand-border-subtle);
@@ -888,14 +930,19 @@ body {
 }
 
 .command-item .cmd-content-preview {
+    /* 只有命令内容区可横向滚动（拖拽/触控板），别名、shell 徽章、操作按钮均固定不动 */
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--brand-text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: auto;
+    overflow-y: hidden;
     white-space: nowrap;
     margin-top: 3px;
+    cursor: grab;
+    scrollbar-width: none;
 }
+.command-item .cmd-content-preview::-webkit-scrollbar { height: 0; display: none; }
+.command-item .cmd-content-preview.dragging { cursor: grabbing; }
 
 .command-item .alias-row {
     display: flex;
@@ -2836,6 +2883,8 @@ function updateProjectList() {
         function createItem() {
             const item = document.createElement('div');
             item.className = 'project-item' + (isSelected ? ' selected' : '');
+            // 局部刷新定位锚点（updateProjectsPartial 按 id 就地修补行内容）
+            item.dataset.projectId = p.id;
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
@@ -2920,6 +2969,35 @@ function updatePushBadge() {
     const customEl = document.getElementById('customSelectedCount');
     if (gitEl) { gitEl.innerHTML = '<span>' + t('project.selected') + '</span> ' + count; }
     if (customEl) { customEl.innerHTML = '<span>' + t('project.selected') + '</span> ' + count; }
+}
+
+/* 局部刷新：按 id 就地修补项目行（分支/变更数），不重建列表——
+   git 操作/分支切换后仅受影响行更新，其余行保持原状（无闪烁、无滚动跳动） */
+function patchProjects(patch) {
+    if (!Array.isArray(patch) || patch.length === 0) { return; }
+    const byId = new Map(patch.map(p => [p.id, p]));
+    let hit = false;
+    projects = projects.map(p => {
+        const next = byId.get(p.id);
+        if (next) { hit = true; return next; }
+        return p;
+    });
+    if (!hit) { return; }
+    patch.forEach(p => {
+        document.querySelectorAll('.project-item[data-project-id="' + p.id + '"]').forEach(item => {
+            const branch = item.querySelector('.project-branch');
+            if (branch) {
+                branch.innerHTML = '<span class="branch-icon codicon codicon-git-branch" aria-hidden="true"></span><span>' + (p.currentBranch || t('project.noBranch')) + '</span>';
+            }
+            const count = item.querySelector('.change-count');
+            if (count) {
+                const cc = (p.changeCount === 0) ? 'success' : (p.changeCount <= 2 ? 'warning' : 'error');
+                count.className = 'change-count ' + cc;
+                count.textContent = p.changeCount || 0;
+            }
+        });
+    });
+    updatePushBadge();
 }
 
 // 展开/收起项目列表
@@ -3534,10 +3612,43 @@ function renderTxtCmdLogs() {
     document.addEventListener('mouseup', onMouseUp);
 })();
 
+/* ==================== 命令内容预览：拖拽横向滚动 ====================
+   列表级横向滚动已禁用（.command-list overflow-x:hidden），命令内容在
+   .cmd-content-preview 内部滚动——别名/徽章/按钮固定不动；此处支持按住拖拽平移。 */
+(function () {
+    let drag = null;
+    document.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) { return; }
+        const el = e.target && e.target.closest ? e.target.closest('.cmd-content-preview') : null;
+        if (!el || el.scrollWidth <= el.clientWidth) { return; }
+        drag = { el, x: e.clientX, left: el.scrollLeft, moved: false };
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!drag) { return; }
+        const dx = e.clientX - drag.x;
+        if (Math.abs(dx) > 3 && !drag.moved) { drag.moved = true; drag.el.classList.add('dragging'); }
+        if (drag.moved) { drag.el.scrollLeft = drag.left - dx; }
+    });
+    document.addEventListener('mouseup', () => {
+        if (drag && drag.moved) {
+            const el = drag.el;
+            // 拖拽结束时吞掉紧随其后的 click，避免误触发行点击（打开编辑器）
+            const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+            el.addEventListener('click', swallow, true);
+            setTimeout(() => el.removeEventListener('click', swallow, true), 0);
+            el.classList.remove('dragging');
+        }
+        drag = null;
+    });
+})();
+
 window.addEventListener('message', event => {
     const message = event.data;
     switch (message.command) {
         case 'updateProjects': projects = message.projects; updateProjectList(); break;
+        // 局部刷新：只修补受影响项目的行（分支/变更数），列表不重建、其余行不动
+        case 'updateProjectsPartial': patchProjects(message.projects || []); break;
         case 'updateLogs': logs = message.logs; renderLogs(); break;
         case 'updateTxtCmdLogs': txtCmdLogs = message.logs || []; renderTxtCmdLogs(); break;
         case 'addLog': addLogEntry(message.entry); break;
@@ -4006,8 +4117,8 @@ window.addEventListener('message', event => {
         }
 
         this.addLog('✓ ' + t('backend.completed', this._language) + ' — ' + successCount + '/' + selectedProjects.length + ' ' + t('backend.success', this._language), successCount === selectedProjects.length ? 'success' : 'error');
-        await this.loadProjects();
-        this.updateWebview();
+        // 只刷新受影响项目（局部更新，不整页重发/全量重扫描——避免其余项目闪成 no branch）
+        await this.refreshProjectsByPaths(selectedProjects.map(p => p.path));
     }
 
     private async handleRefreshProjects(): Promise<void> {
@@ -4266,8 +4377,8 @@ window.addEventListener('message', event => {
                 }
                 const allOk = successCount === selectedProjects.length;
                 log(allOk ? 'ok' : 'err', `[Ref] ${successCount}/${selectedProjects.length} ` + t('backend.success', this._language));
-                await this.loadProjects();
-                this.updateWebview();
+                // 只刷新受影响项目（局部更新，不整页重发/全量重扫描）
+                await this.refreshProjectsByPaths(selectedProjects.map(p => p.path));
                 return allOk;
             }
 
@@ -4523,7 +4634,9 @@ window.addEventListener('message', event => {
             let commandName: string;
             switch (shell) {
                 case 'git-bash':
-                    commandName = 'bash';  // PATH 中是 bash 或 bash.exe
+                    // 确定性定位 Git Bash 的 bash.exe：PATH 中的裸 bash 在 Windows 上
+                    // 极易命中 System32 的 WSL 启动器（每次执行拉起整个 WSL，数秒延迟）
+                    commandName = this._bashPath || 'bash';
                     break;
                 case 'cmd':
                     commandName = process.env.ComSpec || 'cmd.exe';
@@ -5122,16 +5235,18 @@ window.addEventListener('message', event => {
         // 告知面板新运行的 runId（面板事件按 runId 过滤，避免污染其他运行详情视图）
         this._flowEditor.postMessage({ command: 'runPhase', phase: 'running', runId: this._activeRun.id, engineBusy: true });
         this.postRunState();
-        await this._workflowEngine.run(workflow, this.buildRunOptions(folders[0].uri.fsPath, runShell, runEnv), (event) => this.onRunEvent(this._activeRun!, event));
+        await this._workflowEngine.run(workflow, await this.buildRunOptions(folders[0].uri.fsPath, runShell, runEnv), (event) => this.onRunEvent(this._activeRun!, event));
     }
 
-    private buildRunOptions(cwd: string, shell: string, env: string): any {
+    private async buildRunOptions(cwd: string, shell: string, env: string): Promise<any> {
         return {
             cwd,
             shell,
             env,
             commonParameters: this._settings.commonParameters,
             envVariables: this.getEnvVariables(),
+            // git-bash 确定性定位 bash.exe（PATH 裸 bash 在 Windows 可能命中 WSL 启动器，数秒延迟）
+            bashPath: await resolveBashPath(),
             // 工作流 Fork/Join 的并行度由画布设计决定，不受批量执行的 Concurrency 设置约束
             maxParallel: 32,
             runRef: (tab: string, id: string, log: any, param: string) => this.executeReferencedCommand(tab, id, param || '', log),
@@ -5268,8 +5383,19 @@ window.addEventListener('message', event => {
         inst.logs.push({ nodeId: '', level: 'hdr', text: '━━ Resume from failed step ━━' });
         this.postRunState();
         this._flowEditor.postMessage({ command: 'runPhase', phase: 'running', durationMs: inst.totalDuration, runId: inst.id, engineBusy: true });
+        // 面板跟随切换到续跑实例的执行详情（面板正监控该实例时为幂等操作，视图不重建）
+        this._flowEditor.postMessage({ command: 'openRunDetail', run: this.buildRunDetail(inst) });
         const resumeStates = { ...inst.states };
-        await engine.run(inst.workflow, this.buildRunOptions(folders[0].uri.fsPath, inst.shell, inst.env), (event) => this.onRunEvent(inst, event), resumeStates);
+        await engine.run(inst.workflow, await this.buildRunOptions(folders[0].uri.fsPath, inst.shell, inst.env), (event) => this.onRunEvent(inst, event), resumeStates);
+    }
+
+    /** 停止引擎当前运行：runId 指定时仅当其为活动运行才停止（失败暂停实例的终局走 workflowCancel） */
+    private handleWorkflowStop(runId?: string): void {
+        if (runId) {
+            const inst = this.findRun(runId);
+            if (!inst || inst !== this._activeRun) { return; }
+        }
+        this._workflowEngine.stop();
     }
 
     /** 用户取消：运行中的活动实例 → 引擎停止（done stopped 终局）；失败暂停实例（活动或暂停列表）→ 直接以 failed 终局 */
