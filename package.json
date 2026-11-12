@@ -150,6 +150,20 @@
           "maximum": 3600,
           "description": "Command execution timeout in seconds"
         },
+        "multi-project-tool.cmdScriptExtension": {
+          "type": "string",
+          "default": "cmd",
+          "pattern": "^[A-Za-z0-9]{1,8}$",
+          "enum": [
+            "cmd",
+            "bat"
+          ],
+          "enumDescriptions": [
+            "Use .cmd temp script files (default)",
+            "Use .bat temp script files (fallback when corporate security policy blocks .cmd execution)"
+          ],
+          "description": "Temp script file extension for cmd-shell commands. Settings-UI hidden by design: change this only if corporate security policy blocks .cmd script execution (e.g. set to \"bat\")."
+        },
         "multi-project-tool.customCommands": {
           "type": "array",
           "items": {

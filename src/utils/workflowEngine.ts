@@ -8,6 +8,22 @@ import * as https from 'https';
 import { URL } from 'url';
 import { Workflow, WfNode, WfEdge, HistoryNodeResult, RunResult } from '../webviews/workbench/workbenchTypes';
 
+/** 安全策略拦截特征：SRP/AppLocker 阻止 .cmd/.bat 脚本执行时的典型输出（中英文 Windows） */
+const SECURITY_BLOCK_PATTERN = /blocked by group policy|组策略|此程序已被阻止|cannot execute the specified program|系统无法执行指定的程序/i;
+
+/** 检测输出文本是否为安全策略拦截脚本执行的典型报错 */
+export function detectSecurityBlock(text: string): boolean {
+    return SECURITY_BLOCK_PATTERN.test(text);
+}
+
+/** cmd 脚本被安全策略拦截时的用户指引（提示修改 settings.json 中的临时脚本扩展名） */
+export function cmdScriptBlockHint(ext: string): string {
+    return '[Multi-Project Tool] 检测到脚本可能被公司安全策略阻止（禁止执行 .' + ext +
+        ' 脚本文件）。解决方案：① 在 VS Code 设置（settings.json）中将 "multi-project-tool.cmdScriptExtension" 改为策略允许的扩展名（如 "bat"）；' +
+        '② 或将该命令的 Shell 类型改为 git-bash（临时脚本为 .sh，通常不受限制）。' +
+        ' | This script may be blocked by corporate security policy (.' + ext + ' files). Fix: ① change "multi-project-tool.cmdScriptExtension" in VS Code Settings (settings.json) to an allowed extension (e.g. "bat"); ② or switch the command shell to git-bash (.sh scripts are usually allowed).';
+}
+
 export interface WorkflowEngineOptions {
     cwd: string;
     /** git-bash / cmd / powershell / wsl */
@@ -20,6 +36,8 @@ export interface WorkflowEngineOptions {
     maxParallel: number;
     /** git-bash 的 bash.exe 绝对路径（宿主解析后注入；PATH 中的裸 bash 在 Windows 上可能命中 WSL 启动器导致数秒延迟） */
     bashPath?: string;
+    /** cmd 临时脚本文件扩展名（默认 'cmd'；公司安全策略禁止执行 .cmd 时可在 VS Code 设置中改为 'bat'） */
+    cmdScriptExt?: string;
     /** ref 节点执行器：由宿主提供，按 (tab, commandId) 执行各页签已保存命令，返回成败；param 承载节点参数（如 git 分支名/提交信息） */
     runRef?: (tab: string, commandId: string, log: (level: 'info' | 'ok' | 'err' | 'dim' | 'hdr', text: string) => void, param?: string) => Promise<boolean>;
     /** vscode 节点执行器：由宿主提供，执行任意插件注册的 VSCode 命令（vscode.commands.executeCommand）；argsText 为参数原文（JSON 数组或纯文本，已完成变量替换） */
@@ -510,8 +528,9 @@ export class WorkflowEngine {
         return new Promise(resolve => {
             const shell = node.shell || options.shell;
             const stamp = Date.now() + '_' + Math.random().toString(36).slice(2);
+            const cmdExt = options.cmdScriptExt || 'cmd';
             const tmpSh = path.join(os.tmpdir(), `mpt_wf_${stamp}.sh`);
-            const tmpCmd = path.join(os.tmpdir(), `mpt_wf_${stamp}.cmd`);
+            const tmpCmd = path.join(os.tmpdir(), `mpt_wf_${stamp}.${cmdExt}`);
             const tmpPs = path.join(os.tmpdir(), `mpt_wf_${stamp}.ps1`);
 
             let bin = '';
@@ -572,10 +591,13 @@ export class WorkflowEngine {
 
             const pipeLines = (data: Buffer, isErr: boolean) => {
                 const text = data.toString();
+                allOutput += text;
+                if (allOutput.length > 16384) { allOutput = allOutput.slice(-8192); }
                 text.split(/\r?\n/).forEach(line => {
                     if (line.trim()) { log(isErr ? 'err' : 'info', line); }
                 });
             };
+            let allOutput = '';
             child.stdout?.on('data', (d: Buffer) => pipeLines(d, false));
             child.stderr?.on('data', (d: Buffer) => pipeLines(d, true));
 
@@ -601,6 +623,10 @@ export class WorkflowEngine {
                     resolve(true);
                 } else {
                     log('err', `[FAIL] ${node.label} exit code ${code}`);
+                    // cmd 临时脚本被公司安全策略拦截时给出配置指引
+                    if (shell === 'cmd' && detectSecurityBlock(allOutput)) {
+                        log('err', cmdScriptBlockHint(cmdExt));
+                    }
                     resolve(false);
                 }
             });
