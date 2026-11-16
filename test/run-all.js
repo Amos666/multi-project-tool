@@ -10,7 +10,8 @@ const suites = [
     'workbenchStore.test.js',
     'workflowEngine.test.js',
     'webview.test.js',
-    'prc.test.js'
+    'prc.test.js',
+    'env.test.js'
 ];
 
 let allOk = true;
