@@ -28,7 +28,9 @@ export interface WorkspaceConfig {
         projectRowCommands?: ProjectRowCommand[];
     };
     customCommandTree: CommandTreeNode[];
-    envVariables: Array<{
+    /** @deprecated 环境变量已改为插件级全局文件存储（globalStorageUri/env-variables.json），跨工作区/跨实例共享。
+     *  此字段仅供 loadEnvVariables 读取旧工作区数据做一次性迁移，新代码不再写入 */
+    envVariables?: Array<{
         key: string;
         value: string;
     }>;

@@ -757,6 +757,44 @@ test('r3: cmd temp script extension is configurable (settings.json only) with bl
     assert.ok(engineSrcCache.includes('detectSecurityBlock(allOutput)'), 'engine detects block from output');
 });
 
+// ---------- r4: environment variables plugin-level cross-instance sync ----------
+test('r4: env variables stored in globalStorage file with cross-instance watcher sync', () => {
+    const envStoreSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'envVarStore.ts'), 'utf8');
+    const extSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+    const cfgStoreSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'utils', 'configStore.ts'), 'utf8');
+
+    // 存储层：插件级全局文件 env-variables.json（读 / 写 / 归一化）
+    assert.ok(envStoreSrc.includes("export const ENV_VAR_FILE = 'env-variables.json'"), 'well-known global file name');
+    assert.ok(envStoreSrc.includes('export function readEnvVarStore') && envStoreSrc.includes('export function writeEnvVarStore'), 'read/write helpers exported');
+    assert.ok(envStoreSrc.includes('fs.mkdirSync(storeDir, { recursive: true })'), 'globalStorage dir created on write');
+
+    // 入口：extension.ts 把 globalStorageUri 传给 provider
+    assert.ok(extSrc.includes('context.globalStorageUri)'), 'extension passes globalStorageUri');
+
+    // 宿主：构造函数接收 + 存储目录字段
+    assert.ok(mvpSrcCache.includes('globalStorageUri?: vscode.Uri'), 'constructor accepts globalStorageUri');
+    assert.ok(mvpSrcCache.includes('this._envStoreDir = globalStorageUri ? globalStorageUri.fsPath : undefined'), 'store dir resolved from uri');
+
+    // 加载：全局文件优先，无文件时一次性迁移工作区旧数据并落盘初始化
+    assert.ok(mvpSrcCache.includes('readEnvVarStore(this._envStoreDir)'), 'loads from global file');
+    assert.ok(mvpSrcCache.includes('writeEnvVarStore(this._envStoreDir, this._envVariables)'), 'migrates/initializes global file');
+    assert.ok(mvpSrcCache.includes('this._envLegacyCleanupPending = true'), 'legacy cleanup scheduled after migration');
+
+    // watcher：RelativePattern 绝对路径监听 + 防抖 + 内容比对防回环 + 推送前端
+    assert.ok(mvpSrcCache.includes('new vscode.RelativePattern(vscode.Uri.file(this._envStoreDir), ENV_VAR_FILE)'), 'watches global file by absolute path');
+    assert.ok(mvpSrcCache.includes("JSON.stringify(latest) !== JSON.stringify(this._envVariables)"), 'content compare guards self-write loop');
+    assert.ok(mvpSrcCache.includes("command: 'updateEnvVariables', variables: this._envVariables"), 'webview pushed on external change');
+
+    // 保存：写全局文件；saveAllConfig 不再写 env 字段（无全局目录的降级场景除外）
+    assert.ok(mvpSrcCache.includes('...(this._envStoreDir ? {} : { envVariables: this._envVariables })'), 'workspace config excludes env when global store active');
+
+    // 迁移清理：数据加载完成后重写工作区配置清除旧字段
+    assert.ok(mvpSrcCache.includes('this._prcLegacyCleanupPending || this._envLegacyCleanupPending'), 'loadData cleans legacy env field');
+
+    // 类型：WorkspaceConfig.envVariables 标记 @deprecated（遗留字段，仅迁移读取）
+    assert.ok(cfgStoreSrc.includes('@deprecated') && cfgStoreSrc.includes('envVariables?: Array'), 'workspace env field deprecated + optional');
+});
+
 
 // ---------- i18n completeness ----------
 test('i18n: all tree keys exist in en and zh', () => {

@@ -6,6 +6,7 @@ import { ProjectScanner } from '../utils/projectScanner';
 import { ConfigStore, ProjectRowCommand } from '../utils/configStore';
 import { PythonTxtCmdStore, PythonTxtCommand } from '../utils/pythonTxtCmdStore';
 import { ShortcutCmdStore } from '../utils/shortcutCmdStore';
+import { readEnvVarStore, writeEnvVarStore, ENV_VAR_FILE } from '../utils/envVarStore';
 import { CommandTreeNode, findNodeById, VALID_SHELLS } from '../utils/configMigration';
 import { translations, Language, t } from '../utils/i18n';
 import { resolveBashPath } from '../utils/gitLocator';
@@ -77,7 +78,17 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     };
     private _currentShell: string = 'git-bash';
     private _shortcutShell: string = 'git-bash';
+    /** 环境变量（Set Tab）：插件级全局共享——所有工作区 / 所有 VS Code 实例同步一份。
+     *  存储于 globalStorageUri 目录下的 env-variables.json（文件式便于跨实例 watcher 实时同步） */
     private _envVariables: EnvVariable[] = [];
+    /** 插件级全局存储目录（globalStorageUri.fsPath）；无（异常/旧宿主）时降级为工作区存储 */
+    private _envStoreDir: string | undefined;
+    /** env-variables.json 文件 watcher：其他 VS Code 实例修改时实时同步本实例 UI */
+    private _envWatcher: vscode.FileSystemWatcher | undefined;
+    /** watcher 防抖定时器 */
+    private _envReloadTimer: NodeJS.Timeout | undefined;
+    /** 迁移标记：工作区级旧环境变量已并入全局文件，待数据加载完成后重写工作区配置清除旧字段 */
+    private _envLegacyCleanupPending = false;
     /** Projects view 项目行右侧动态按钮命令（Set Tab 配置，Git / ProjectsCmd 两页签共用）。
      *  插件级全局存储（context.globalState）：所有工作区共享同一份配置，修改后全局生效 */
     private _projectRowCommands: ProjectRowCommand[] = [];
@@ -100,8 +111,10 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     /** 命令行运行实例跟踪：key = `${tabId}:${commandId}`，值为可取消句柄（同一命令可能多次并发） */
     private _activeCmdRuns = new Map<string, Array<{ cancel: () => void }>>();
 
-    constructor(private readonly _extensionUri: vscode.Uri, private readonly _globalState?: vscode.Memento) {
+    constructor(private readonly _extensionUri: vscode.Uri, private readonly _globalState?: vscode.Memento, globalStorageUri?: vscode.Uri) {
         this._projectScanner = ProjectScanner.getInstance();
+        // 插件级全局存储目录：环境变量跨工作区 / 跨 VS Code 实例共享的落盘位置
+        this._envStoreDir = globalStorageUri ? globalStorageUri.fsPath : undefined;
         // 预解析 Git Bash 的 bash.exe 绝对路径（进程级缓存）：避免执行时 PATH 裸 bash
         // 命中 Windows 的 WSL 启动器导致每次点击数秒延迟
         void resolveBashPath().then(p => { this._bashPath = p; });
@@ -137,8 +150,9 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             await this.loadPythonTxtCommands();
             await this.loadShortcutCommands();
             // 工作区级旧配置已迁移到全局存储：此时所有字段加载完毕，重写工作区配置以清除旧字段
-            if (this._prcLegacyCleanupPending) {
+            if (this._prcLegacyCleanupPending || this._envLegacyCleanupPending) {
                 this._prcLegacyCleanupPending = false;
+                this._envLegacyCleanupPending = false;
                 this.saveAllConfig();
             }
             // 项目加载可能较慢，先显示其他数据
@@ -274,8 +288,61 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async loadEnvVariables(): Promise<void> {
-        const config = ConfigStore.getInstance().load();
-        this._envVariables = config.envVariables;
+        if (this._envStoreDir) {
+            // 插件级全局文件存储：所有工作区 / 所有 VS Code 实例共享一份
+            const stored = readEnvVarStore(this._envStoreDir);
+            if (stored) {
+                this._envVariables = stored;
+            } else {
+                // 全局文件不存在：一次性迁移工作区旧数据；全新安装则初始化空文件
+                const legacyWs = ConfigStore.getInstance().load().envVariables;
+                this._envVariables = Array.isArray(legacyWs) ? legacyWs : [];
+                writeEnvVarStore(this._envStoreDir, this._envVariables);
+                if (this._envVariables.length > 0) {
+                    // 有旧数据被迁移：加载完成后重写工作区配置清除旧字段（saveAllConfig 已不写 env）
+                    this._envLegacyCleanupPending = true;
+                }
+            }
+            // 跨实例实时同步：监听全局文件变化（其他 VS Code 实例的增删改）
+            this.watchEnvVarStore();
+        } else {
+            // 降级：无 globalStorageUri（异常环境）时维持旧的工作区级存储
+            const config = ConfigStore.getInstance().load();
+            this._envVariables = config.envVariables ?? [];
+        }
+    }
+
+    /* ---- 环境变量跨实例同步：监听全局文件 env-variables.json 变化 ---- */
+
+    private watchEnvVarStore(): void {
+        if (this._envWatcher || !this._envStoreDir) {
+            return;
+        }
+        try {
+            // 绝对路径监听 globalStorage 目录下的 env-variables.json
+            this._envWatcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(vscode.Uri.file(this._envStoreDir), ENV_VAR_FILE)
+            );
+            const onStoreChange = () => {
+                if (this._envReloadTimer) {
+                    clearTimeout(this._envReloadTimer);
+                }
+                this._envReloadTimer = setTimeout(() => {
+                    this._envReloadTimer = undefined;
+                    if (!this._envStoreDir) { return; }
+                    const latest = readEnvVarStore(this._envStoreDir) ?? [];
+                    // 内容比对：自身写入也会触发 watcher，内容未变则跳过（防回环）
+                    if (JSON.stringify(latest) !== JSON.stringify(this._envVariables)) {
+                        this._envVariables = latest;
+                        this._view?.webview.postMessage({ command: 'updateEnvVariables', variables: this._envVariables });
+                    }
+                }, 300);
+            };
+            this._envWatcher.onDidChange(onStoreChange);
+            this._envWatcher.onDidCreate(onStoreChange);
+        } catch {
+            // watcher 不可用时静默降级（下次窗口激活/页签切换时仍会重新读取）
+        }
     }
 
     private async loadPythonTxtCommands(): Promise<void> {
@@ -5076,7 +5143,12 @@ window.addEventListener('message', event => {
     }
 
     private async saveEnvVariables(): Promise<void> {
-        this.saveAllConfig();
+        // 插件级全局文件存储：跨工作区 / 跨 VS Code 实例共享（写入触发其他实例 watcher 同步）
+        if (this._envStoreDir) {
+            writeEnvVarStore(this._envStoreDir, this._envVariables);
+        } else {
+            this.saveAllConfig();
+        }
     }
 
     private saveAllConfig(): void {
@@ -5092,7 +5164,8 @@ window.addEventListener('message', event => {
                 language: this._language
             },
             customCommandTree: this._customCommandTree,
-            envVariables: this._envVariables
+            // 环境变量已迁移到插件级全局文件存储：不再写入工作区配置（无 globalStorageUri 的降级场景除外）
+            ...(this._envStoreDir ? {} : { envVariables: this._envVariables })
         };
         ConfigStore.getInstance().save(config);
     }

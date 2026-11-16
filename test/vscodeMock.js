@@ -34,6 +34,9 @@ const vscodeMock = {
         fire() {}
         dispose() {}
     },
+    RelativePattern: class {
+        constructor(base, pattern) { this.base = base; this.pattern = pattern; }
+    },
     Disposable: { from: () => ({ dispose() {} }) }
 };
 
